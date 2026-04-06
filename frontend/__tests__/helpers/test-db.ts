@@ -1,0 +1,68 @@
+/**
+ * Shared test database helper.
+ * Creates isolated temp SQLite databases for integration tests.
+ */
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { vi } from "vitest";
+
+const DEFAULT_MOCK_CONFIG = {
+  DB_PATH: "",
+  MODE: "development",
+  AUTH_SECRET_KEY: "test-secret-for-tests-32chars!!!!!",
+  HOST: "127.0.0.1",
+  PORT: 8080,
+  FORCE_SECURE_COOKIES: false,
+  APP_PORT_START: 3001,
+  PREVIEW_PORT_MIN: 9001,
+  PREVIEW_PORT_MAX: 9050,
+  CLAUDE_DANGEROUS_PERMISSIONS: true,
+  getProjectsDir: () => "/tmp",
+  getDefaultModel: () => "claude-sonnet-4-6",
+  getBackgroundModel: () => "claude-sonnet-4-6",
+};
+
+export interface TestContext {
+  tmpDir: string;
+  dbPath: string;
+  cleanup: () => void;
+}
+
+/** Create an isolated temp directory and DB path for a test. */
+export function createTestContext(prefix = "archie-test-"): TestContext {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dbPath = path.join(tmpDir, "test.db");
+  return {
+    tmpDir,
+    dbPath,
+    cleanup: () => {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // best effort cleanup
+      }
+    },
+  };
+}
+
+/** Build a mock config object with optional overrides. */
+export function mockConfig(dbPath: string, overrides?: Record<string, unknown>) {
+  return {
+    ...DEFAULT_MOCK_CONFIG,
+    DB_PATH: dbPath,
+    ...overrides,
+  };
+}
+
+/**
+ * Get an initialised test database.
+ * Must be called after vi.resetModules().
+ */
+export async function getTestDb(ctx: TestContext) {
+  vi.doMock("@/lib/server/config", () => mockConfig(ctx.dbPath, {
+    getProjectsDir: () => ctx.tmpDir,
+  }));
+  const { getDb } = await import("@/lib/server/db");
+  return getDb();
+}
