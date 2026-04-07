@@ -21,6 +21,77 @@ ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# Prompt the user with a yes/no question. Returns 0 for yes, 1 for no.
+# In non-interactive shells (no TTY), defaults to "no" so the script fails
+# loudly rather than silently installing system packages.
+ask_yes_no() {
+  local prompt="$1"
+  local default="${2:-y}"
+  local hint="[Y/n]"
+  [ "$default" = "n" ] && hint="[y/N]"
+
+  if [ ! -t 0 ]; then
+    warn "Non-interactive shell — cannot prompt. Assuming \"no\" for: $prompt"
+    return 1
+  fi
+
+  local reply
+  while true; do
+    echo -ne "${YELLOW}[?]${NC} $prompt $hint "
+    read -r reply </dev/tty || return 1
+    reply="${reply:-$default}"
+    case "$reply" in
+      [Yy]|[Yy][Ee][Ss]) return 0 ;;
+      [Nn]|[Nn][Oo])     return 1 ;;
+      *) echo "Please answer yes or no." ;;
+    esac
+  done
+}
+
+# Detect the OS / package manager so we know how to install things.
+detect_pkg_manager() {
+  if [ "$(uname -s)" = "Darwin" ]; then
+    echo "brew"
+  elif command -v apt-get &>/dev/null; then
+    echo "apt"
+  elif command -v dnf &>/dev/null; then
+    echo "dnf"
+  elif command -v yum &>/dev/null; then
+    echo "yum"
+  elif command -v pacman &>/dev/null; then
+    echo "pacman"
+  else
+    echo ""
+  fi
+}
+
+PKG_MGR="$(detect_pkg_manager)"
+
+# Install one or more system packages using the detected package manager.
+# Returns non-zero if installation is not possible or fails.
+install_packages() {
+  local pkgs=("$@")
+  case "$PKG_MGR" in
+    brew)
+      if ! command -v brew &>/dev/null; then
+        err "Homebrew is not installed. Install it from https://brew.sh and re-run."
+        return 1
+      fi
+      brew install "${pkgs[@]}"
+      ;;
+    apt)
+      sudo apt-get update && sudo apt-get install -y "${pkgs[@]}"
+      ;;
+    dnf)    sudo dnf install -y "${pkgs[@]}" ;;
+    yum)    sudo yum install -y "${pkgs[@]}" ;;
+    pacman) sudo pacman -S --noconfirm "${pkgs[@]}" ;;
+    *)
+      err "Could not detect a supported package manager. Please install manually: ${pkgs[*]}"
+      return 1
+      ;;
+  esac
+}
+
 echo ""
 echo -e "${BOLD}=== Archie Local Bootstrap ===${NC}"
 echo ""
@@ -36,9 +107,17 @@ for cmd in git curl; do
 done
 
 if [ ${#missing[@]} -gt 0 ]; then
-  err "Missing required tools: ${missing[*]}"
-  err "Please install them and re-run this script."
-  exit 1
+  warn "The following required tools are missing: ${missing[*]}"
+  if ask_yes_no "Would you like to install them now?" "y"; then
+    if ! install_packages "${missing[@]}"; then
+      err "Failed to install required tools. Please install them manually and re-run."
+      exit 1
+    fi
+    ok "Installed: ${missing[*]}"
+  else
+    err "Required tools are missing: ${missing[*]}. Please install them and re-run."
+    exit 1
+  fi
 fi
 ok "git, curl OK"
 
@@ -72,14 +151,27 @@ if type nvm &>/dev/null 2>&1; then
     set -eu
   fi
 elif ! command -v node &>/dev/null; then
-  warn "Node.js not found. Install nvm first:"
-  echo ""
-  echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
-  echo "  source ~/.bashrc"
-  echo "  nvm install $MIN_NODE"
-  echo ""
-  err "Then re-run: bash scripts/setup.sh"
-  exit 1
+  warn "Node.js (>= $MIN_NODE) is required but not installed, and nvm was not found."
+  if ask_yes_no "Install nvm and Node.js $MIN_NODE now?" "y"; then
+    info "Installing nvm..."
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+    export NVM_DIR="$HOME/.nvm"
+    set +eu
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    set -eu
+    if ! type nvm &>/dev/null 2>&1; then
+      err "nvm installation did not succeed. Please install it manually and re-run."
+      exit 1
+    fi
+    info "Installing Node.js $MIN_NODE via nvm..."
+    set +eu
+    nvm install "$MIN_NODE"
+    nvm use "$MIN_NODE"
+    set -eu
+  else
+    err "Node.js >= $MIN_NODE is required. Aborting."
+    exit 1
+  fi
 fi
 
 # Final check
@@ -90,7 +182,22 @@ fi
 
 NODE_MAJOR=$(node -v | sed 's/v//' | cut -d. -f1)
 if [ "$NODE_MAJOR" -lt "$MIN_NODE" ]; then
-  warn "Node.js v${NODE_MAJOR} is below the minimum (v${MIN_NODE}). Things may not work correctly."
+  warn "Node.js v${NODE_MAJOR} is installed but Archie needs v${MIN_NODE} or newer."
+  if type nvm &>/dev/null 2>&1; then
+    if ask_yes_no "Install Node.js $MIN_NODE via nvm now?" "y"; then
+      set +eu
+      nvm install "$MIN_NODE"
+      nvm use "$MIN_NODE"
+      set -eu
+      NODE_MAJOR=$(node -v | sed 's/v//' | cut -d. -f1)
+    fi
+  else
+    warn "nvm is not available — please upgrade Node.js manually to v${MIN_NODE}+."
+  fi
+  if [ "$NODE_MAJOR" -lt "$MIN_NODE" ]; then
+    err "Node.js is still below v${MIN_NODE}. Aborting."
+    exit 1
+  fi
 fi
 ok "Node.js $(node -v)"
 
@@ -98,7 +205,16 @@ ok "Node.js $(node -v)"
 if command -v ffmpeg &>/dev/null; then
   ok "ffmpeg found (demo videos will work)"
 else
-  warn "ffmpeg not found (optional — needed for demo video feature)"
+  warn "ffmpeg is not installed (optional — needed for the demo video feature)."
+  if ask_yes_no "Install ffmpeg now?" "n"; then
+    if install_packages ffmpeg; then
+      ok "ffmpeg installed"
+    else
+      warn "ffmpeg install failed — continuing without it."
+    fi
+  else
+    info "Skipping ffmpeg install."
+  fi
 fi
 
 echo ""
