@@ -295,6 +295,13 @@ export interface RoomPlanResponse {
   steps: PlanStep[];
 }
 
+export interface PlanExecutionResponse {
+  plan: Plan;
+  step: PlanStep;
+  conversation: Conversation;
+  work_item: Task;
+}
+
 // ── Notification (RFC 23) ──────────────────────────────────────────
 
 export interface Notification {

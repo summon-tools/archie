@@ -1,4 +1,4 @@
-import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep } from "./types";
+import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse } from "./types";
 
 const BASE = "/api";
 
@@ -287,6 +287,10 @@ export async function updatePlanStep(appId: number, roomId: number, stepId: numb
     method: "PATCH",
     body: JSON.stringify(body),
   });
+}
+
+export async function executeNextPlanStep(appId: number, roomId: number): Promise<PlanExecutionResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/execute-next`, { method: "POST" });
 }
 
 // --- Work Item Environment endpoints ---

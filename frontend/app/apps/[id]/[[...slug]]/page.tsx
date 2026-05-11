@@ -355,6 +355,7 @@ export default function AppPage() {
           appId={appId}
           workItems={workItems}
           onOpenConversation={handleSelectItem}
+          onWorkItemCreated={handleItemCreated}
         />
       );
     }

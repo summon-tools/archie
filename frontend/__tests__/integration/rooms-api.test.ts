@@ -211,4 +211,57 @@ describe("rooms API", () => {
     expect(patchedBody.plan.status).toBe("ready");
     expect(patchedBody.steps).toHaveLength(1);
   });
+
+  it("launches the next pending plan step as a scoped task conversation", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Execution Room" });
+    const plan = dal.createPlan({
+      room_id: room.id,
+      title: "Plan Mode",
+      summary_md: "This summary should not expand every step.",
+      status: "ready",
+    });
+    const firstStep = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Create room execution bridge",
+      objective_md: "Create only the execution bridge.",
+      implementation_prompt_md: "Wire the next pending plan step into a normal task conversation.",
+      acceptance_criteria_md: "A work item and conversation are linked back to the step.",
+      requires_security_review: true,
+    });
+    dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Second step sentinel",
+      objective_md: "This later step must not be sent to the first task.",
+    });
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/execute-next/route");
+
+    const response = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/execute-next`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.plan.status).toBe("executing");
+    expect(body.step.id).toBe(firstStep.id);
+    expect(body.step.status).toBe("implementing");
+    expect(body.step.linked_work_item_id).toBe(body.work_item.id);
+    expect(body.step.linked_conversation_id).toBe(body.conversation.id);
+    expect(body.work_item.origin_type).toBe("room_plan");
+
+    const message = db.prepare("SELECT body_md FROM messages WHERE conversation_id = ?").get(body.conversation.id) as { body_md: string };
+    expect(message.body_md).toContain("Wire the next pending plan step");
+    expect(message.body_md).toContain("Security review is required");
+    expect(message.body_md).not.toContain("Second step sentinel");
+
+    const event = db.prepare("SELECT * FROM plan_step_events WHERE plan_step_id = ?").get(firstStep.id) as any;
+    expect(event.phase).toBe("implementation");
+    expect(event.agent_key).toBe("coordinator");
+
+    const roomMessage = db.prepare("SELECT * FROM room_messages WHERE room_id = ? AND kind = 'execution_event'").get(room.id) as any;
+    expect(roomMessage.body_md).toContain("Started implementation");
+  });
 });

@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
-import { createPlanStep, createRoom, createRoomPlan, sendRoomMessage, updateRoomPlan } from "@/lib/api";
+import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
+import { createPlanStep, createRoom, createRoomPlan, executeNextPlanStep, sendRoomMessage, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
@@ -12,9 +12,10 @@ interface HomePanelProps {
   appId: number;
   workItems: Task[];
   onOpenConversation: (itemId: number) => void;
+  onWorkItemCreated: (item: Task) => void;
 }
 
-export default function HomePanel({ appId, workItems, onOpenConversation }: HomePanelProps) {
+export default function HomePanel({ appId, workItems, onOpenConversation, onWorkItemCreated }: HomePanelProps) {
   const { data, mutate, isLoading } = useSWR<{ rooms: HomeRoom[] }>(`/api/apps/${appId}/rooms`, fetcher);
   const rooms = data?.rooms || [];
   const [activeTab, setActiveTab] = useState<"rooms" | "conversations">("rooms");
@@ -198,7 +199,12 @@ export default function HomePanel({ appId, workItems, onOpenConversation }: Home
       </main>
 
       <aside className="w-80 border-l border-th bg-th-panel flex flex-col min-h-0">
-        <PlanPanel appId={appId} room={selectedRoom} />
+        <PlanPanel
+          appId={appId}
+          room={selectedRoom}
+          onOpenConversation={onOpenConversation}
+          onWorkItemCreated={onWorkItemCreated}
+        />
       </aside>
     </div>
   );
@@ -374,7 +380,17 @@ function ConversationGroup({
   );
 }
 
-function PlanPanel({ appId, room }: { appId: number; room: HomeRoom | null }) {
+function PlanPanel({
+  appId,
+  room,
+  onOpenConversation,
+  onWorkItemCreated,
+}: {
+  appId: number;
+  room: HomeRoom | null;
+  onOpenConversation: (itemId: number) => void;
+  onWorkItemCreated: (item: Task) => void;
+}) {
   const { data, mutate, isLoading } = useSWR<RoomPlanResponse>(
     room ? `/api/apps/${appId}/rooms/${room.id}/plan` : null,
     fetcher,
@@ -386,6 +402,8 @@ function PlanPanel({ appId, room }: { appId: number; room: HomeRoom | null }) {
 
   const plan = data?.plan || null;
   const steps = data?.steps || [];
+  const activeStep = steps.find((step) => ["implementing", "reviewing", "fixing", "validating", "committing"].includes(step.status));
+  const nextPendingStep = steps.find((step) => step.status === "pending");
 
   const handleCreatePlan = async () => {
     if (!room || busy) return;
@@ -399,6 +417,21 @@ function PlanPanel({ appId, room }: { appId: number; room: HomeRoom | null }) {
       await mutate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create plan");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExecuteNext = async () => {
+    if (!room || !plan || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await executeNextPlanStep(appId, room.id);
+      await mutate();
+      onWorkItemCreated(result.work_item);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to execute next step");
     } finally {
       setBusy(false);
     }
@@ -469,6 +502,27 @@ function PlanPanel({ appId, room }: { appId: number; room: HomeRoom | null }) {
         <p className="mt-1 text-sm text-th-muted">
           Draft scoped steps before launching implementation conversations.
         </p>
+        {plan && (
+          <div className="mt-3">
+            {activeStep?.linked_work_item_id ? (
+              <button
+                onClick={() => onOpenConversation(activeStep.linked_work_item_id!)}
+                className="w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+              >
+                Open active task
+              </button>
+            ) : (
+              <button
+                onClick={handleExecuteNext}
+                disabled={busy || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <PlayCircle size={16} />
+                {busy ? "Starting..." : "Execute next step"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
