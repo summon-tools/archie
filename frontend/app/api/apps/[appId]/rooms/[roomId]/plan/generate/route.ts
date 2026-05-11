@@ -52,7 +52,9 @@ export async function POST(
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
     }
-    const detail = e instanceof Error ? e.message : "Failed to generate plan";
+    const detail = e instanceof Error && e.message.includes("Plan generator")
+      ? "The model returned an unstructured plan response. Please try again."
+      : e instanceof Error ? e.message : "Failed to generate plan";
     return NextResponse.json({ detail }, { status: 500 });
   }
 }

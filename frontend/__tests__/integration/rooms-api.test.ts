@@ -521,6 +521,86 @@ describe("rooms API", () => {
     expect(dal.getRoom(room.id)!.planning_context_md).toContain("Room execution plan");
   });
 
+  it("repairs unstructured plan generator output before persisting the plan", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Repair Room" });
+    const userMessage = dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Generate a draft plan for the blog feature.",
+    });
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: "Here is the plan: first add the model, then add routes, then validate it.",
+      };
+    });
+    const ephemeralQuery = vi.fn(async () => JSON.stringify({
+      title: "Repaired blog plan",
+      summary_md: "Converted from an unstructured model reply.",
+      steps: [
+        {
+          title: "Add blog persistence",
+          objective_md: "Create the blog post model and storage.",
+          implementation_prompt_md: "Add the Post model and persistence for blog posts.",
+          acceptance_criteria_md: "- Blog posts can be persisted",
+          risk_level: "medium",
+          requires_architecture_review: true,
+          requires_security_review: false,
+          requires_browser_validation: false,
+        },
+        {
+          title: "Add blog pages",
+          objective_md: "Render public blog pages.",
+          implementation_prompt_md: "Add blog index and detail routes.",
+          acceptance_criteria_md: "- Blog index and detail pages render",
+          risk_level: "low",
+          requires_architecture_review: false,
+          requires_security_review: false,
+          requires_browser_validation: true,
+        },
+      ],
+    }));
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream, ephemeralQuery })),
+    }));
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
+
+    const reply = await createRoomAgentReply({ app: appRow, room, userMessage });
+
+    expect(reply).toMatchObject({
+      role: "agent",
+      agent_key: "coordinator",
+      kind: "plan_update",
+      body_md: "I created a draft plan with 2 steps. Review it in the Plan panel.",
+    });
+    expect(ephemeralQuery).toHaveBeenCalledWith(
+      expect.stringContaining("Convert the following plan-generator output into the required JSON object."),
+      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 1 }),
+    );
+
+    const plans = dal.getPlansByRoom(room.id);
+    expect(plans[0]).toMatchObject({
+      title: "Repaired blog plan",
+      summary_md: "Converted from an unstructured model reply.",
+    });
+    expect(dal.getPlanSteps(plans[0].id).map((step) => step.title)).toEqual([
+      "Add blog persistence",
+      "Add blog pages",
+    ]);
+
+    const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;
+    expect(JSON.parse(run.result_json)).toMatchObject({
+      text: "Here is the plan: first add the model, then add routes, then validate it.",
+      repaired_text: expect.stringContaining("Repaired blog plan"),
+      plan_id: plans[0].id,
+      step_count: 2,
+    });
+  });
+
   it("generates a room plan from the plan API", async () => {
     const app = seedApp(db);
     const token = await createAuthToken();

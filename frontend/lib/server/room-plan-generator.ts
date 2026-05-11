@@ -54,6 +54,8 @@ function buildPlanGenerationPrompt({
     "You are generating the structured execution plan for an Archie planning room.",
     "Inspect the repository as needed before deciding the plan.",
     "This is read-only planning. Do not edit files, install dependencies, change git state, or commit.",
+    "You must generate a draft plan now. Do not ask clarifying questions instead of returning the JSON.",
+    "If details are missing, make conservative assumptions and list the open questions inside summary_md or acceptance_criteria_md.",
     "",
     "Return ONLY valid JSON. Do not wrap it in markdown.",
     "JSON shape:",
@@ -76,6 +78,7 @@ function buildPlanGenerationPrompt({
     "",
     "Rules:",
     "- Create 2 to 8 ordered steps.",
+    "- Do not return prose, analysis, XML, YAML, or markdown outside the JSON object.",
     "- Keep steps independently executable and reviewable.",
     "- Put enough context in implementation_prompt_md that a task conversation can execute only that step.",
     "- Set requires_security_review for auth, permissions, secrets, data exposure, execution, dependency, or write-path risk.",
@@ -139,6 +142,86 @@ async function runPlanGenerator({
   return { text, events };
 }
 
+function buildJsonRepairPrompt({
+  originalPrompt,
+  modelOutput,
+}: {
+  originalPrompt: string;
+  modelOutput: string;
+}): string {
+  return [
+    "Convert the following plan-generator output into the required JSON object.",
+    "Return ONLY valid JSON. Do not wrap it in markdown. Do not add commentary.",
+    "If the output asks questions or is incomplete, still produce a conservative draft plan and put open questions in summary_md or acceptance_criteria_md.",
+    "",
+    "Required JSON shape:",
+    "{",
+    '  "title": "Short plan title",',
+    '  "summary_md": "Concise markdown summary of the plan, assumptions, and open questions.",',
+    '  "steps": [',
+    "    {",
+    '      "title": "Step title",',
+    '      "objective_md": "What this step changes and why.",',
+    '      "implementation_prompt_md": "The exact implementation brief to send to the task agent for this step.",',
+    '      "acceptance_criteria_md": "- Observable acceptance criteria\\n- Include tests or verification expected",',
+    '      "risk_level": "low|medium|high",',
+    '      "requires_architecture_review": true,',
+    '      "requires_security_review": false,',
+    '      "requires_browser_validation": true',
+    "    }",
+    "  ]",
+    "}",
+    "",
+    "Original instruction:",
+    originalPrompt,
+    "",
+    "Model output to convert:",
+    modelOutput || "(empty output)",
+  ].join("\n");
+}
+
+async function parseOrRepairGeneratedPlan({
+  provider,
+  model,
+  cwd,
+  prompt,
+  text,
+  room,
+}: {
+  provider: AgentProvider;
+  model: string;
+  cwd: string;
+  prompt: string;
+  text: string;
+  room: HomeRoomRow;
+}): Promise<{ generated: GeneratedPlan; repairedText: string | null }> {
+  try {
+    return {
+      generated: normalizeGeneratedPlan(extractJsonObject(text), room),
+      repairedText: null,
+    };
+  } catch (initialError) {
+    const repairPrompt = buildJsonRepairPrompt({
+      originalPrompt: prompt,
+      modelOutput: text,
+    });
+    const repairedText = await provider.ephemeralQuery(repairPrompt, {
+      model,
+      cwd,
+      maxTurns: 1,
+    });
+
+    try {
+      return {
+        generated: normalizeGeneratedPlan(extractJsonObject(repairedText), room),
+        repairedText,
+      };
+    } catch {
+      throw initialError;
+    }
+  }
+}
+
 function extractJsonObject(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const raw = fenced?.[1] || text;
@@ -147,7 +230,11 @@ function extractJsonObject(text: string): unknown {
   if (start === -1 || end === -1 || end <= start) {
     throw new Error("Plan generator did not return JSON");
   }
-  return JSON.parse(raw.slice(start, end + 1));
+  try {
+    return JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    throw new Error("Plan generator returned invalid JSON");
+  }
 }
 
 function stringValue(value: unknown, fallback: string): string {
@@ -257,6 +344,10 @@ export async function generateRoomPlanFromDiscussion({
     input_json: JSON.stringify({ prompt }),
   });
 
+  let generatorText = "";
+  let repairedText: string | null = null;
+  let events: ToolStreamEvent[] = [];
+
   try {
     const provider = getProvider(agent.defaultProvider);
     const result = await runPlanGenerator({
@@ -265,7 +356,18 @@ export async function generateRoomPlanFromDiscussion({
       model: agent.defaultModel,
       cwd: app.directory,
     });
-    const generated = normalizeGeneratedPlan(extractJsonObject(result.text), room);
+    generatorText = result.text;
+    events = result.events;
+    const parsed = await parseOrRepairGeneratedPlan({
+      provider,
+      prompt,
+      text: result.text,
+      model: agent.defaultModel,
+      cwd: app.directory,
+      room,
+    });
+    const generated = parsed.generated;
+    repairedText = parsed.repairedText;
     const persisted = persistGeneratedPlan(room, generated);
     updateRoomPlanningContextFromStructuredPlan({
       roomId: room.id,
@@ -278,6 +380,7 @@ export async function generateRoomPlanFromDiscussion({
       status: "completed",
       result_json: JSON.stringify({
         text: result.text,
+        repaired_text: repairedText,
         events: result.events,
         plan_id: persisted.plan.id,
         step_count: persisted.steps.length,
@@ -288,6 +391,11 @@ export async function generateRoomPlanFromDiscussion({
   } catch (error) {
     dal.updateRoomAgentRun(run.id, {
       status: "failed",
+      result_json: JSON.stringify({
+        text: generatorText,
+        repaired_text: repairedText,
+        events,
+      }),
       error_text: error instanceof Error ? error.message : "Unknown plan generation error",
     });
     throw error;
