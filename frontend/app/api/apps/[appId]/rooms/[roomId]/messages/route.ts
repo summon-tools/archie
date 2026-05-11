@@ -1,0 +1,67 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getAuthUser, AuthError } from "@/lib/server/auth";
+import * as dal from "@/lib/server/dal";
+
+function getRoomForApp(appId: number, roomId: number) {
+  const app = dal.getApp(appId);
+  if (!app) return { error: NextResponse.json({ detail: "App not found" }, { status: 404 }) };
+
+  const room = dal.getRoom(roomId);
+  if (!room || room.app_id !== app.id) {
+    return { error: NextResponse.json({ detail: "Room not found" }, { status: 404 }) };
+  }
+
+  return { app, room };
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ appId: string; roomId: string }> },
+) {
+  try {
+    await getAuthUser(request);
+    const { appId, roomId } = await params;
+    const result = getRoomForApp(Number(appId), Number(roomId));
+    if (result.error) return result.error;
+
+    return NextResponse.json({ messages: dal.getRoomMessages(result.room!.id) });
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ detail: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ appId: string; roomId: string }> },
+) {
+  try {
+    const authUser = await getAuthUser(request);
+    const { appId, roomId } = await params;
+    const result = getRoomForApp(Number(appId), Number(roomId));
+    if (result.error) return result.error;
+
+    const body = await request.json();
+    const content = typeof body.content === "string" ? body.content.trim() : "";
+    if (!content) {
+      return NextResponse.json({ detail: "content is required" }, { status: 400 });
+    }
+
+    const message = dal.createRoomMessage({
+      room_id: result.room!.id,
+      role: "user",
+      kind: "message",
+      body_md: content,
+      author_user_id: authUser.id,
+    });
+
+    return NextResponse.json(message, { status: 201 });
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ detail: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+}

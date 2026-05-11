@@ -226,6 +226,75 @@ export interface ChatStatus {
   pid: number | null;
 }
 
+// ── Home Rooms / Plans ─────────────────────────────────────────────
+
+export type HomeRoomStatus = "open" | "archived";
+export type RoomMessageRole = "user" | "agent" | "system";
+export type RoomMessageKind = "message" | "decision" | "plan_update" | "execution_event" | "error";
+export type PlanStatus = "draft" | "ready" | "executing" | "completed" | "blocked" | "cancelled";
+export type PlanStepRiskLevel = "low" | "medium" | "high";
+export type PlanStepStatus = "pending" | "implementing" | "reviewing" | "fixing" | "validating" | "committing" | "completed" | "blocked" | "failed" | "skipped";
+
+export interface HomeRoom {
+  id: number;
+  app_id: number;
+  title: string;
+  purpose: string;
+  status: HomeRoomStatus;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomMessage {
+  id: number;
+  room_id: number;
+  author_user_id: number | null;
+  agent_key: string | null;
+  role: RoomMessageRole;
+  kind: RoomMessageKind;
+  body_md: string;
+  payload_json: string | null;
+  created_at: string;
+}
+
+export interface Plan {
+  id: number;
+  room_id: number;
+  title: string;
+  summary_md: string;
+  status: PlanStatus;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanStep {
+  id: number;
+  plan_id: number;
+  position: number;
+  title: string;
+  objective_md: string;
+  implementation_prompt_md: string;
+  acceptance_criteria_md: string;
+  risk_level: PlanStepRiskLevel;
+  requires_architecture_review: number;
+  requires_security_review: number;
+  requires_browser_validation: number;
+  status: PlanStepStatus;
+  linked_work_item_id: number | null;
+  linked_conversation_id: number | null;
+  commit_sha: string | null;
+  result_summary_md: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomPlanResponse {
+  plan: Plan | null;
+  steps: PlanStep[];
+}
+
 // ── Notification (RFC 23) ──────────────────────────────────────────
 
 export interface Notification {

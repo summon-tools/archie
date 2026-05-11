@@ -1,4 +1,4 @@
-import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact } from "./types";
+import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep } from "./types";
 
 const BASE = "/api";
 
@@ -218,6 +218,75 @@ export async function archiveConversation(appId: number, conversationId: number)
 
 export async function markWorkItemDone(appId: number, itemId: number): Promise<Task> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/done`, { method: "POST" });
+}
+
+// --- Home Rooms / Plans ---
+
+export async function getRooms(appId: number): Promise<HomeRoom[]> {
+  const data = await fetchJSON<{ rooms: HomeRoom[] }>(`${BASE}/apps/${appId}/rooms`);
+  return data.rooms;
+}
+
+export async function createRoom(appId: number, body: { title: string; purpose?: string; message?: string }): Promise<HomeRoom> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getRoom(appId: number, roomId: number): Promise<HomeRoom> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}`);
+}
+
+export async function updateRoom(appId: number, roomId: number, body: Partial<Pick<HomeRoom, "title" | "purpose" | "status">>): Promise<HomeRoom> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getRoomMessages(appId: number, roomId: number): Promise<RoomMessage[]> {
+  const data = await fetchJSON<{ messages: RoomMessage[] }>(`${BASE}/apps/${appId}/rooms/${roomId}/messages`);
+  return data.messages;
+}
+
+export async function sendRoomMessage(appId: number, roomId: number, content: string): Promise<RoomMessage> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function getRoomPlan(appId: number, roomId: number): Promise<RoomPlanResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan`);
+}
+
+export async function createRoomPlan(appId: number, roomId: number, body: { title: string; summary_md?: string; status?: string }): Promise<RoomPlanResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateRoomPlan(appId: number, roomId: number, body: { title?: string; summary_md?: string; status?: string; current_version?: number }): Promise<RoomPlanResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createPlanStep(appId: number, roomId: number, body: Partial<PlanStep> & { title: string }): Promise<PlanStep> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updatePlanStep(appId: number, roomId: number, stepId: number, body: Partial<PlanStep>): Promise<PlanStep> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps/${stepId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
 }
 
 // --- Work Item Environment endpoints ---
