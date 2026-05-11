@@ -1,4 +1,4 @@
-import { DEFAULT_HOME_AGENTS, getHomeAgent } from "@/lib/home/agents";
+import { DEFAULT_HOME_AGENTS, getHomeAgent, type HomeAgentDefinition } from "@/lib/home/agents";
 import { getProvider } from "@/lib/server/agent";
 import * as dal from "./dal";
 import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
@@ -10,11 +10,12 @@ function buildCoordinatorPrompt({
 }: {
   app: AppRow;
   room: HomeRoomRow;
-  userMessage: string;
+  userMessage: RoomMessageRow;
 }): string {
   const plan = dal.getPlansByRoom(room.id)[0] || null;
   const steps = plan ? dal.getPlanSteps(plan.id) : [];
   const recentMessages = dal.getRoomMessages(room.id, 12);
+  const taggedAgent = getTaggedAgent(userMessage);
 
   return [
     "You are the Coordinator agent inside an Archie planning room for software work.",
@@ -33,6 +34,8 @@ function buildCoordinatorPrompt({
     `Room: ${room.title}`,
     room.purpose ? `Room purpose: ${room.purpose}` : null,
     plan ? `Current plan: ${plan.title} (${plan.status})` : "Current plan: none yet",
+    taggedAgent ? `Tagged agent: ${taggedAgent.name} — ${taggedAgent.role}` : null,
+    taggedAgent ? "Use the tagged agent as the primary perspective for this answer, while staying in planning mode." : null,
     steps.length > 0 ? "Plan steps:" : null,
     ...steps.map((step) => `- ${step.position + 1}. ${step.title} (${step.status})`),
     "",
@@ -47,10 +50,21 @@ function buildCoordinatorPrompt({
     }),
     "",
     "Latest user message:",
-    userMessage,
+    userMessage.body_md,
     "",
     "Respond as Coordinator.",
   ].filter((line): line is string => line !== null).join("\n");
+}
+
+function getTaggedAgent(message: RoomMessageRow): HomeAgentDefinition | null {
+  if (!message.payload_json) return null;
+  try {
+    const payload = JSON.parse(message.payload_json) as { target_agent_key?: unknown };
+    if (typeof payload.target_agent_key !== "string") return null;
+    return DEFAULT_HOME_AGENTS.find((agent) => agent.key === payload.target_agent_key) || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function createCoordinatorRoomReply({
@@ -66,7 +80,7 @@ export async function createCoordinatorRoomReply({
   const prompt = buildCoordinatorPrompt({
     app,
     room,
-    userMessage: userMessage.body_md,
+    userMessage,
   });
 
   const run = dal.createRoomAgentRun({

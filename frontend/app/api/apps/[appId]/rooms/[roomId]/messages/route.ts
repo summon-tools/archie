@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { createCoordinatorRoomReply } from "@/lib/server/room-agents";
+import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 
 function getRoomForApp(appId: number, roomId: number) {
   const app = dal.getApp(appId);
@@ -49,6 +50,10 @@ export async function POST(
     if (!content) {
       return NextResponse.json({ detail: "content is required" }, { status: 400 });
     }
+    const targetAgentKey = typeof body.target_agent_key === "string" ? body.target_agent_key : null;
+    if (targetAgentKey && !DEFAULT_HOME_AGENTS.some((agent) => agent.key === targetAgentKey)) {
+      return NextResponse.json({ detail: "Unknown agent tag" }, { status: 400 });
+    }
 
     const message = dal.createRoomMessage({
       room_id: result.room!.id,
@@ -56,6 +61,7 @@ export async function POST(
       kind: "message",
       body_md: content,
       author_user_id: authUser.id,
+      payload_json: targetAgentKey ? JSON.stringify({ target_agent_key: targetAgentKey }) : null,
     });
 
     void createCoordinatorRoomReply({

@@ -4,12 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CaretDown, CaretRight, ChatsCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Sparkle } from "@phosphor-icons/react";
+import { ChatsCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
 import { advancePlanStepGate, createPlanStep, createRoomPlan, executeNextPlanStep, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
+import RoomChatInput from "@/components/RoomChatInput";
 
 interface RoomWorkspaceProps {
   appId: number;
@@ -23,6 +24,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [pendingMessages, setPendingMessages] = useState<RoomMessage[]>([]);
+  const [selectedAgentKey, setSelectedAgentKey] = useState<string | null>(null);
   const [awaitingReplyAfterId, setAwaitingReplyAfterId] = useState<number | null>(null);
   const [awaitingReplyStartedAt, setAwaitingReplyStartedAt] = useState<number | null>(null);
 
@@ -43,6 +45,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   const handleSendRoomMessage = async () => {
     if (!room || !messageDraft.trim() || sendingMessage) return;
     const content = messageDraft.trim();
+    const targetAgentKey = selectedAgentKey;
     const optimisticMessage: RoomMessage = {
       id: -Date.now(),
       room_id: room.id,
@@ -51,7 +54,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       role: "user",
       kind: "message",
       body_md: content,
-      payload_json: null,
+      payload_json: targetAgentKey ? JSON.stringify({ target_agent_key: targetAgentKey }) : null,
       created_at: new Date().toISOString(),
     };
     setSendingMessage(true);
@@ -59,8 +62,9 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     setMessageDraft("");
     setPendingMessages((prev) => [...prev, optimisticMessage]);
     try {
-      const message = await sendRoomMessage(appId, room.id, content);
+      const message = await sendRoomMessage(appId, room.id, content, targetAgentKey);
       setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
+      setSelectedAgentKey(null);
       setAwaitingReplyAfterId(message.id);
       setAwaitingReplyStartedAt(Date.now());
       await mutateMessages();
@@ -101,6 +105,8 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             sending={sendingMessage}
             thinking={Boolean(awaitingReplyAfterId)}
             error={messageError}
+            selectedAgentKey={selectedAgentKey}
+            setSelectedAgentKey={setSelectedAgentKey}
             onSend={handleSendRoomMessage}
           />
         ) : (
@@ -138,6 +144,8 @@ function RoomShell({
   sending,
   thinking,
   error,
+  selectedAgentKey,
+  setSelectedAgentKey,
   onSend,
 }: {
   room: HomeRoom;
@@ -147,10 +155,10 @@ function RoomShell({
   sending: boolean;
   thinking: boolean;
   error: string | null;
+  selectedAgentKey: string | null;
+  setSelectedAgentKey: (agentKey: string | null) => void;
   onSend: () => void;
 }) {
-  const [agentsExpanded, setAgentsExpanded] = useState(false);
-
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <header className="px-6 py-4 border-b border-th">
@@ -189,81 +197,24 @@ function RoomShell({
         </div>
       </div>
 
-      <div className="border-t border-th p-4">
-        <div className="max-w-3xl mx-auto">
-          <AgentTeamDrawer
-            expanded={agentsExpanded}
-            onToggle={() => setAgentsExpanded((value) => !value)}
-          />
-          {error && <p className="mb-2 text-sm text-st-red">{error}</p>}
-          <div className="flex items-end gap-2 rounded-xl border border-th bg-th-panel p-2">
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  onSend();
-                }
-              }}
-              placeholder="Discuss the plan..."
-              rows={2}
-              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none"
-              disabled={sending}
-            />
-            <button
-              onClick={onSend}
-              disabled={!draft.trim() || sending}
-              className="h-9 w-9 rounded-lg bg-btn-primary text-btn-primary flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Send message"
-            >
-              {sending ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneTilt size={16} weight="bold" />}
-            </button>
+      <div className="border-t border-th">
+        {error && (
+          <div className="max-w-chat mx-auto px-4 pt-3">
+            <p className="text-sm text-st-red">{error}</p>
           </div>
-          {(sending || thinking) && (
-            <p className="mt-2 text-xs text-th-muted">Coordinator is thinking...</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AgentTeamDrawer({
-  expanded,
-  onToggle,
-}: {
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="mb-3 rounded-lg border border-th bg-th-panel overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-th-subtle transition-colors"
-      >
-        {expanded ? (
-          <CaretDown size={14} className="text-th-muted flex-shrink-0" />
-        ) : (
-          <CaretRight size={14} className="text-th-muted flex-shrink-0" />
         )}
-        <span className="text-sm font-medium text-th-secondary">Agent team</span>
-        <span className="ml-auto text-meta text-th-dimmed">{DEFAULT_HOME_AGENTS.length} agents</span>
-      </button>
-      {expanded && (
-        <div className="border-t border-th p-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-56 overflow-y-auto">
-          {DEFAULT_HOME_AGENTS.map((agent) => (
-            <div key={agent.key} className="rounded-lg border border-th bg-th-main p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-2 h-2 rounded-full bg-th-strong" />
-                <h3 className="text-sm font-semibold text-th-primary truncate">{agent.name}</h3>
-                <span className="ml-auto text-meta text-th-dimmed">{agent.defaultModel}</span>
-              </div>
-              <p className="text-xs text-th-muted leading-relaxed">{agent.role}</p>
-            </div>
-          ))}
-        </div>
-      )}
+        <RoomChatInput
+          value={draft}
+          onChange={setDraft}
+          onSubmit={onSend}
+          agents={DEFAULT_HOME_AGENTS}
+          selectedAgentKey={selectedAgentKey}
+          onSelectAgent={setSelectedAgentKey}
+          disabled={sending}
+          isLoading={sending}
+          statusText={sending || thinking ? "Coordinator is thinking..." : undefined}
+        />
+      </div>
     </div>
   );
 }
@@ -271,6 +222,7 @@ function AgentTeamDrawer({
 function RoomMessageBubble({ message }: { message: RoomMessage }) {
   const isUser = message.role === "user";
   const label = isUser ? "You" : message.agent_key ? formatAgentLabel(message.agent_key) : "Archie";
+  const taggedAgent = isUser ? getTaggedAgentName(message) : null;
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -286,6 +238,13 @@ function RoomMessageBubble({ message }: { message: RoomMessage }) {
               {message.kind.replace("_", " ")}
             </span>
           )}
+          {taggedAgent && (
+            <span className={`rounded-full px-1.5 py-0.5 text-meta font-medium ${
+              isUser ? "bg-black/10 text-btn-primary/70" : "bg-th-muted text-th-dimmed"
+            }`}>
+              @{taggedAgent}
+            </span>
+          )}
         </div>
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p>
@@ -297,6 +256,18 @@ function RoomMessageBubble({ message }: { message: RoomMessage }) {
       </div>
     </div>
   );
+}
+
+function getTaggedAgentName(message: RoomMessage): string | null {
+  if (!message.payload_json) return null;
+  try {
+    const payload = JSON.parse(message.payload_json) as { target_agent_key?: unknown };
+    if (typeof payload.target_agent_key !== "string") return null;
+    const agent = DEFAULT_HOME_AGENTS.find((candidate) => candidate.key === payload.target_agent_key);
+    return agent?.name || null;
+  } catch {
+    return null;
+  }
 }
 
 function formatAgentLabel(agentKey: string): string {

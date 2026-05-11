@@ -136,7 +136,7 @@ describe("rooms API", () => {
     const created = await routes.POST(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/messages`, {
         token,
-        body: { content: "Please critique this plan." },
+        body: { content: "Please critique this plan.", target_agent_key: "architect" },
       }),
       { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
     );
@@ -145,6 +145,7 @@ describe("rooms API", () => {
     await expect(created.json()).resolves.toMatchObject({
       role: "user",
       body_md: "Please critique this plan.",
+      payload_json: JSON.stringify({ target_agent_key: "architect" }),
     });
 
     const listed = await routes.GET(
@@ -156,6 +157,7 @@ describe("rooms API", () => {
     const body = await listed.json();
     expect(body.messages.length).toBeGreaterThanOrEqual(1);
     expect(body.messages[0].body_md).toBe("Please critique this plan.");
+    expect(body.messages[0].payload_json).toBe(JSON.stringify({ target_agent_key: "architect" }));
     await vi.waitFor(() => {
       const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ? ORDER BY id ASC").all(room.id) as any[];
       expect(messages[1]).toMatchObject({
@@ -255,6 +257,7 @@ describe("rooms API", () => {
       room_id: room.id,
       role: "user",
       body_md: "Who am I talking to?",
+      payload_json: JSON.stringify({ target_agent_key: "architect" }),
     });
     const ephemeralQuery = vi.fn(async () => "You are talking to the Coordinator for this planning room.");
     vi.doMock("@/lib/server/agent", () => ({
@@ -276,6 +279,10 @@ describe("rooms API", () => {
     expect(ephemeralQuery).toHaveBeenCalledWith(
       expect.stringContaining("Latest user message:\nWho am I talking to?"),
       expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app" }),
+    );
+    expect(ephemeralQuery).toHaveBeenCalledWith(
+      expect.stringContaining("Tagged agent: Architect"),
+      expect.any(Object),
     );
 
     const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;

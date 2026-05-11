@@ -250,10 +250,10 @@ export async function getRoomMessages(appId: number, roomId: number): Promise<Ro
   return data.messages;
 }
 
-export async function sendRoomMessage(appId: number, roomId: number, content: string): Promise<RoomMessage> {
+export async function sendRoomMessage(appId: number, roomId: number, content: string, targetAgentKey?: string | null): Promise<RoomMessage> {
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, target_agent_key: targetAgentKey || undefined }),
   });
 }
 
