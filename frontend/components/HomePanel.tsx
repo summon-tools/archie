@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
-import { createPlanStep, createRoom, createRoomPlan, executeNextPlanStep, sendRoomMessage, updateRoomPlan } from "@/lib/api";
+import { advancePlanStepGate, createPlanStep, createRoom, createRoomPlan, executeNextPlanStep, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
@@ -437,6 +437,34 @@ function PlanPanel({
     }
   };
 
+  const handleStartGates = async (step: PlanStep) => {
+    if (!room || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await startPlanStepGates(appId, room.id, step.id);
+      await mutate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start review gates");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAdvanceGate = async (step: PlanStep, status: "passed" | "failed") => {
+    if (!room || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await advancePlanStepGate(appId, room.id, step.id, { status });
+      await mutate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to advance review gate");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleMarkReady = async () => {
     if (!room || !plan || busy) return;
     setBusy(true);
@@ -572,7 +600,13 @@ function PlanPanel({
               ) : (
                 <div className="space-y-2">
                   {steps.map((step) => (
-                    <PlanStepCard key={step.id} step={step} />
+                    <PlanStepCard
+                      key={step.id}
+                      step={step}
+                      busy={busy}
+                      onStartGates={handleStartGates}
+                      onAdvanceGate={handleAdvanceGate}
+                    />
                   ))}
                 </div>
               )}
@@ -610,12 +644,33 @@ function PlanPanel({
   );
 }
 
-function PlanStepCard({ step }: { step: PlanStep }) {
+const GATE_LABELS: Record<string, string> = {
+  architecture_review: "Architecture",
+  code_review: "Review",
+  security_review: "Security",
+  qa_validation: "QA",
+  browser_validation: "Browser",
+  commit: "Commit",
+};
+
+function PlanStepCard({
+  step,
+  busy,
+  onStartGates,
+  onAdvanceGate,
+}: {
+  step: PlanStep;
+  busy: boolean;
+  onStartGates: (step: PlanStep) => void;
+  onAdvanceGate: (step: PlanStep, status: "passed" | "failed") => void;
+}) {
   const gates = [
     step.requires_architecture_review ? "Architecture" : null,
     step.requires_security_review ? "Security" : null,
     step.requires_browser_validation ? "Browser" : null,
   ].filter(Boolean);
+  const events = step.events?.filter((event) => GATE_LABELS[event.phase]) || [];
+  const pendingEvent = events.find((event) => event.status === "pending");
 
   return (
     <div className="rounded-lg border border-th bg-th-main p-3">
@@ -639,6 +694,42 @@ function PlanStepCard({ step }: { step: PlanStep }) {
               </span>
             ))}
           </div>
+          {events.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {events.map((event) => (
+                <span key={event.id} className="rounded-full bg-th-muted px-2 py-0.5 text-meta text-th-dimmed">
+                  {GATE_LABELS[event.phase]}: {event.status}
+                </span>
+              ))}
+            </div>
+          )}
+          {(step.status === "implementing" || step.status === "fixing") && step.linked_work_item_id && (
+            <button
+              onClick={() => onStartGates(step)}
+              disabled={busy}
+              className="mt-3 w-full rounded-lg border border-th px-3 py-2 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
+            >
+              Start review gates
+            </button>
+          )}
+          {pendingEvent && ["reviewing", "validating", "committing"].includes(step.status) && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onAdvanceGate(step, "passed")}
+                disabled={busy}
+                className="rounded-lg border border-th px-3 py-2 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
+              >
+                Pass gate
+              </button>
+              <button
+                onClick={() => onAdvanceGate(step, "failed")}
+                disabled={busy}
+                className="rounded-lg border border-th px-3 py-2 text-xs font-medium text-st-red hover:bg-th-subtle disabled:opacity-50"
+              >
+                Needs fixes
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -16,7 +16,10 @@ function getRoomForApp(appId: number, roomId: number) {
 
 function serializePlan(roomId: number) {
   const plan = dal.getPlansByRoom(roomId)[0] || null;
-  const steps = plan ? dal.getPlanSteps(plan.id) : [];
+  const steps = plan ? dal.getPlanSteps(plan.id).map((step) => ({
+    ...step,
+    events: dal.getPlanStepEvents(step.id),
+  })) : [];
   return { plan, steps };
 }
 

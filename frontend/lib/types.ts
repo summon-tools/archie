@@ -288,6 +288,18 @@ export interface PlanStep {
   result_summary_md: string;
   created_at: string;
   updated_at: string;
+  events?: PlanStepEvent[];
+}
+
+export interface PlanStepEvent {
+  id: number;
+  plan_step_id: number;
+  phase: string;
+  agent_key: string | null;
+  status: string;
+  summary_md: string;
+  payload_json: string | null;
+  created_at: string;
 }
 
 export interface RoomPlanResponse {
@@ -300,6 +312,12 @@ export interface PlanExecutionResponse {
   step: PlanStep;
   conversation: Conversation;
   work_item: Task;
+}
+
+export interface PlanStepGateResponse {
+  plan: Plan;
+  step: PlanStep;
+  events: PlanStepEvent[];
 }
 
 // ── Notification (RFC 23) ──────────────────────────────────────────

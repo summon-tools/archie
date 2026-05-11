@@ -283,6 +283,20 @@ export function createPlanStepEvent(data: {
   return getDb().prepare("SELECT * FROM plan_step_events WHERE id = ?").get(result.lastInsertRowid) as PlanStepEventRow;
 }
 
+export function updatePlanStepEvent(
+  eventId: number,
+  fields: Partial<Pick<PlanStepEventRow, "status" | "summary_md" | "payload_json">>,
+): void {
+  const keys = Object.keys(fields).filter((key) => fields[key as keyof typeof fields] !== undefined);
+  if (keys.length === 0) return;
+
+  const setParts = keys.map((key) => `${key} = ?`);
+  const values: unknown[] = keys.map((key) => fields[key as keyof typeof fields]);
+  values.push(eventId);
+
+  getDb().prepare(`UPDATE plan_step_events SET ${setParts.join(", ")} WHERE id = ?`).run(...values);
+}
+
 export function getPlanStepEvents(stepId: number): PlanStepEventRow[] {
   return getDb().prepare(
     `SELECT * FROM plan_step_events

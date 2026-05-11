@@ -264,4 +264,104 @@ describe("rooms API", () => {
     const roomMessage = db.prepare("SELECT * FROM room_messages WHERE room_id = ? AND kind = 'execution_event'").get(room.id) as any;
     expect(roomMessage.body_md).toContain("Started implementation");
   });
+
+  it("orchestrates review, security, qa, browser, and commit gates deterministically", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Gate Room" });
+    const plan = dal.createPlan({ room_id: room.id, title: "Gate Plan", status: "ready" });
+    const step = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Gate controlled step",
+      requires_architecture_review: true,
+      requires_security_review: true,
+      requires_browser_validation: true,
+    });
+    const executeRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/execute-next/route");
+    const startRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/start/route");
+    const advanceRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/advance/route");
+
+    await executeRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/execute-next`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    const started = await startRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/start`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+    expect(started.status).toBe(201);
+    const startedBody = await started.json();
+    expect(startedBody.step.status).toBe("reviewing");
+    expect(startedBody.events.filter((event: any) => event.status === "pending").map((event: any) => event.phase)).toEqual([
+      "architecture_review",
+      "code_review",
+      "security_review",
+      "qa_validation",
+      "browser_validation",
+      "commit",
+    ]);
+
+    for (const phase of ["architecture_review", "code_review", "security_review", "qa_validation", "browser_validation", "commit"]) {
+      const response = await advanceRoutes.POST(
+        makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/advance`, {
+          token,
+          body: {
+            status: "passed",
+            summary_md: `${phase} passed`,
+            commit_sha: phase === "commit" ? "abc123" : undefined,
+          },
+        }),
+        { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const completedStep = dal.getPlanStep(step.id)!;
+    expect(completedStep.status).toBe("completed");
+    expect(completedStep.commit_sha).toBe("abc123");
+    expect(dal.getPlan(plan.id)!.status).toBe("completed");
+    expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "completed")).toHaveLength(7);
+  });
+
+  it("moves a step back to fixing when a gate fails", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Fix Room" });
+    const plan = dal.createPlan({ room_id: room.id, title: "Fix Plan", status: "ready" });
+    const step = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Security sensitive step",
+      status: "implementing",
+      requires_security_review: true,
+    });
+    const startRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/start/route");
+    const advanceRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/advance/route");
+
+    await startRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/start`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+    await advanceRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/advance`, {
+        token,
+        body: { status: "passed", summary_md: "Review passed" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+    const failed = await advanceRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/advance`, {
+        token,
+        body: { status: "failed", summary_md: "Tighten authorization checks." },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+
+    expect(failed.status).toBe(200);
+    const failedBody = await failed.json();
+    expect(failedBody.step.status).toBe("fixing");
+    expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "skipped")).toHaveLength(2);
+  });
 });

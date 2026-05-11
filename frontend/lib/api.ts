@@ -1,4 +1,4 @@
-import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse } from "./types";
+import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse } from "./types";
 
 const BASE = "/api";
 
@@ -291,6 +291,22 @@ export async function updatePlanStep(appId: number, roomId: number, stepId: numb
 
 export async function executeNextPlanStep(appId: number, roomId: number): Promise<PlanExecutionResponse> {
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/execute-next`, { method: "POST" });
+}
+
+export async function startPlanStepGates(appId: number, roomId: number, stepId: number): Promise<PlanStepGateResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps/${stepId}/gates/start`, { method: "POST" });
+}
+
+export async function advancePlanStepGate(
+  appId: number,
+  roomId: number,
+  stepId: number,
+  body: { status: "passed" | "failed"; summary_md?: string; commit_sha?: string },
+): Promise<PlanStepGateResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps/${stepId}/gates/advance`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 // --- Work Item Environment endpoints ---
