@@ -139,6 +139,8 @@ export interface HomeRoomRow {
   app_id: number;
   title: string;
   purpose: string;
+  planning_context_md: string;
+  planning_context_updated_at: string | null;
   status: HomeRoomStatus;
   created_by: number | null;
   created_at: string;

@@ -1,6 +1,7 @@
 import { DEFAULT_HOME_AGENTS, getHomeAgent, type HomeAgentDefinition } from "@/lib/home/agents";
 import { getProvider, type AgentProvider, type ToolStreamEvent } from "@/lib/server/agent";
 import * as dal from "./dal";
+import { refreshRoomPlanningContext } from "./room-planning-context";
 import { generateRoomPlanFromDiscussion, shouldGenerateRoomPlan } from "./room-plan-generator";
 import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
 
@@ -17,7 +18,8 @@ function buildRoomAgentPrompt({
 }): string {
   const plan = dal.getPlansByRoom(room.id)[0] || null;
   const steps = plan ? dal.getPlanSteps(plan.id) : [];
-  const recentMessages = dal.getRoomMessages(room.id, 12);
+  const planningContext = room.planning_context_md?.trim();
+  const recentMessages = dal.getRoomMessages(room.id, 30);
   const isCoordinator = agent.key === "coordinator";
 
   return [
@@ -32,6 +34,9 @@ function buildRoomAgentPrompt({
       ? "- Clarify scope, risks, sequencing, and acceptance criteria."
       : "- Surface the most important risks, tradeoffs, questions, and recommendations in your area.",
     isCoordinator ? "- Route concerns to the fixed agent team when useful." : null,
+    "- The planning context summary and structured plan are separate sources of truth.",
+    "- If no structured plan exists, treat the planning context summary and recent discussion as the draft plan being discussed.",
+    "- When the user asks about the plan, review the working plan from discussion even if no structured plan record exists yet.",
     "- Do not claim that implementation has started unless a plan step has been executed.",
     "- You may inspect the repository for context, but this is read-only planning chat.",
     "- Do not edit files, install dependencies, change git state, or create commits from this room reply.",
@@ -43,8 +48,12 @@ function buildRoomAgentPrompt({
     `App: ${app.name}`,
     `Room: ${room.title}`,
     room.purpose ? `Room purpose: ${room.purpose}` : null,
-    plan ? `Current plan: ${plan.title} (${plan.status})` : "Current plan: none yet",
-    steps.length > 0 ? "Plan steps:" : null,
+    "",
+    planningContext ? "Planning context summary:" : "Planning context summary: none yet",
+    planningContext || null,
+    "",
+    plan ? `Structured plan: ${plan.title} (${plan.status})` : "Structured plan: none created yet",
+    steps.length > 0 ? "Structured plan steps:" : null,
     ...steps.map((step) => `- ${step.position + 1}. ${step.title} (${step.status})`),
     "",
     "Recent room messages:",
@@ -182,6 +191,15 @@ export async function createRoomAgentReply({
     dal.updateRoomAgentRun(run.id, {
       status: "completed",
       result_json: JSON.stringify({ text: replyText, events: result.events }),
+    });
+
+    await refreshRoomPlanningContext({
+      app,
+      room,
+      agent,
+      provider,
+      userMessage,
+      agentReplyText: replyText,
     });
 
     return dal.createRoomMessage({

@@ -240,6 +240,8 @@ export interface HomeRoom {
   app_id: number;
   title: string;
   purpose: string;
+  planning_context_md: string;
+  planning_context_updated_at: string | null;
   status: HomeRoomStatus;
   created_by: number | null;
   created_at: string;
@@ -305,6 +307,8 @@ export interface PlanStepEvent {
 export interface RoomPlanResponse {
   plan: Plan | null;
   steps: PlanStep[];
+  planning_context_md: string;
+  planning_context_updated_at: string | null;
 }
 
 export interface PlanExecutionResponse {

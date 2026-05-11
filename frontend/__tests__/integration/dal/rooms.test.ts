@@ -36,6 +36,8 @@ describe("rooms DAL", () => {
     expect(room.id).toBeDefined();
     expect(room.title).toBe("Planning Room");
     expect(room.purpose).toBe("Plan a larger feature");
+    expect(room.planning_context_md).toBe("");
+    expect(room.planning_context_updated_at).toBe(null);
     expect(room.status).toBe("open");
     expect(room.created_by).toBe(user.id);
 
@@ -59,6 +61,18 @@ describe("rooms DAL", () => {
     expect(updated.title).toBe("New");
     expect(updated.purpose).toBe("Updated purpose");
     expect(updated.status).toBe("archived");
+  });
+
+  it("updates the room planning context summary", async () => {
+    const dal = await loadDal();
+    const app = seedApp(db);
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+
+    dal.updateRoomPlanningContext(room.id, "## Current direction\n- Build the blog feature.");
+
+    const updated = dal.getRoom(room.id)!;
+    expect(updated.planning_context_md).toBe("## Current direction\n- Build the blog feature.");
+    expect(updated.planning_context_updated_at).toBeTruthy();
   });
 
   it("creates and retrieves room messages in insertion order", async () => {

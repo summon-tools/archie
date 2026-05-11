@@ -65,9 +65,23 @@ export function createRoom(data: {
 
 export function updateRoom(
   roomId: number,
-  fields: Partial<Pick<HomeRoomRow, "title" | "purpose" | "status">>,
+  fields: Partial<Pick<HomeRoomRow, "title" | "purpose" | "planning_context_md" | "planning_context_updated_at" | "status">>,
 ): void {
   buildUpdate("home_rooms", "id", roomId, fields);
+}
+
+export function updateRoomPlanningContext(roomId: number, planningContextMd: string): void {
+  getDb().prepare(
+    `UPDATE home_rooms
+     SET planning_context_md = ?,
+         planning_context_updated_at = CASE WHEN length(trim(?)) > 0 THEN datetime('now') ELSE NULL END,
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(
+    planningContextMd,
+    planningContextMd,
+    roomId,
+  );
 }
 
 export function createRoomMessage(data: {

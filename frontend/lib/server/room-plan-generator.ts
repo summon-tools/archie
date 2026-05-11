@@ -1,6 +1,7 @@
 import { getHomeAgent, type HomeAgentDefinition } from "@/lib/home/agents";
 import { getProvider, type AgentProvider, type ToolStreamEvent } from "@/lib/server/agent";
 import * as dal from "./dal";
+import { updateRoomPlanningContextFromStructuredPlan } from "./room-planning-context";
 import type { AppRow, HomeRoomRow, PlanRow, PlanStepRiskLevel, PlanStepRow, RoomMessageRow } from "./types";
 
 interface GeneratedPlanStep {
@@ -46,6 +47,7 @@ function buildPlanGenerationPrompt({
 }): string {
   const existingPlan = dal.getPlansByRoom(room.id)[0] || null;
   const existingSteps = existingPlan ? dal.getPlanSteps(existingPlan.id) : [];
+  const planningContext = room.planning_context_md?.trim();
   const recentMessages = dal.getRoomMessages(room.id, 30);
 
   return [
@@ -84,6 +86,9 @@ function buildPlanGenerationPrompt({
     `Repository: ${app.directory}`,
     `Room: ${room.title}`,
     room.purpose ? `Room purpose: ${room.purpose}` : null,
+    planningContext ? "Planning context summary:" : "Planning context summary: none yet",
+    planningContext || null,
+    "",
     existingPlan ? `Existing plan: ${existingPlan.title} (${existingPlan.status})` : "Existing plan: none",
     existingSteps.length > 0 ? "Existing steps:" : null,
     ...existingSteps.map((step) => `- ${step.position + 1}. ${step.title} (${step.status})`),
@@ -262,6 +267,12 @@ export async function generateRoomPlanFromDiscussion({
     });
     const generated = normalizeGeneratedPlan(extractJsonObject(result.text), room);
     const persisted = persistGeneratedPlan(room, generated);
+    updateRoomPlanningContextFromStructuredPlan({
+      roomId: room.id,
+      title: generated.title,
+      summaryMd: generated.summary_md,
+      steps: generated.steps,
+    });
 
     dal.updateRoomAgentRun(run.id, {
       status: "completed",

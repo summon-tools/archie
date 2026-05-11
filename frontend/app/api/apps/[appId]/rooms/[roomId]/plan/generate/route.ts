@@ -5,12 +5,18 @@ import { getHomeAgent } from "@/lib/home/agents";
 import { generateRoomPlanFromDiscussion } from "@/lib/server/room-plan-generator";
 
 function serializePlan(roomId: number) {
+  const room = dal.getRoom(roomId);
   const plan = dal.getPlansByRoom(roomId)[0] || null;
   const steps = plan ? dal.getPlanSteps(plan.id).map((step) => ({
     ...step,
     events: dal.getPlanStepEvents(step.id),
   })) : [];
-  return { plan, steps };
+  return {
+    plan,
+    steps,
+    planning_context_md: room?.planning_context_md || "",
+    planning_context_updated_at: room?.planning_context_updated_at || null,
+  };
 }
 
 function getRoomForApp(appId: number, roomId: number) {

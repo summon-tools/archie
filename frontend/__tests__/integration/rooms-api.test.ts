@@ -352,6 +352,67 @@ describe("rooms API", () => {
     });
   });
 
+  it("lets tagged agents review the planning context before a structured plan exists", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    dal.updateRoomPlanningContext(room.id, [
+      "## Current direction",
+      "- Add a blog feature with public listing and post detail pages.",
+      "",
+      "## Open questions",
+      "- Decide whether admin CRUD is in the first step.",
+    ].join("\n"));
+    const roomWithContext = dal.getRoom(room.id)!;
+    const userMessage = dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Architect, what do you think about the plan?",
+      payload_json: JSON.stringify({ target_agent_key: "architect" }),
+    });
+    const toolEnabledStream = vi.fn(async function* (prompt: string) {
+      if (prompt.includes("Update the room planning context summary")) {
+        yield {
+          type: "result",
+          detail: "Completed",
+          resultText: "## Current direction\n- Blog feature plan reviewed by Architect.\n\n## Decisions so far\n- Keep the first step scoped.\n\n## Open questions\n- Admin CRUD scope remains open.\n\n## Risks and validation\n- Check routing and content rendering.",
+        };
+        return;
+      }
+
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: "Architect perspective: the discussed blog plan is reasonable, but split public rendering from admin editing.",
+      };
+    });
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
+    }));
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
+
+    const reply = await createRoomAgentReply({
+      app: appRow,
+      room: roomWithContext,
+      userMessage,
+    });
+
+    expect(reply).toMatchObject({
+      role: "agent",
+      agent_key: "architect",
+      body_md: "Architect perspective: the discussed blog plan is reasonable, but split public rendering from admin editing.",
+    });
+    expect(toolEnabledStream.mock.calls[0][0]).toContain("Planning context summary:\n## Current direction");
+    expect(toolEnabledStream.mock.calls[0][0]).toContain("Structured plan: none created yet");
+    expect(toolEnabledStream.mock.calls[0][0]).toContain("review the working plan from discussion");
+    expect(toolEnabledStream).toHaveBeenCalledWith(
+      expect.stringContaining("Update the room planning context summary"),
+      expect.objectContaining({ model: "claude-opus-4-7", cwd: "/tmp/test-app", maxTurns: 3 }),
+    );
+    expect(dal.getRoom(room.id)!.planning_context_md).toContain("Blog feature plan reviewed by Architect.");
+  });
+
   it("generates a structured plan when room chat asks for one", async () => {
     const app = seedApp(db);
     const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
@@ -457,6 +518,7 @@ describe("rooms API", () => {
       plan_id: plans[0].id,
       step_count: 2,
     });
+    expect(dal.getRoom(room.id)!.planning_context_md).toContain("Room execution plan");
   });
 
   it("generates a room plan from the plan API", async () => {
@@ -512,6 +574,7 @@ describe("rooms API", () => {
       summary_md: "Plan generated through the API.",
       status: "draft",
     });
+    expect(body.planning_context_md).toContain("Generated API plan");
     expect(body.steps).toHaveLength(1);
     expect(body.steps[0]).toMatchObject({
       title: "Define the contract",

@@ -344,6 +344,7 @@ function PlanPanel({
 
   const plan = data?.plan || null;
   const steps = data?.steps || [];
+  const planningContext = data?.planning_context_md || room?.planning_context_md || "";
   const activeStep = steps.find((step) => ["implementing", "reviewing", "fixing", "validating", "committing"].includes(step.status));
   const nextPendingStep = steps.find((step) => step.status === "pending");
 
@@ -454,115 +455,137 @@ function PlanPanel({
 
         {!room ? (
           <p className="text-sm text-th-muted">Select a room to draft a structured plan.</p>
-        ) : isLoading ? (
-          <p className="text-sm text-th-muted">Loading plan...</p>
-        ) : !plan ? (
-          <div className="rounded-lg border border-dashed border-th p-4">
-            <Flag size={18} className="text-th-muted mb-2" />
-            <p className="text-sm font-medium text-th-secondary">Create a structured plan</p>
-            <p className="mt-1 text-xs text-th-muted">
-              The plan will hold executable steps, gates, task links, and progress.
-            </p>
-            <button
-              onClick={handleGeneratePlan}
-              disabled={busy}
-              className="mt-3 w-full rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-60"
-            >
-              {busy ? "Generating..." : "Generate draft plan"}
-            </button>
-          </div>
         ) : (
           <>
-            <section className="space-y-3">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-semibold text-th-primary flex-1 min-w-0 truncate">
-                  {plan.title}
-                </h3>
-                <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
-                  {plan.status}
-                </span>
-              </div>
-              {activeStep?.linked_work_item_id ? (
-                <button
-                  onClick={() => onOpenConversation(activeStep.linked_work_item_id!)}
-                  className="w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle"
-                >
-                  Open active task
-                </button>
-              ) : (
-                <button
-                  onClick={handleExecuteNext}
-                  disabled={busy || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
-                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <PlayCircle size={16} />
-                  {busy ? "Starting..." : "Execute next step"}
-                </button>
-              )}
-            </section>
-
-            {plan.summary_md && (
-              <div className="rounded-lg border border-th bg-th-main p-3">
-                <p className="text-xs text-th-muted leading-relaxed whitespace-pre-wrap">{plan.summary_md}</p>
-              </div>
-            )}
-
-            <section>
+            <section className="rounded-lg border border-th bg-th-main p-3">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider">Steps</p>
-                {plan.status === "draft" && steps.length > 0 && (
-                  <button
-                    onClick={handleMarkReady}
-                    disabled={busy}
-                    className="text-xs font-medium text-th-secondary hover:text-th-primary disabled:opacity-60"
-                  >
-                    Mark ready
-                  </button>
+                <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider">Planning Context</p>
+                {data?.planning_context_updated_at && (
+                  <span className="text-meta text-th-dimmed">updated</span>
                 )}
               </div>
-
-              {steps.length === 0 ? (
-                <p className="text-sm text-th-muted">No steps yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {steps.map((step) => (
-                    <PlanStepCard
-                      key={step.id}
-                      step={step}
-                      busy={busy}
-                      onStartGates={handleStartGates}
-                      onAdvanceGate={handleAdvanceGate}
-                    />
-                  ))}
+              {planningContext.trim() ? (
+                <div className={PROSE_CLASSES}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{planningContext}</ReactMarkdown>
                 </div>
+              ) : (
+                <p className="text-xs text-th-muted leading-relaxed">
+                  The working planning context will appear here as the room discussion develops.
+                </p>
               )}
             </section>
 
-            <section className="rounded-lg border border-th bg-th-main p-3">
-              <p className="text-sm font-medium text-th-secondary mb-2">Add step</p>
-              <input
-                value={stepTitle}
-                onChange={(event) => setStepTitle(event.target.value)}
-                placeholder="Step title"
-                className="w-full rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
-                disabled={busy}
-              />
-              <textarea
-                value={stepObjective}
-                onChange={(event) => setStepObjective(event.target.value)}
-                placeholder="Objective or implementation brief"
-                rows={3}
-                className="mt-2 w-full resize-none rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
-                disabled={busy}
-              />
-              <button
-                onClick={handleCreateStep}
-                disabled={!stepTitle.trim() || busy}
-                className="mt-2 w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {busy ? "Saving..." : "Add step"}
-              </button>
-            </section>
+            {isLoading ? (
+              <p className="text-sm text-th-muted">Loading plan...</p>
+            ) : !plan ? (
+              <div className="rounded-lg border border-dashed border-th p-4">
+                <Flag size={18} className="text-th-muted mb-2" />
+                <p className="text-sm font-medium text-th-secondary">Create a structured plan</p>
+                <p className="mt-1 text-xs text-th-muted">
+                  The plan will hold executable steps, gates, task links, and progress.
+                </p>
+                <button
+                  onClick={handleGeneratePlan}
+                  disabled={busy}
+                  className="mt-3 w-full rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-60"
+                >
+                  {busy ? "Generating..." : "Generate draft plan"}
+                </button>
+              </div>
+            ) : (
+              <>
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold text-th-primary flex-1 min-w-0 truncate">
+                      {plan.title}
+                    </h3>
+                    <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
+                      {plan.status}
+                    </span>
+                  </div>
+                  {activeStep?.linked_work_item_id ? (
+                    <button
+                      onClick={() => onOpenConversation(activeStep.linked_work_item_id!)}
+                      className="w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+                    >
+                      Open active task
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleExecuteNext}
+                      disabled={busy || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <PlayCircle size={16} />
+                      {busy ? "Starting..." : "Execute next step"}
+                    </button>
+                  )}
+                </section>
+
+                {plan.summary_md && (
+                  <div className="rounded-lg border border-th bg-th-main p-3">
+                    <p className="text-xs text-th-muted leading-relaxed whitespace-pre-wrap">{plan.summary_md}</p>
+                  </div>
+                )}
+
+                <section>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider">Steps</p>
+                    {plan.status === "draft" && steps.length > 0 && (
+                      <button
+                        onClick={handleMarkReady}
+                        disabled={busy}
+                        className="text-xs font-medium text-th-secondary hover:text-th-primary disabled:opacity-60"
+                      >
+                        Mark ready
+                      </button>
+                    )}
+                  </div>
+
+                  {steps.length === 0 ? (
+                    <p className="text-sm text-th-muted">No steps yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {steps.map((step) => (
+                        <PlanStepCard
+                          key={step.id}
+                          step={step}
+                          busy={busy}
+                          onStartGates={handleStartGates}
+                          onAdvanceGate={handleAdvanceGate}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-lg border border-th bg-th-main p-3">
+                  <p className="text-sm font-medium text-th-secondary mb-2">Add step</p>
+                  <input
+                    value={stepTitle}
+                    onChange={(event) => setStepTitle(event.target.value)}
+                    placeholder="Step title"
+                    className="w-full rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
+                    disabled={busy}
+                  />
+                  <textarea
+                    value={stepObjective}
+                    onChange={(event) => setStepObjective(event.target.value)}
+                    placeholder="Objective or implementation brief"
+                    rows={3}
+                    className="mt-2 w-full resize-none rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
+                    disabled={busy}
+                  />
+                  <button
+                    onClick={handleCreateStep}
+                    disabled={!stepTitle.trim() || busy}
+                    className="mt-2 w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {busy ? "Saving..." : "Add step"}
+                  </button>
+                </section>
+              </>
+            )}
           </>
         )}
       </div>

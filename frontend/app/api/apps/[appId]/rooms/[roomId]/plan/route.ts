@@ -15,12 +15,18 @@ function getRoomForApp(appId: number, roomId: number) {
 }
 
 function serializePlan(roomId: number) {
+  const room = dal.getRoom(roomId);
   const plan = dal.getPlansByRoom(roomId)[0] || null;
   const steps = plan ? dal.getPlanSteps(plan.id).map((step) => ({
     ...step,
     events: dal.getPlanStepEvents(step.id),
   })) : [];
-  return { plan, steps };
+  return {
+    plan,
+    steps,
+    planning_context_md: room?.planning_context_md || "",
+    planning_context_updated_at: room?.planning_context_updated_at || null,
+  };
 }
 
 export async function GET(
@@ -58,14 +64,14 @@ export async function POST(
       return NextResponse.json({ detail: "title is required" }, { status: 400 });
     }
 
-    const plan = dal.createPlan({
+    dal.createPlan({
       room_id: result.room!.id,
       title,
       summary_md: typeof body.summary_md === "string" ? body.summary_md : "",
       status: body.status || "draft",
     });
 
-    return NextResponse.json({ plan, steps: [] }, { status: 201 });
+    return NextResponse.json(serializePlan(result.room!.id), { status: 201 });
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });

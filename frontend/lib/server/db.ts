@@ -292,6 +292,8 @@ function initDb(db: Database.Database): void {
       app_id INTEGER NOT NULL,
       title TEXT NOT NULL,
       purpose TEXT DEFAULT '',
+      planning_context_md TEXT NOT NULL DEFAULT '',
+      planning_context_updated_at TEXT DEFAULT NULL,
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'archived')),
       created_by INTEGER DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now')),
@@ -402,6 +404,9 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "conversations", "origin_type", "TEXT NOT NULL DEFAULT 'user'");
   addColumnIfMissing(db, "conversations", "origin_automation_key", "TEXT DEFAULT NULL");
   addColumnIfMissing(db, "conversations", "origin_run_id", "INTEGER DEFAULT NULL");
+
+  addColumnIfMissing(db, "home_rooms", "planning_context_md", "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(db, "home_rooms", "planning_context_updated_at", "TEXT DEFAULT NULL");
 
   // ── Clean stale agent sessions ────────────────────────────────
   db.exec("UPDATE agent_sessions SET status = 'idle' WHERE status = 'running'");
