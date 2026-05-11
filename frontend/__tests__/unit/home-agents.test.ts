@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_HOME_AGENTS, getHomeAgent } from "@/lib/home/agents";
 
-describe("default Home agents", () => {
+describe("default room agents", () => {
   it("ships the fixed V1 agent team", () => {
     expect(DEFAULT_HOME_AGENTS.map((agent) => agent.key)).toEqual([
       "coordinator",

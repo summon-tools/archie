@@ -4,9 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
-import { App, Task, GitStatus } from "@/lib/types";
+import { App, Task, GitStatus, HomeRoom } from "@/lib/types";
 import { fetcher } from "@/lib/swr";
-import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, BookOpen, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, House } from "@phosphor-icons/react";
+import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, BookOpen, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, UsersThree, ChatsCircle } from "@phosphor-icons/react";
 import BackgroundJobsBar from "./BackgroundJobsBar";
 
 interface ChatSidebarProps {
@@ -14,7 +14,13 @@ interface ChatSidebarProps {
   app: App | null;
   apps?: App[];
   workItems: Task[];
+  rooms: HomeRoom[];
+  roomsLoading?: boolean;
+  selectedRoomId: number | null;
   selectedItemId: number | null;
+  activeWorkMode: "rooms" | "tasks";
+  onSelectRoom: (roomId: number) => void;
+  onNewRoom: () => void;
   onSelectItem: (itemId: number) => void;
   onNewItem: () => void;
   onMarkDone?: (itemId: number) => void;
@@ -60,7 +66,13 @@ export default function ChatSidebar({
   app,
   apps,
   workItems,
+  rooms,
+  roomsLoading,
+  selectedRoomId,
   selectedItemId,
+  activeWorkMode,
+  onSelectRoom,
+  onNewRoom,
   onSelectItem,
   onNewItem,
   onMarkDone,
@@ -97,6 +109,11 @@ export default function ChatSidebar({
   }, [showProjectPicker]);
 
   const appInitial = app?.name?.charAt(0).toUpperCase() || "?";
+  const openRooms = () => {
+    if (selectedRoomId) onSelectRoom(selectedRoomId);
+    else if (rooms[0]) onSelectRoom(rooms[0].id);
+    else onViewChange?.("room");
+  };
 
   // Collapsed sidebar
   if (collapsed) {
@@ -119,19 +136,27 @@ export default function ChatSidebar({
           )}
         </div>
 
-        {/* Work group: New conversation + conversations */}
+        {/* Work group */}
         <div className="flex flex-col items-center py-1.5 gap-1">
           <button
-            onClick={() => onViewChange?.("home")}
+            onClick={openRooms}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              activeView === "home"
+              activeWorkMode === "rooms"
                 ? "bg-btn-secondary text-btn-secondary"
                 : "text-th-muted hover:text-th-primary hover:bg-th-muted"
             }`}
-            title="Home"
-            aria-label="Home"
+            title="Rooms"
+            aria-label="Rooms"
           >
-            <House size={16} weight="bold" />
+            <UsersThree size={16} weight="bold" />
+          </button>
+          <button
+            onClick={onNewRoom}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-th-muted hover:text-th-primary hover:bg-th-muted"
+            title="New Room"
+            aria-label="New Room"
+          >
+            <Plus size={16} weight="bold" />
           </button>
           <button
             onClick={onNewItem}
@@ -140,28 +165,42 @@ export default function ChatSidebar({
                 ? "bg-btn-secondary text-btn-secondary"
                 : "text-th-muted hover:text-th-primary hover:bg-th-muted"
             }`}
-            title="New Conversation"
-            aria-label="New Conversation"
+            title="New Task"
+            aria-label="New Task"
           >
-            <Plus size={16} weight="bold" />
+            <ChatsCircle size={16} weight="bold" />
           </button>
         </div>
 
-        {/* Conversation dots */}
+        {/* Work dots */}
         <div className="flex-1 overflow-y-auto py-1">
-          {workItems.filter((item) => item.status !== "done").map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onSelectItem(item.id)}
-              className={`w-full flex items-center justify-center py-2 transition-colors ${
-                item.id === selectedItemId ? "bg-th-muted" : "hover:bg-th-subtle"
-              }`}
-              title={item.title}
-              aria-label={item.title}
-            >
-              <span className="w-2.5 h-2.5 rounded-full bg-th-muted" />
-            </button>
-          ))}
+          {activeWorkMode === "rooms"
+            ? rooms.map((room) => (
+                <button
+                  key={room.id}
+                  onClick={() => onSelectRoom(room.id)}
+                  className={`w-full flex items-center justify-center py-2 transition-colors ${
+                    room.id === selectedRoomId ? "bg-th-muted" : "hover:bg-th-subtle"
+                  }`}
+                  title={room.title}
+                  aria-label={room.title}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-th-muted" />
+                </button>
+              ))
+            : workItems.filter((item) => item.status !== "done").map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => onSelectItem(item.id)}
+                  className={`w-full flex items-center justify-center py-2 transition-colors ${
+                    item.id === selectedItemId ? "bg-th-muted" : "hover:bg-th-subtle"
+                  }`}
+                  title={item.title}
+                  aria-label={item.title}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-th-muted" />
+                </button>
+              ))}
         </div>
 
         {/* Spacer between Work and Project Context groups */}
@@ -321,43 +360,71 @@ export default function ChatSidebar({
 
       {/* ── WORK ───────────────────────────────────────────── */}
       <SectionLabel label="Work" />
-      <div className="px-3 pb-1 space-y-0.5">
-        <button
-          onClick={() => onViewChange?.("home")}
-          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
-            activeView === "home"
-              ? "text-th-primary font-medium"
-              : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
-          }`}
-          title="Project home"
-        >
-          <House size={15} weight="bold" className="text-th-muted" />
-          Home
-        </button>
-        <button
-          onClick={onNewItem}
-          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
-            isNewItemActive
-              ? "text-th-primary font-medium"
-              : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
-          }`}
-          title="New conversation (⌘K)"
-        >
-          <Plus size={15} weight="bold" className="text-th-muted" />
-          New conversation
-          <span className="ml-auto text-meta text-th-dimmed font-mono">⌘K</span>
-        </button>
+      <div className="px-3 pb-2">
+        <div className="grid grid-cols-2 gap-1 rounded-lg bg-th-muted p-1">
+          <button
+            onClick={openRooms}
+            className={`px-2 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeWorkMode === "rooms" ? "bg-th-elevated text-th-primary shadow-sm" : "text-th-muted hover:text-th-primary"
+            }`}
+          >
+            Rooms
+          </button>
+          <button
+            onClick={() => onViewChange?.(null)}
+            className={`px-2 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeWorkMode === "tasks" ? "bg-th-elevated text-th-primary shadow-sm" : "text-th-muted hover:text-th-primary"
+            }`}
+          >
+            Tasks
+          </button>
+        </div>
       </div>
 
-      {/* Conversation list (scrollable) */}
-      <ConversationList
-        workItems={workItems}
-        selectedItemId={selectedItemId}
-        activeView={activeView}
-        onSelectItem={onSelectItem}
-        onViewChange={onViewChange}
-        onMarkDone={onMarkDone}
-      />
+      <div className="px-3 pb-1 space-y-0.5">
+        {activeWorkMode === "rooms" ? (
+          <button
+            onClick={onNewRoom}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+            title="New room"
+          >
+            <Plus size={15} weight="bold" className="text-th-muted" />
+            New room
+          </button>
+        ) : (
+          <button
+            onClick={onNewItem}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
+              isNewItemActive
+                ? "text-th-primary font-medium"
+                : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+            }`}
+            title="New task (⌘K)"
+          >
+            <Plus size={15} weight="bold" className="text-th-muted" />
+            New task
+            <span className="ml-auto text-meta text-th-dimmed font-mono">⌘K</span>
+          </button>
+        )}
+      </div>
+
+      {activeWorkMode === "rooms" ? (
+        <RoomList
+          rooms={rooms}
+          selectedRoomId={selectedRoomId}
+          loading={roomsLoading}
+          onSelectRoom={onSelectRoom}
+        />
+      ) : (
+        <ConversationList
+          workItems={workItems}
+          selectedItemId={selectedItemId}
+          activeView={activeView}
+          onSelectItem={onSelectItem}
+          onViewChange={onViewChange}
+          onMarkDone={onMarkDone}
+        />
+      )}
 
       {/* ── PROJECT CONTEXT ────────────────────────────────── */}
       <div className="border-t border-th" />
@@ -479,7 +546,7 @@ function ConversationList({
     <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
       {active.length === 0 && archived.length === 0 ? (
         <div className="p-4 text-center text-sm text-th-muted">
-          No conversations yet
+          No tasks yet
         </div>
       ) : (
         <>
@@ -532,6 +599,55 @@ function ConversationList({
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function RoomList({
+  rooms,
+  selectedRoomId,
+  loading,
+  onSelectRoom,
+}: {
+  rooms: HomeRoom[];
+  selectedRoomId: number | null;
+  loading?: boolean;
+  onSelectRoom: (roomId: number) => void;
+}) {
+  return (
+    <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+      {loading ? (
+        <div className="p-4 text-center text-sm text-th-muted">Loading rooms...</div>
+      ) : rooms.length === 0 ? (
+        <div className="p-4 text-center text-sm text-th-muted">
+          No rooms yet
+        </div>
+      ) : (
+        <div>
+          {rooms.map((room) => (
+            <button
+              key={room.id}
+              onClick={() => onSelectRoom(room.id)}
+              className={`group w-full text-left px-4 py-2 border-l-2 transition-colors duration-150 ${
+                room.id === selectedRoomId
+                  ? "bg-th-muted border-l-th-strong"
+                  : "border-l-transparent hover:bg-th-subtle"
+              }`}
+              title={room.title}
+            >
+              <div className="flex items-center gap-2 pl-2">
+                <UsersThree size={15} className="text-th-muted flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-th-primary truncate">{room.title}</p>
+                  {room.purpose && (
+                    <p className="mt-0.5 text-xs text-th-muted truncate">{room.purpose}</p>
+                  )}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

@@ -69,6 +69,6 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
 
 export function getHomeAgent(key: HomeAgentKey): HomeAgentDefinition {
   const agent = DEFAULT_HOME_AGENTS.find((candidate) => candidate.key === key);
-  if (!agent) throw new Error(`Unknown Home agent: ${key}`);
+  if (!agent) throw new Error(`Unknown room agent: ${key}`);
   return agent;
 }

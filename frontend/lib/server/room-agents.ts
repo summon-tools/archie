@@ -17,7 +17,7 @@ function buildCoordinatorPrompt({
   const recentMessages = dal.getRoomMessages(room.id, 12);
 
   return [
-    "You are the Coordinator agent inside Archie Home, a planning room for software work.",
+    "You are the Coordinator agent inside an Archie planning room for software work.",
     "",
     "Your job:",
     "- Answer the user's planning questions directly.",

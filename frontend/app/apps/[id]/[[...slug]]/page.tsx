@@ -3,13 +3,13 @@
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SpinnerGap, WarningCircle } from "@phosphor-icons/react";
-import { App, Task } from "@/lib/types";
-import { getApp, getApps, getWorkItem, getWorkItems, startApp, stopApp, restartApp, archiveConversation } from "@/lib/api";
+import { App, HomeRoom, Task } from "@/lib/types";
+import { getApp, getApps, getRooms, createRoom, getWorkItem, getWorkItems, startApp, stopApp, restartApp, archiveConversation } from "@/lib/api";
 import ChatSidebar from "@/components/ChatSidebar";
 import ConversationView from "@/components/ConversationView";
 import AppSettingsPanel from "@/components/AppSettingsPanel";
 import NewChatView from "@/components/NewChatView";
-import HomePanel from "@/components/HomePanel";
+import RoomWorkspace from "@/components/RoomWorkspace";
 import SplitPanelLayout from "@/components/SplitPanelLayout";
 import PreviewPanel from "@/components/PreviewPanel";
 import SpecEditor from "@/components/SpecEditor";
@@ -34,7 +34,8 @@ export default function AppPage() {
   // Parse workItemId from optional catch-all slug: /apps/[id]/conversation/[itemId]
   const slug = params.slug as string[] | undefined;
   const itemIdFromUrl = slug && slug[0] === "conversation" && slug[1] ? Number(slug[1]) : null;
-  const isHomePage = slug?.[0] === "home";
+  const roomIdFromUrl = slug && slug[0] === "rooms" && slug[1] ? Number(slug[1]) : null;
+  const isRoomsPage = slug?.[0] === "rooms" || slug?.[0] === "home";
   const isSettingsPage = slug?.[0] === "settings";
   const isSpecPage = slug?.[0] === "spec";
   const isCodebaseIndexPage = slug?.[0] === "codebase-index" || slug?.[0] === "knowledge";
@@ -43,15 +44,17 @@ export default function AppPage() {
   const [app, setApp] = useState<App | null>(null);
   const [allApps, setAllApps] = useState<App[]>([]);
   const [workItems, setWorkItems] = useState<Task[]>([]);
+  const [rooms, setRooms] = useState<HomeRoom[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(itemIdFromUrl);
+  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(roomIdFromUrl);
   const [selectedItem, setSelectedItem] = useState<Task | null>(null);
-  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isHomePage && !isSettingsPage && !isSpecPage && !isCodebaseIndexPage && !isSkillsPage && !isNotificationsPage);
+  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isRoomsPage && !isSettingsPage && !isSpecPage && !isCodebaseIndexPage && !isSkillsPage && !isNotificationsPage);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Active view: null = conversation/new, "settings" = app settings, "profile" = profile
-  const [activeView, setActiveView] = useState<string | null>(isHomePage ? "home" : isSettingsPage ? "settings" : isSpecPage ? "spec" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isNotificationsPage ? "notifications" : null);
+  const [activeView, setActiveView] = useState<string | null>(isRoomsPage ? "room" : isSettingsPage ? "settings" : isSpecPage ? "spec" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isNotificationsPage ? "notifications" : null);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
 
@@ -84,14 +87,16 @@ export default function AppPage() {
   // Load app, all apps, and work items
   const loadData = useCallback(async () => {
     try {
-      const [appData, itemsData, appsData] = await Promise.all([
+      const [appData, itemsData, appsData, roomsData] = await Promise.all([
         getApp(appId),
         getWorkItems(appId),
         getApps(),
+        getRooms(appId),
       ]);
       setApp(appData);
       setWorkItems(itemsData);
       setAllApps(appsData);
+      setRooms(roomsData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load app — try refreshing the page");
@@ -108,10 +113,21 @@ export default function AppPage() {
   useEffect(() => {
     if (itemIdFromUrl && itemIdFromUrl !== selectedItemId) {
       setSelectedItemId(itemIdFromUrl);
+      setSelectedRoomId(null);
       setShowNewItem(false);
       setActiveView(null);
     }
   }, [itemIdFromUrl]);
+
+  // Sync room selection from URL
+  useEffect(() => {
+    if (roomIdFromUrl && roomIdFromUrl !== selectedRoomId) {
+      setSelectedRoomId(roomIdFromUrl);
+      setSelectedItemId(null);
+      setShowNewItem(false);
+      setActiveView("room");
+    }
+  }, [roomIdFromUrl]);
 
   // Load selected item details
   useEffect(() => {
@@ -131,14 +147,38 @@ export default function AppPage() {
   // Handle item selection
   const handleSelectItem = (itemId: number) => {
     setSelectedItemId(itemId);
+    setSelectedRoomId(null);
     setShowNewItem(false);
     setActiveView(null);
     window.history.replaceState(null, "", `/apps/${appId}/conversation/${itemId}`);
   };
 
+  const handleSelectRoom = useCallback((roomId: number) => {
+    setSelectedRoomId(roomId);
+    setSelectedItemId(null);
+    setSelectedItem(null);
+    setShowNewItem(false);
+    setActiveView("room");
+    window.history.replaceState(null, "", `/apps/${appId}/rooms/${roomId}`);
+  }, [appId]);
+
+  const handleNewRoom = useCallback(async () => {
+    try {
+      const room = await createRoom(appId, {
+        title: `Planning Room ${rooms.length + 1}`,
+        purpose: "Plan and coordinate project work before creating implementation tasks.",
+      });
+      setRooms((prev) => [room, ...prev]);
+      handleSelectRoom(room.id);
+    } catch (err) {
+      console.error("Failed to create room:", err);
+    }
+  }, [appId, rooms.length, handleSelectRoom]);
+
   // Handle new item
   const handleNewItem = () => {
     setSelectedItemId(null);
+    setSelectedRoomId(null);
     setSelectedItem(null);
     setShowNewItem(true);
     setActiveView(null);
@@ -148,8 +188,17 @@ export default function AppPage() {
   // Handle view change from sidebar (settings, profile)
   const handleViewChange = (view: string | null) => {
     setActiveView(view);
-    if (view === "home") {
-      window.history.replaceState(null, "", `/apps/${appId}/home`);
+    if (view === "room") {
+      setSelectedItemId(null);
+      setSelectedItem(null);
+      setShowNewItem(false);
+      if (selectedRoomId) {
+        window.history.replaceState(null, "", `/apps/${appId}/rooms/${selectedRoomId}`);
+      } else if (rooms[0]) {
+        handleSelectRoom(rooms[0].id);
+      } else {
+        window.history.replaceState(null, "", `/apps/${appId}/rooms`);
+      }
     } else if (view === "settings") {
       window.history.replaceState(null, "", `/apps/${appId}/settings`);
     } else if (view === "spec") {
@@ -224,6 +273,7 @@ export default function AppPage() {
   // Handle item created
   const handleItemCreated = (item: Task) => {
     setWorkItems((prev) => [item, ...prev]);
+    setSelectedRoomId(null);
     setShowNewItem(false);
     setActiveView(null);
     setPrefillMessage(null);
@@ -247,12 +297,22 @@ export default function AppPage() {
   // Handle item deleted
   const handleItemDeleted = () => {
     setSelectedItemId(null);
+    setSelectedRoomId(null);
     setSelectedItem(null);
     setShowNewItem(true);
     setActiveView(null);
     loadData();
     window.history.replaceState(null, "", `/apps/${appId}`);
   };
+
+  const selectedRoom = selectedRoomId
+    ? rooms.find((room) => room.id === selectedRoomId) || null
+    : null;
+
+  useEffect(() => {
+    if (loading || activeView !== "room" || selectedRoomId || rooms.length === 0) return;
+    handleSelectRoom(rooms[0].id);
+  }, [activeView, handleSelectRoom, loading, rooms, selectedRoomId]);
 
   // Handle marking a work item as done from the sidebar
   const handleSidebarMarkDone = useCallback(async (itemId: number) => {
@@ -349,11 +409,11 @@ export default function AppPage() {
       );
     }
 
-    if (activeView === "home") {
+    if (activeView === "room") {
       return (
-        <HomePanel
+        <RoomWorkspace
           appId={appId}
-          workItems={workItems}
+          room={selectedRoom}
           onOpenConversation={handleSelectItem}
           onWorkItemCreated={handleItemCreated}
         />
@@ -443,7 +503,13 @@ export default function AppPage() {
         app={app}
         apps={allApps}
         workItems={workItems}
+        rooms={rooms}
+        roomsLoading={loading}
+        selectedRoomId={selectedRoomId}
         selectedItemId={selectedItemId}
+        activeWorkMode={activeView === "room" ? "rooms" : "tasks"}
+        onSelectRoom={handleSelectRoom}
+        onNewRoom={handleNewRoom}
         onSelectItem={handleSelectItem}
         onNewItem={handleNewItem}
         onMarkDone={handleSidebarMarkDone}

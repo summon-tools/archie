@@ -4,27 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowSquareOut, CaretDown, CaretRight, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
-import { advancePlanStepGate, createPlanStep, createRoom, createRoomPlan, executeNextPlanStep, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
+import { CaretDown, CaretRight, ChatsCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Sparkle } from "@phosphor-icons/react";
+import { advancePlanStepGate, createPlanStep, createRoomPlan, executeNextPlanStep, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
 
-interface HomePanelProps {
+interface RoomWorkspaceProps {
   appId: number;
-  workItems: Task[];
+  room: HomeRoom | null;
   onOpenConversation: (itemId: number) => void;
   onWorkItemCreated: (item: Task) => void;
 }
 
-export default function HomePanel({ appId, workItems, onOpenConversation, onWorkItemCreated }: HomePanelProps) {
-  const { data, mutate, isLoading } = useSWR<{ rooms: HomeRoom[] }>(`/api/apps/${appId}/rooms`, fetcher);
-  const rooms = data?.rooms || [];
-  const [activeTab, setActiveTab] = useState<"rooms" | "conversations">("rooms");
-  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated }: RoomWorkspaceProps) {
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
@@ -32,49 +26,26 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
   const [awaitingReplyAfterId, setAwaitingReplyAfterId] = useState<number | null>(null);
   const [awaitingReplyStartedAt, setAwaitingReplyStartedAt] = useState<number | null>(null);
 
-  const selectedRoom = useMemo(() => {
-    return rooms.find((room) => room.id === selectedRoomId) || rooms[0] || null;
-  }, [rooms, selectedRoomId]);
   const { data: messagesData, mutate: mutateMessages } = useSWR<{ messages: RoomMessage[] }>(
-    selectedRoom ? `/api/apps/${appId}/rooms/${selectedRoom.id}/messages` : null,
+    room ? `/api/apps/${appId}/rooms/${room.id}/messages` : null,
     fetcher,
     { refreshInterval: awaitingReplyAfterId ? 1500 : 0 },
   );
   const messages = messagesData?.messages || [];
   const visibleMessages = useMemo(() => {
     const persistedBodies = new Set(messages.map((message) => `${message.role}:${message.body_md}`));
-    const pending = pendingMessages.filter((message) => !persistedBodies.has(`${message.role}:${message.body_md}`));
+    const pending = pendingMessages.filter((message) => (
+      message.room_id === room?.id && !persistedBodies.has(`${message.role}:${message.body_md}`)
+    ));
     return [...messages, ...pending];
-  }, [messages, pendingMessages]);
-
-  const activeWorkItems = workItems.filter((item) => item.status !== "done");
-  const completedWorkItems = workItems.filter((item) => item.status === "done");
-
-  const handleCreateRoom = async () => {
-    if (creating) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      const room = await createRoom(appId, {
-        title: `Planning Room ${rooms.length + 1}`,
-        purpose: "Plan and coordinate project work before creating implementation tasks.",
-      });
-      setSelectedRoomId(room.id);
-      await mutate();
-      setActiveTab("rooms");
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create room");
-    } finally {
-      setCreating(false);
-    }
-  };
+  }, [messages, pendingMessages, room?.id]);
 
   const handleSendRoomMessage = async () => {
-    if (!selectedRoom || !messageDraft.trim() || sendingMessage) return;
+    if (!room || !messageDraft.trim() || sendingMessage) return;
     const content = messageDraft.trim();
     const optimisticMessage: RoomMessage = {
       id: -Date.now(),
-      room_id: selectedRoom.id,
+      room_id: room.id,
       author_user_id: null,
       agent_key: null,
       role: "user",
@@ -88,12 +59,11 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
     setMessageDraft("");
     setPendingMessages((prev) => [...prev, optimisticMessage]);
     try {
-      const message = await sendRoomMessage(appId, selectedRoom.id, content);
+      const message = await sendRoomMessage(appId, room.id, content);
       setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
       setAwaitingReplyAfterId(message.id);
       setAwaitingReplyStartedAt(Date.now());
       await mutateMessages();
-      await mutate();
     } catch (err) {
       setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
       setMessageDraft(content);
@@ -121,105 +91,10 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
 
   return (
     <div className="flex-1 min-h-0 bg-th-main flex">
-      <aside className="w-72 border-r border-th bg-th-panel flex flex-col min-h-0">
-        <div className="p-4 border-b border-th">
-          <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-2">Home</p>
-          <h1 className="text-xl font-semibold text-th-primary tracking-tight">Project control</h1>
-          <p className="mt-1 text-sm text-th-muted">
-            Plan work in rooms, then launch scoped implementation conversations.
-          </p>
-        </div>
-
-        <div className="p-3 border-b border-th">
-          <div className="grid grid-cols-2 gap-1 rounded-lg bg-th-muted p-1">
-            <button
-              onClick={() => setActiveTab("rooms")}
-              className={`px-2 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                activeTab === "rooms" ? "bg-th-elevated text-th-primary shadow-sm" : "text-th-muted hover:text-th-primary"
-              }`}
-            >
-              Rooms
-            </button>
-            <button
-              onClick={() => setActiveTab("conversations")}
-              className={`px-2 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                activeTab === "conversations" ? "bg-th-elevated text-th-primary shadow-sm" : "text-th-muted hover:text-th-primary"
-              }`}
-            >
-              Tasks
-            </button>
-          </div>
-        </div>
-
-        {activeTab === "rooms" ? (
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <div className="p-3">
-              <button
-                onClick={handleCreateRoom}
-                disabled={creating}
-                className="w-full flex items-center justify-center gap-2 rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-60 transition-colors"
-              >
-                {creating ? <CircleNotch size={15} className="animate-spin" /> : <Plus size={15} weight="bold" />}
-                New room
-              </button>
-              {createError && <p className="mt-2 text-xs text-st-red">{createError}</p>}
-            </div>
-
-            {isLoading ? (
-              <div className="px-4 py-6 text-sm text-th-muted">Loading rooms...</div>
-            ) : rooms.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-th-muted">
-                No rooms yet. Create one to plan larger work before implementation.
-              </div>
-            ) : (
-              <div className="pb-3">
-                {rooms.map((room) => {
-                  const isSelected = selectedRoom?.id === room.id;
-                  return (
-                    <button
-                      key={room.id}
-                      onClick={() => setSelectedRoomId(room.id)}
-                      className={`w-full text-left px-4 py-3 border-l-2 transition-colors ${
-                        isSelected
-                          ? "border-l-th-strong bg-th-muted"
-                          : "border-l-transparent hover:bg-th-subtle"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <UsersThree size={16} className="text-th-muted flex-shrink-0" />
-                        <p className="text-sm font-medium text-th-primary truncate">{room.title}</p>
-                      </div>
-                      {room.purpose && (
-                        <p className="mt-1 text-xs text-th-muted line-clamp-2 pl-6">{room.purpose}</p>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <ConversationGroup
-              label="Active"
-              items={activeWorkItems}
-              emptyText="No active task conversations."
-              onOpenConversation={onOpenConversation}
-            />
-            <ConversationGroup
-              label="Completed"
-              items={completedWorkItems}
-              emptyText="No completed task conversations."
-              onOpenConversation={onOpenConversation}
-            />
-          </div>
-        )}
-      </aside>
-
       <main className="flex-1 min-w-0 flex flex-col">
-        {selectedRoom ? (
+        {room ? (
           <RoomShell
-            room={selectedRoom}
+            room={room}
             messages={visibleMessages}
             draft={messageDraft}
             setDraft={setMessageDraft}
@@ -246,7 +121,7 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
       <aside className="w-80 border-l border-th bg-th-panel flex flex-col min-h-0">
         <PlanPanel
           appId={appId}
-          room={selectedRoom}
+          room={room}
           onOpenConversation={onOpenConversation}
           onWorkItemCreated={onWorkItemCreated}
         />
@@ -429,41 +304,6 @@ function formatAgentLabel(agentKey: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function ConversationGroup({
-  label,
-  items,
-  emptyText,
-  onOpenConversation,
-}: {
-  label: string;
-  items: Task[];
-  emptyText: string;
-  onOpenConversation: (itemId: number) => void;
-}) {
-  return (
-    <section className="py-2">
-      <p className="px-4 py-2 text-meta font-semibold text-th-dimmed uppercase tracking-wider">{label}</p>
-      {items.length === 0 ? (
-        <p className="px-4 py-2 text-xs text-th-muted">{emptyText}</p>
-      ) : (
-        <div>
-          {items.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onOpenConversation(item.id)}
-              className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-th-subtle transition-colors"
-            >
-              {item.status === "done" ? <CheckCircle size={15} className="text-th-muted" /> : <ChatsCircle size={15} className="text-th-muted" />}
-              <span className="text-sm text-th-primary truncate">{item.title}</span>
-              <ArrowSquareOut size={13} className="ml-auto text-th-dimmed flex-shrink-0" />
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
-  );
 }
 
 function PlanPanel({
