@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
-import { createRoom } from "@/lib/api";
+import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, PaperPlaneTilt, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
+import { createRoom, sendRoomMessage } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
-import type { HomeRoom, Task } from "@/lib/types";
+import type { HomeRoom, RoomMessage, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 
 interface HomePanelProps {
@@ -21,10 +21,18 @@ export default function HomePanel({ appId, workItems, onOpenConversation }: Home
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
 
   const selectedRoom = useMemo(() => {
     return rooms.find((room) => room.id === selectedRoomId) || rooms[0] || null;
   }, [rooms, selectedRoomId]);
+  const { data: messagesData, mutate: mutateMessages } = useSWR<{ messages: RoomMessage[] }>(
+    selectedRoom ? `/api/apps/${appId}/rooms/${selectedRoom.id}/messages` : null,
+    fetcher,
+  );
+  const messages = messagesData?.messages || [];
 
   const activeWorkItems = workItems.filter((item) => item.status !== "done");
   const completedWorkItems = workItems.filter((item) => item.status === "done");
@@ -45,6 +53,24 @@ export default function HomePanel({ appId, workItems, onOpenConversation }: Home
       setCreateError(err instanceof Error ? err.message : "Failed to create room");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleSendRoomMessage = async () => {
+    if (!selectedRoom || !messageDraft.trim() || sendingMessage) return;
+    const content = messageDraft.trim();
+    setSendingMessage(true);
+    setMessageError(null);
+    setMessageDraft("");
+    try {
+      await sendRoomMessage(appId, selectedRoom.id, content);
+      await mutateMessages();
+      await mutate();
+    } catch (err) {
+      setMessageDraft(content);
+      setMessageError(err instanceof Error ? err.message : "Failed to send message");
+    } finally {
+      setSendingMessage(false);
     }
   };
 
@@ -147,7 +173,15 @@ export default function HomePanel({ appId, workItems, onOpenConversation }: Home
 
       <main className="flex-1 min-w-0 flex flex-col">
         {selectedRoom ? (
-          <RoomShell room={selectedRoom} />
+          <RoomShell
+            room={selectedRoom}
+            messages={messages}
+            draft={messageDraft}
+            setDraft={setMessageDraft}
+            sending={sendingMessage}
+            error={messageError}
+            onSend={handleSendRoomMessage}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center p-8">
             <div className="max-w-sm text-center">
@@ -181,7 +215,23 @@ export default function HomePanel({ appId, workItems, onOpenConversation }: Home
   );
 }
 
-function RoomShell({ room }: { room: HomeRoom }) {
+function RoomShell({
+  room,
+  messages,
+  draft,
+  setDraft,
+  sending,
+  error,
+  onSend,
+}: {
+  room: HomeRoom;
+  messages: RoomMessage[];
+  draft: string;
+  setDraft: (value: string) => void;
+  sending: boolean;
+  error: string | null;
+  onSend: () => void;
+}) {
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <header className="px-6 py-4 border-b border-th">
@@ -198,24 +248,106 @@ function RoomShell({ room }: { room: HomeRoom }) {
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-3xl">
-          <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-3">Default agent team</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {DEFAULT_HOME_AGENTS.map((agent) => (
-              <div key={agent.key} className="rounded-lg border border-th bg-th-panel p-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="w-2 h-2 rounded-full bg-th-strong" />
-                  <h3 className="text-sm font-semibold text-th-primary">{agent.name}</h3>
-                  <span className="ml-auto text-meta text-th-dimmed">{agent.defaultModel}</span>
-                </div>
-                <p className="text-xs text-th-muted leading-relaxed">{agent.role}</p>
+        <div className="max-w-3xl mx-auto space-y-6">
+          {messages.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-th-muted flex items-center justify-center">
+                <ChatsCircle size={22} className="text-th-muted" />
               </div>
-            ))}
+              <h3 className="text-base font-semibold text-th-primary">Start the room discussion</h3>
+              <p className="mt-2 text-sm text-th-muted">
+                Ask questions, explore risks, and shape the plan before launching implementation tasks.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messages.map((message) => (
+                <RoomMessageBubble key={message.id} message={message} />
+              ))}
+            </div>
+          )}
+
+          <div className="pt-2">
+            <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-3">Default agent team</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {DEFAULT_HOME_AGENTS.map((agent) => (
+                <div key={agent.key} className="rounded-lg border border-th bg-th-panel p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-th-strong" />
+                    <h3 className="text-sm font-semibold text-th-primary">{agent.name}</h3>
+                    <span className="ml-auto text-meta text-th-dimmed">{agent.defaultModel}</span>
+                  </div>
+                  <p className="text-xs text-th-muted leading-relaxed">{agent.role}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-th p-4">
+        <div className="max-w-3xl mx-auto">
+          {error && <p className="mb-2 text-sm text-st-red">{error}</p>}
+          <div className="flex items-end gap-2 rounded-xl border border-th bg-th-panel p-2">
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  onSend();
+                }
+              }}
+              placeholder="Discuss the plan..."
+              rows={2}
+              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none"
+              disabled={sending}
+            />
+            <button
+              onClick={onSend}
+              disabled={!draft.trim() || sending}
+              className="h-9 w-9 rounded-lg bg-btn-primary text-btn-primary flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Send message"
+            >
+              {sending ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneTilt size={16} weight="bold" />}
+            </button>
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function RoomMessageBubble({ message }: { message: RoomMessage }) {
+  const isUser = message.role === "user";
+  const label = isUser ? "You" : message.agent_key ? formatAgentLabel(message.agent_key) : "Archie";
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div className={`max-w-[78%] rounded-xl px-3 py-2 ${
+        isUser ? "bg-btn-primary text-btn-primary" : "bg-th-panel border border-th text-th-primary"
+      }`}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`text-meta font-semibold ${isUser ? "text-btn-primary/80" : "text-th-dimmed"}`}>
+            {label}
+          </span>
+          {message.kind !== "message" && (
+            <span className={`text-meta ${isUser ? "text-btn-primary/70" : "text-th-dimmed"}`}>
+              {message.kind.replace("_", " ")}
+            </span>
+          )}
+        </div>
+        <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p>
+      </div>
+    </div>
+  );
+}
+
+function formatAgentLabel(agentKey: string): string {
+  return agentKey
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function ConversationGroup({
