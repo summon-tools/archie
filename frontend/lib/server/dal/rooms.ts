@@ -239,6 +239,10 @@ export function createPlanStep(data: {
   return getPlanStep(Number(result.lastInsertRowid))!;
 }
 
+export function deletePlanSteps(planId: number): void {
+  getDb().prepare("DELETE FROM plan_steps WHERE plan_id = ?").run(planId);
+}
+
 export function updatePlanStep(
   stepId: number,
   fields: Partial<Pick<

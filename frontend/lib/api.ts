@@ -268,6 +268,13 @@ export async function createRoomPlan(appId: number, roomId: number, body: { titl
   });
 }
 
+export async function generateRoomPlan(appId: number, roomId: number): Promise<RoomPlanResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/generate`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export async function updateRoomPlan(appId: number, roomId: number, body: { title?: string; summary_md?: string; status?: string; current_version?: number }): Promise<RoomPlanResponse> {
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan`, {
     method: "PATCH",

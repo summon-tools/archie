@@ -352,6 +352,181 @@ describe("rooms API", () => {
     });
   });
 
+  it("generates a structured plan when room chat asks for one", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Planning Room" });
+    const userMessage = dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Create the implementation plan from this discussion.",
+    });
+    const generatedPlan = {
+      title: "Room execution plan",
+      summary_md: "Generated from the room discussion.",
+      steps: [
+        {
+          title: "Persist generated plans",
+          objective_md: "Create plan records from agent output.",
+          implementation_prompt_md: "Wire chat-driven plan generation into persisted plan records.",
+          acceptance_criteria_md: "- Plan is saved\n- Steps are ordered",
+          risk_level: "medium",
+          requires_architecture_review: true,
+          requires_security_review: false,
+          requires_browser_validation: false,
+        },
+        {
+          title: "Refresh the plan panel",
+          objective_md: "Show generated steps in the room sidebar.",
+          implementation_prompt_md: "Refresh the plan SWR cache after the agent creates a plan.",
+          acceptance_criteria_md: "- Plan panel shows the generated steps",
+          risk_level: "low",
+          requires_architecture_review: false,
+          requires_security_review: false,
+          requires_browser_validation: true,
+        },
+      ],
+    };
+    const toolEnabledStream = vi.fn(async function* () {
+      yield { type: "tool_use", tool: "Grep", detail: "/RoomWorkspace/" };
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: JSON.stringify(generatedPlan),
+      };
+    });
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
+    }));
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
+
+    const reply = await createRoomAgentReply({ app: appRow, room, userMessage });
+
+    expect(reply).toMatchObject({
+      role: "agent",
+      agent_key: "coordinator",
+      kind: "plan_update",
+      body_md: "I created a draft plan with 2 steps. Review it in the Plan panel.",
+    });
+    expect(toolEnabledStream).toHaveBeenCalledWith(
+      expect.stringContaining("Return ONLY valid JSON"),
+      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 8 }),
+    );
+    expect(toolEnabledStream).toHaveBeenCalledWith(
+      expect.stringContaining("Create the implementation plan from this discussion."),
+      expect.any(Object),
+    );
+
+    const plans = dal.getPlansByRoom(room.id);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({
+      title: "Room execution plan",
+      summary_md: "Generated from the room discussion.",
+      status: "draft",
+    });
+    const steps = dal.getPlanSteps(plans[0].id);
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toMatchObject({
+      position: 0,
+      title: "Persist generated plans",
+      risk_level: "medium",
+      requires_architecture_review: 1,
+      requires_security_review: 0,
+      requires_browser_validation: 0,
+    });
+    expect(steps[1]).toMatchObject({
+      position: 1,
+      title: "Refresh the plan panel",
+      risk_level: "low",
+      requires_browser_validation: 1,
+    });
+
+    const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;
+    expect(run).toMatchObject({
+      agent_key: "coordinator",
+      status: "completed",
+      model_id: "claude-sonnet-4-6",
+      tool_policy_json: JSON.stringify({ mode: "plan_generation", tools: "read_only_codebase" }),
+    });
+    expect(JSON.parse(run.result_json)).toMatchObject({
+      plan_id: plans[0].id,
+      step_count: 2,
+    });
+    expect(JSON.parse(reply.payload_json!)).toMatchObject({
+      plan_id: plans[0].id,
+      step_count: 2,
+    });
+  });
+
+  it("generates a room plan from the plan API", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({
+      app_id: app.id,
+      title: "API Planning Room",
+      purpose: "Shape the room plan.",
+    });
+    dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "We need a safe step-by-step implementation plan.",
+    });
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: JSON.stringify({
+          title: "Generated API plan",
+          summary_md: "Plan generated through the API.",
+          steps: [
+            {
+              title: "Define the contract",
+              objective_md: "Lock the API and persistence contract.",
+              implementation_prompt_md: "Implement the generate endpoint contract.",
+              acceptance_criteria_md: "- Endpoint returns plan and steps",
+              risk_level: "high",
+              requires_architecture_review: true,
+              requires_security_review: true,
+              requires_browser_validation: false,
+            },
+          ],
+        }),
+      };
+    });
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
+    }));
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/generate/route");
+
+    const response = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/generate`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.plan).toMatchObject({
+      title: "Generated API plan",
+      summary_md: "Plan generated through the API.",
+      status: "draft",
+    });
+    expect(body.steps).toHaveLength(1);
+    expect(body.steps[0]).toMatchObject({
+      title: "Define the contract",
+      risk_level: "high",
+      requires_architecture_review: 1,
+      requires_security_review: 1,
+      requires_browser_validation: 0,
+      events: [],
+    });
+    expect(toolEnabledStream).toHaveBeenCalledWith(
+      expect.stringContaining("Recent room messages:"),
+      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 8 }),
+    );
+  });
+
   it("creates and updates room plans and steps", async () => {
     const app = seedApp(db);
     const token = await createAuthToken();

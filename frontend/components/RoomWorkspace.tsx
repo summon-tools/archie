@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatsCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
-import { advancePlanStepGate, createPlanStep, createRoomPlan, executeNextPlanStep, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
+import { advancePlanStepGate, createPlanStep, executeNextPlanStep, generateRoomPlan, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
@@ -21,6 +21,7 @@ interface RoomWorkspaceProps {
 }
 
 export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated }: RoomWorkspaceProps) {
+  const { mutate: mutateGlobal } = useSWRConfig();
   const { leftWidth, isDragging, containerRef, dragHandleProps } = useResizablePanel({
     storageKey: "archie-room-plan-ratio",
     defaultWidth: 78,
@@ -94,6 +95,9 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       setAwaitingReplyAfterId(null);
       setAwaitingReplyStartedAt(null);
       setAwaitingReplyAgentKey(null);
+      if (room) {
+        void mutateGlobal(`/api/apps/${appId}/rooms/${room.id}/plan`);
+      }
       return;
     }
 
@@ -104,7 +108,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       setAwaitingReplyAgentKey(null);
       setMessageError(`${agentName} is taking longer than expected. Your message was saved; refresh the room or send another message to retry.`);
     }
-  }, [awaitingReplyAfterId, awaitingReplyAgentKey, awaitingReplyStartedAt, messages]);
+  }, [appId, awaitingReplyAfterId, awaitingReplyAgentKey, awaitingReplyStartedAt, messages, mutateGlobal, room]);
 
   return (
     <div className="flex-1 min-h-0 bg-th-main flex" ref={containerRef}>
@@ -343,18 +347,15 @@ function PlanPanel({
   const activeStep = steps.find((step) => ["implementing", "reviewing", "fixing", "validating", "committing"].includes(step.status));
   const nextPendingStep = steps.find((step) => step.status === "pending");
 
-  const handleCreatePlan = async () => {
+  const handleGeneratePlan = async () => {
     if (!room || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await createRoomPlan(appId, room.id, {
-        title: `${room.title} plan`,
-        summary_md: room.purpose || "Structured execution plan for this room.",
-      });
+      await generateRoomPlan(appId, room.id);
       await mutate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create plan");
+      setError(err instanceof Error ? err.message : "Failed to generate plan");
     } finally {
       setBusy(false);
     }
@@ -463,11 +464,11 @@ function PlanPanel({
               The plan will hold executable steps, gates, task links, and progress.
             </p>
             <button
-              onClick={handleCreatePlan}
+              onClick={handleGeneratePlan}
               disabled={busy}
               className="mt-3 w-full rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-60"
             >
-              {busy ? "Creating..." : "Create draft plan"}
+              {busy ? "Generating..." : "Generate draft plan"}
             </button>
           </div>
         ) : (

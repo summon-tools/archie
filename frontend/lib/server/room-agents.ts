@@ -1,6 +1,7 @@
 import { DEFAULT_HOME_AGENTS, getHomeAgent, type HomeAgentDefinition } from "@/lib/home/agents";
 import { getProvider, type AgentProvider, type ToolStreamEvent } from "@/lib/server/agent";
 import * as dal from "./dal";
+import { generateRoomPlanFromDiscussion, shouldGenerateRoomPlan } from "./room-plan-generator";
 import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
 
 function buildRoomAgentPrompt({
@@ -119,6 +120,36 @@ export async function createRoomAgentReply({
   userMessage: RoomMessageRow;
 }): Promise<RoomMessageRow> {
   const agent = getReplyAgent(userMessage);
+  if (shouldGenerateRoomPlan(userMessage.body_md)) {
+    try {
+      const generated = await generateRoomPlanFromDiscussion({ app, room, userMessage, agent });
+      const body = `I created a draft plan with ${generated.steps.length} step${generated.steps.length === 1 ? "" : "s"}. Review it in the Plan panel.`;
+
+      return dal.createRoomMessage({
+        room_id: room.id,
+        role: "agent",
+        agent_key: agent.key,
+        kind: "plan_update",
+        body_md: body,
+        payload_json: JSON.stringify({
+          provider_id: agent.defaultProvider,
+          model_id: agent.defaultModel,
+          plan_id: generated.plan.id,
+          step_count: generated.steps.length,
+        }),
+      });
+    } catch (error) {
+      return dal.createRoomMessage({
+        room_id: room.id,
+        role: "agent",
+        agent_key: agent.key,
+        kind: "error",
+        body_md: `I saved your message, but the ${agent.name} could not generate the plan. Try again in a moment.`,
+        payload_json: JSON.stringify({ error: error instanceof Error ? error.message : "Unknown plan generation error" }),
+      });
+    }
+  }
+
   const prompt = buildRoomAgentPrompt({
     app,
     room,
