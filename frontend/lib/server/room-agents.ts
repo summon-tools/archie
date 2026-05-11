@@ -3,27 +3,34 @@ import { getProvider } from "@/lib/server/agent";
 import * as dal from "./dal";
 import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
 
-function buildCoordinatorPrompt({
+function buildRoomAgentPrompt({
   app,
   room,
   userMessage,
+  agent,
 }: {
   app: AppRow;
   room: HomeRoomRow;
   userMessage: RoomMessageRow;
+  agent: HomeAgentDefinition;
 }): string {
   const plan = dal.getPlansByRoom(room.id)[0] || null;
   const steps = plan ? dal.getPlanSteps(plan.id) : [];
   const recentMessages = dal.getRoomMessages(room.id, 12);
-  const taggedAgent = getTaggedAgent(userMessage);
+  const isCoordinator = agent.key === "coordinator";
 
   return [
-    "You are the Coordinator agent inside an Archie planning room for software work.",
+    `You are the ${agent.name} agent inside an Archie planning room for software work.`,
+    `Your role: ${agent.role}`,
     "",
     "Your job:",
-    "- Answer the user's planning questions directly.",
-    "- Clarify scope, risks, sequencing, and acceptance criteria.",
-    "- Route concerns to the fixed agent team when useful.",
+    isCoordinator
+      ? "- Answer the user's planning questions directly."
+      : "- Answer from your specialist perspective because the user tagged you for this reply.",
+    isCoordinator
+      ? "- Clarify scope, risks, sequencing, and acceptance criteria."
+      : "- Surface the most important risks, tradeoffs, questions, and recommendations in your area.",
+    isCoordinator ? "- Route concerns to the fixed agent team when useful." : null,
     "- Do not claim that implementation has started unless a plan step has been executed.",
     "- Keep replies concise and practical.",
     "",
@@ -34,8 +41,6 @@ function buildCoordinatorPrompt({
     `Room: ${room.title}`,
     room.purpose ? `Room purpose: ${room.purpose}` : null,
     plan ? `Current plan: ${plan.title} (${plan.status})` : "Current plan: none yet",
-    taggedAgent ? `Tagged agent: ${taggedAgent.name} — ${taggedAgent.role}` : null,
-    taggedAgent ? "Use the tagged agent as the primary perspective for this answer, while staying in planning mode." : null,
     steps.length > 0 ? "Plan steps:" : null,
     ...steps.map((step) => `- ${step.position + 1}. ${step.title} (${step.status})`),
     "",
@@ -52,7 +57,7 @@ function buildCoordinatorPrompt({
     "Latest user message:",
     userMessage.body_md,
     "",
-    "Respond as Coordinator.",
+    `Respond as ${agent.name}.`,
   ].filter((line): line is string => line !== null).join("\n");
 }
 
@@ -67,7 +72,11 @@ function getTaggedAgent(message: RoomMessageRow): HomeAgentDefinition | null {
   }
 }
 
-export async function createCoordinatorRoomReply({
+function getReplyAgent(message: RoomMessageRow): HomeAgentDefinition {
+  return getTaggedAgent(message) || getHomeAgent("coordinator");
+}
+
+export async function createRoomAgentReply({
   app,
   room,
   userMessage,
@@ -76,32 +85,33 @@ export async function createCoordinatorRoomReply({
   room: HomeRoomRow;
   userMessage: RoomMessageRow;
 }): Promise<RoomMessageRow> {
-  const coordinator = getHomeAgent("coordinator");
-  const prompt = buildCoordinatorPrompt({
+  const agent = getReplyAgent(userMessage);
+  const prompt = buildRoomAgentPrompt({
     app,
     room,
     userMessage,
+    agent,
   });
 
   const run = dal.createRoomAgentRun({
     room_id: room.id,
-    agent_key: coordinator.key,
-    provider_id: coordinator.defaultProvider,
-    model_id: coordinator.defaultModel,
+    agent_key: agent.key,
+    provider_id: agent.defaultProvider,
+    model_id: agent.defaultModel,
     phase: "planning",
     tool_policy_json: JSON.stringify({ mode: "planning_chat", tools: "none" }),
     input_json: JSON.stringify({ prompt }),
   });
 
   try {
-    const provider = getProvider(coordinator.defaultProvider);
+    const provider = getProvider(agent.defaultProvider);
     const text = (await provider.ephemeralQuery(prompt, {
-      model: coordinator.defaultModel,
+      model: agent.defaultModel,
       maxTurns: 1,
       cwd: app.directory,
     })).trim();
 
-    const replyText = text || "I am the Coordinator for this planning room. I can help clarify the work, shape the plan, and route concerns to the Architect, Reviewer, QA, or Security agents before implementation starts.";
+    const replyText = text || `I am the ${agent.name} for this planning room. I can help with ${agent.role.toLowerCase()}`;
 
     dal.updateRoomAgentRun(run.id, {
       status: "completed",
@@ -111,17 +121,17 @@ export async function createCoordinatorRoomReply({
     return dal.createRoomMessage({
       room_id: room.id,
       role: "agent",
-      agent_key: coordinator.key,
+      agent_key: agent.key,
       kind: "message",
       body_md: replyText,
       payload_json: JSON.stringify({
         run_id: run.id,
-        provider_id: coordinator.defaultProvider,
-        model_id: coordinator.defaultModel,
+        provider_id: agent.defaultProvider,
+        model_id: agent.defaultModel,
       }),
     });
   } catch (error) {
-    const errorText = error instanceof Error ? error.message : "Unknown coordinator error";
+    const errorText = error instanceof Error ? error.message : `Unknown ${agent.name} error`;
     dal.updateRoomAgentRun(run.id, {
       status: "failed",
       error_text: errorText,
@@ -130,9 +140,9 @@ export async function createCoordinatorRoomReply({
     return dal.createRoomMessage({
       room_id: room.id,
       role: "agent",
-      agent_key: coordinator.key,
+      agent_key: agent.key,
       kind: "error",
-      body_md: "I saved your message, but the Coordinator model could not respond. Try again in a moment.",
+      body_md: `I saved your message, but the ${agent.name} model could not respond. Try again in a moment.`,
       payload_json: JSON.stringify({ run_id: run.id, error: errorText }),
     });
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { createCoordinatorRoomReply } from "@/lib/server/room-agents";
+import { createRoomAgentReply } from "@/lib/server/room-agents";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 
 function getRoomForApp(appId: number, roomId: number) {
@@ -64,7 +64,7 @@ export async function POST(
       payload_json: targetAgentKey ? JSON.stringify({ target_agent_key: targetAgentKey }) : null,
     });
 
-    void createCoordinatorRoomReply({
+    void createRoomAgentReply({
       app: result.app!,
       room: result.room!,
       userMessage: message,

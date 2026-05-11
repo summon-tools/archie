@@ -121,7 +121,7 @@ describe("rooms API", () => {
     const dal = await import("@/lib/server/dal/rooms");
     const room = dal.createRoom({ app_id: app.id, title: "Room" });
     vi.doMock("@/lib/server/room-agents", () => ({
-      createCoordinatorRoomReply: vi.fn(async ({ room }: any) => {
+      createRoomAgentReply: vi.fn(async ({ room }: any) => {
         const roomsDal = await import("@/lib/server/dal/rooms");
         return roomsDal.createRoomMessage({
           room_id: room.id,
@@ -174,10 +174,10 @@ describe("rooms API", () => {
     const dal = await import("@/lib/server/dal/rooms");
     const room = dal.createRoom({ app_id: app.id, title: "Room" });
     let resolveReply = () => {};
-    const createCoordinatorRoomReply = vi.fn(() => new Promise<void>((resolve) => {
+    const createRoomAgentReply = vi.fn(() => new Promise<void>((resolve) => {
       resolveReply = resolve;
     }));
-    vi.doMock("@/lib/server/room-agents", () => ({ createCoordinatorRoomReply }));
+    vi.doMock("@/lib/server/room-agents", () => ({ createRoomAgentReply }));
     const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/messages/route");
 
     const created = await routes.POST(
@@ -193,7 +193,7 @@ describe("rooms API", () => {
       role: "user",
       body_md: "Please respond asynchronously.",
     });
-    expect(createCoordinatorRoomReply).toHaveBeenCalledOnce();
+    expect(createRoomAgentReply).toHaveBeenCalledOnce();
     const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ?").all(room.id) as any[];
     expect(messages).toHaveLength(1);
     resolveReply();
@@ -205,7 +205,7 @@ describe("rooms API", () => {
     const dal = await import("@/lib/server/dal/rooms");
     const room = dal.createRoom({ app_id: app.id, title: "Room" });
     vi.doMock("@/lib/server/room-agents", () => ({
-      createCoordinatorRoomReply: vi.fn(async ({ room }: any) => {
+      createRoomAgentReply: vi.fn(async ({ room }: any) => {
         const roomsDal = await import("@/lib/server/dal/rooms");
         return roomsDal.createRoomMessage({
           room_id: room.id,
@@ -257,15 +257,14 @@ describe("rooms API", () => {
       room_id: room.id,
       role: "user",
       body_md: "Who am I talking to?",
-      payload_json: JSON.stringify({ target_agent_key: "architect" }),
     });
     const ephemeralQuery = vi.fn(async () => "You are talking to the Coordinator for this planning room.");
     vi.doMock("@/lib/server/agent", () => ({
       getProvider: vi.fn(() => ({ ephemeralQuery })),
     }));
-    const { createCoordinatorRoomReply } = await import("@/lib/server/room-agents");
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
 
-    const reply = await createCoordinatorRoomReply({
+    const reply = await createRoomAgentReply({
       app: appRow,
       room,
       userMessage,
@@ -281,7 +280,7 @@ describe("rooms API", () => {
       expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app" }),
     );
     expect(ephemeralQuery).toHaveBeenCalledWith(
-      expect.stringContaining("Tagged agent: Architect"),
+      expect.stringContaining("Respond as Coordinator."),
       expect.any(Object),
     );
 
@@ -290,6 +289,51 @@ describe("rooms API", () => {
       agent_key: "coordinator",
       status: "completed",
       model_id: "claude-sonnet-4-6",
+    });
+  });
+
+  it("routes tagged room messages to the selected agent", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    const userMessage = dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Review the architecture.",
+      payload_json: JSON.stringify({ target_agent_key: "architect" }),
+    });
+    const ephemeralQuery = vi.fn(async () => "Architect perspective: split the work into bounded steps.");
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ ephemeralQuery })),
+    }));
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
+
+    const reply = await createRoomAgentReply({
+      app: appRow,
+      room,
+      userMessage,
+    });
+
+    expect(reply).toMatchObject({
+      role: "agent",
+      agent_key: "architect",
+      body_md: "Architect perspective: split the work into bounded steps.",
+    });
+    expect(ephemeralQuery).toHaveBeenCalledWith(
+      expect.stringContaining("You are the Architect agent inside an Archie planning room"),
+      expect.objectContaining({ model: "claude-opus-4-7", cwd: "/tmp/test-app" }),
+    );
+    expect(ephemeralQuery).toHaveBeenCalledWith(
+      expect.stringContaining("Respond as Architect."),
+      expect.any(Object),
+    );
+
+    const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;
+    expect(run).toMatchObject({
+      agent_key: "architect",
+      status: "completed",
+      model_id: "claude-opus-4-7",
     });
   });
 

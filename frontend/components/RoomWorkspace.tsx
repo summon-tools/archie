@@ -27,6 +27,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   const [selectedAgentKey, setSelectedAgentKey] = useState<string | null>(null);
   const [awaitingReplyAfterId, setAwaitingReplyAfterId] = useState<number | null>(null);
   const [awaitingReplyStartedAt, setAwaitingReplyStartedAt] = useState<number | null>(null);
+  const [awaitingReplyAgentKey, setAwaitingReplyAgentKey] = useState<string | null>(null);
 
   const { data: messagesData, mutate: mutateMessages } = useSWR<{ messages: RoomMessage[] }>(
     room ? `/api/apps/${appId}/rooms/${room.id}/messages` : null,
@@ -67,11 +68,13 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       setSelectedAgentKey(null);
       setAwaitingReplyAfterId(message.id);
       setAwaitingReplyStartedAt(Date.now());
+      setAwaitingReplyAgentKey(targetAgentKey || "coordinator");
       await mutateMessages();
     } catch (err) {
       setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
       setMessageDraft(content);
       setMessageError(err instanceof Error ? err.message : "Failed to send message");
+      setAwaitingReplyAgentKey(null);
     } finally {
       setSendingMessage(false);
     }
@@ -83,15 +86,18 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     if (hasReply) {
       setAwaitingReplyAfterId(null);
       setAwaitingReplyStartedAt(null);
+      setAwaitingReplyAgentKey(null);
       return;
     }
 
     if (awaitingReplyStartedAt && Date.now() - awaitingReplyStartedAt > 90000) {
       setAwaitingReplyAfterId(null);
       setAwaitingReplyStartedAt(null);
-      setMessageError("Coordinator is taking longer than expected. Your message was saved; refresh the room or send another message to retry.");
+      const agentName = getAgentName(awaitingReplyAgentKey);
+      setAwaitingReplyAgentKey(null);
+      setMessageError(`${agentName} is taking longer than expected. Your message was saved; refresh the room or send another message to retry.`);
     }
-  }, [awaitingReplyAfterId, awaitingReplyStartedAt, messages]);
+  }, [awaitingReplyAfterId, awaitingReplyAgentKey, awaitingReplyStartedAt, messages]);
 
   return (
     <div className="flex-1 min-h-0 bg-th-main flex">
@@ -107,6 +113,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             error={messageError}
             selectedAgentKey={selectedAgentKey}
             setSelectedAgentKey={setSelectedAgentKey}
+            thinkingAgentKey={awaitingReplyAgentKey}
             onSend={handleSendRoomMessage}
           />
         ) : (
@@ -146,6 +153,7 @@ function RoomShell({
   error,
   selectedAgentKey,
   setSelectedAgentKey,
+  thinkingAgentKey,
   onSend,
 }: {
   room: HomeRoom;
@@ -157,8 +165,11 @@ function RoomShell({
   error: string | null;
   selectedAgentKey: string | null;
   setSelectedAgentKey: (agentKey: string | null) => void;
+  thinkingAgentKey: string | null;
   onSend: () => void;
 }) {
+  const statusAgentName = getAgentName(thinkingAgentKey || selectedAgentKey);
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <header className="px-6 py-4 border-b border-th">
@@ -212,7 +223,7 @@ function RoomShell({
           onSelectAgent={setSelectedAgentKey}
           disabled={sending}
           isLoading={sending}
-          statusText={sending || thinking ? "Coordinator is thinking..." : undefined}
+          statusText={sending || thinking ? `${statusAgentName} is thinking...` : undefined}
         />
       </div>
     </div>
@@ -268,6 +279,11 @@ function getTaggedAgentName(message: RoomMessage): string | null {
   } catch {
     return null;
   }
+}
+
+function getAgentName(agentKey: string | null): string {
+  if (!agentKey) return "Coordinator";
+  return DEFAULT_HOME_AGENTS.find((agent) => agent.key === agentKey)?.name || "Coordinator";
 }
 
 function formatAgentLabel(agentKey: string): string {
