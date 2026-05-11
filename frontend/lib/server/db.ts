@@ -285,6 +285,111 @@ function initDb(db: Database.Database): void {
     );
   `);
 
+  // ── Home rooms and structured plans ───────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS home_rooms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      purpose TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'archived')),
+      created_by INTEGER DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_home_rooms_app_id ON home_rooms(app_id);
+    CREATE INDEX IF NOT EXISTS idx_home_rooms_status ON home_rooms(status);
+
+    CREATE TABLE IF NOT EXISTS room_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id INTEGER NOT NULL,
+      author_user_id INTEGER DEFAULT NULL,
+      agent_key TEXT DEFAULT NULL,
+      role TEXT NOT NULL CHECK(role IN ('user', 'agent', 'system')),
+      kind TEXT NOT NULL DEFAULT 'message' CHECK(kind IN ('message', 'decision', 'plan_update', 'execution_event', 'error')),
+      body_md TEXT NOT NULL DEFAULT '',
+      payload_json TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE,
+      FOREIGN KEY (author_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_room_messages_room_id ON room_messages(room_id);
+
+    CREATE TABLE IF NOT EXISTS room_agent_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id INTEGER NOT NULL,
+      agent_key TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      model_id TEXT DEFAULT NULL,
+      phase TEXT NOT NULL CHECK(phase IN ('planning', 'critique', 'coordination', 'review', 'security', 'qa')),
+      tool_policy_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed', 'stopped')),
+      input_json TEXT DEFAULT NULL,
+      result_json TEXT DEFAULT NULL,
+      error_text TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_room_agent_runs_room_id ON room_agent_runs(room_id);
+    CREATE INDEX IF NOT EXISTS idx_room_agent_runs_status ON room_agent_runs(status);
+
+    CREATE TABLE IF NOT EXISTS plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      summary_md TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'ready', 'executing', 'completed', 'blocked', 'cancelled')),
+      current_version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_plans_room_id ON plans(room_id);
+    CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
+
+    CREATE TABLE IF NOT EXISTS plan_steps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL,
+      position INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      objective_md TEXT NOT NULL DEFAULT '',
+      implementation_prompt_md TEXT NOT NULL DEFAULT '',
+      acceptance_criteria_md TEXT NOT NULL DEFAULT '',
+      risk_level TEXT NOT NULL DEFAULT 'medium' CHECK(risk_level IN ('low', 'medium', 'high')),
+      requires_architecture_review INTEGER NOT NULL DEFAULT 0,
+      requires_security_review INTEGER NOT NULL DEFAULT 0,
+      requires_browser_validation INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'implementing', 'reviewing', 'fixing', 'validating', 'committing', 'completed', 'blocked', 'failed', 'skipped')),
+      linked_work_item_id INTEGER DEFAULT NULL,
+      linked_conversation_id INTEGER DEFAULT NULL,
+      commit_sha TEXT DEFAULT NULL,
+      result_summary_md TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE CASCADE,
+      FOREIGN KEY (linked_work_item_id) REFERENCES work_items(id),
+      FOREIGN KEY (linked_conversation_id) REFERENCES conversations(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_plan_steps_plan_id ON plan_steps(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_plan_steps_status ON plan_steps(status);
+
+    CREATE TABLE IF NOT EXISTS plan_step_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_step_id INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      agent_key TEXT DEFAULT NULL,
+      status TEXT NOT NULL,
+      summary_md TEXT DEFAULT '',
+      payload_json TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (plan_step_id) REFERENCES plan_steps(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_plan_step_events_step_id ON plan_step_events(plan_step_id);
+  `);
+
   // ── Schema evolution (RFC 23) — add columns to existing tables ─
   addColumnIfMissing(db, "apps", "project_owner_user_id", "INTEGER DEFAULT NULL");
 
