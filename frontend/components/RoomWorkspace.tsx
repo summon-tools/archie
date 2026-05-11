@@ -203,17 +203,11 @@ function RoomShell({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header className="px-6 py-4 border-b border-th">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-1">Room</p>
-            <h2 className="text-xl font-semibold text-th-primary tracking-tight truncate">{room.title}</h2>
-            {room.purpose && <p className="mt-1 text-sm text-th-muted">{room.purpose}</p>}
-          </div>
-          <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
-            {room.status}
-          </span>
-        </div>
+      <header className="h-10 px-6 border-b border-th flex items-center justify-between gap-3">
+        <h2 className="min-w-0 truncate text-sm font-semibold text-th-primary">{room.title}</h2>
+        <span className="flex-shrink-0 text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
+          {room.status}
+        </span>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -448,59 +442,18 @@ function PlanPanel({
     }
   };
 
-  if (!room) {
-    return (
-      <div className="p-4">
-        <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-2">Plan</p>
-        <p className="text-sm text-th-muted">Select a room to draft a structured plan.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col min-h-0 h-full">
-      <div className="p-4 border-b border-th">
-        <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-2">Plan</p>
-        <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold text-th-primary flex-1 min-w-0 truncate">
-            {plan?.title || "No plan yet"}
-          </h2>
-          {plan && (
-            <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
-              {plan.status}
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-sm text-th-muted">
-          Draft scoped steps before launching implementation conversations.
-        </p>
-        {plan && (
-          <div className="mt-3">
-            {activeStep?.linked_work_item_id ? (
-              <button
-                onClick={() => onOpenConversation(activeStep.linked_work_item_id!)}
-                className="w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle"
-              >
-                Open active task
-              </button>
-            ) : (
-              <button
-                onClick={handleExecuteNext}
-                disabled={busy || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <PlayCircle size={16} />
-                {busy ? "Starting..." : "Execute next step"}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      <header className="h-10 px-4 border-b border-th flex items-center">
+        <h2 className="text-sm font-semibold text-th-primary">Plan</h2>
+      </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
         {error && <p className="text-sm text-st-red">{error}</p>}
 
-        {isLoading ? (
+        {!room ? (
+          <p className="text-sm text-th-muted">Select a room to draft a structured plan.</p>
+        ) : isLoading ? (
           <p className="text-sm text-th-muted">Loading plan...</p>
         ) : !plan ? (
           <div className="rounded-lg border border-dashed border-th p-4">
@@ -519,6 +472,34 @@ function PlanPanel({
           </div>
         ) : (
           <>
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold text-th-primary flex-1 min-w-0 truncate">
+                  {plan.title}
+                </h3>
+                <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
+                  {plan.status}
+                </span>
+              </div>
+              {activeStep?.linked_work_item_id ? (
+                <button
+                  onClick={() => onOpenConversation(activeStep.linked_work_item_id!)}
+                  className="w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+                >
+                  Open active task
+                </button>
+              ) : (
+                <button
+                  onClick={handleExecuteNext}
+                  disabled={busy || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PlayCircle size={16} />
+                  {busy ? "Starting..." : "Execute next step"}
+                </button>
+              )}
+            </section>
+
             {plan.summary_md && (
               <div className="rounded-lg border border-th bg-th-main p-3">
                 <p className="text-xs text-th-muted leading-relaxed whitespace-pre-wrap">{plan.summary_md}</p>
