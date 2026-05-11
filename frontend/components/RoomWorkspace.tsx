@@ -241,7 +241,7 @@ function RoomShell({
 
       <div>
         {error && (
-          <div className="max-w-chat mx-auto px-4 pt-3">
+          <div className="max-w-3xl mx-auto px-6 pt-3">
             <p className="text-sm text-st-red">{error}</p>
           </div>
         )}

@@ -80,8 +80,8 @@ export default function RoomChatInput({
   const canSend = value.trim() && !disabled && !isLoading;
 
   return (
-    <div className="flex-shrink-0 bg-transparent px-4 py-3">
-      <div className="max-w-chat mx-auto">
+    <div className="flex-shrink-0 bg-transparent px-6 py-3">
+      <div className="max-w-3xl mx-auto">
         {statusText && (
           <div className="flex items-center gap-2 mb-2 px-1">
             <span className="text-xs text-th-muted">{statusText}</span>
