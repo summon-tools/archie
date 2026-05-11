@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
+import { ArrowSquareOut, CaretDown, CaretRight, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
 import { advancePlanStepGate, createPlanStep, createRoom, createRoomPlan, executeNextPlanStep, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
@@ -274,6 +274,8 @@ function RoomShell({
   error: string | null;
   onSend: () => void;
 }) {
+  const [agentsExpanded, setAgentsExpanded] = useState(false);
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <header className="px-6 py-4 border-b border-th">
@@ -309,26 +311,15 @@ function RoomShell({
             </div>
           )}
 
-          <div className="pt-2">
-            <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-3">Default agent team</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {DEFAULT_HOME_AGENTS.map((agent) => (
-                <div key={agent.key} className="rounded-lg border border-th bg-th-panel p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="w-2 h-2 rounded-full bg-th-strong" />
-                    <h3 className="text-sm font-semibold text-th-primary">{agent.name}</h3>
-                    <span className="ml-auto text-meta text-th-dimmed">{agent.defaultModel}</span>
-                  </div>
-                  <p className="text-xs text-th-muted leading-relaxed">{agent.role}</p>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
       <div className="border-t border-th p-4">
         <div className="max-w-3xl mx-auto">
+          <AgentTeamDrawer
+            expanded={agentsExpanded}
+            onToggle={() => setAgentsExpanded((value) => !value)}
+          />
           {error && <p className="mb-2 text-sm text-st-red">{error}</p>}
           <div className="flex items-end gap-2 rounded-xl border border-th bg-th-panel p-2">
             <textarea
@@ -359,6 +350,45 @@ function RoomShell({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function AgentTeamDrawer({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="mb-3 rounded-lg border border-th bg-th-panel overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-th-subtle transition-colors"
+      >
+        {expanded ? (
+          <CaretDown size={14} className="text-th-muted flex-shrink-0" />
+        ) : (
+          <CaretRight size={14} className="text-th-muted flex-shrink-0" />
+        )}
+        <span className="text-sm font-medium text-th-secondary">Agent team</span>
+        <span className="ml-auto text-meta text-th-dimmed">{DEFAULT_HOME_AGENTS.length} agents</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-th p-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-56 overflow-y-auto">
+          {DEFAULT_HOME_AGENTS.map((agent) => (
+            <div key={agent.key} className="rounded-lg border border-th bg-th-main p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full bg-th-strong" />
+                <h3 className="text-sm font-semibold text-th-primary truncate">{agent.name}</h3>
+                <span className="ml-auto text-meta text-th-dimmed">{agent.defaultModel}</span>
+              </div>
+              <p className="text-xs text-th-muted leading-relaxed">{agent.role}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
