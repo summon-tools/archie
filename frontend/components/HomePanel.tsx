@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, PaperPlaneTilt, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
-import { createRoom, sendRoomMessage } from "@/lib/api";
+import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
+import { createPlanStep, createRoom, createRoomPlan, sendRoomMessage, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
-import type { HomeRoom, RoomMessage, Task } from "@/lib/types";
+import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 
 interface HomePanelProps {
@@ -198,18 +198,7 @@ export default function HomePanel({ appId, workItems, onOpenConversation }: Home
       </main>
 
       <aside className="w-80 border-l border-th bg-th-panel flex flex-col min-h-0">
-        <div className="p-4 border-b border-th">
-          <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-2">Plan</p>
-          <h2 className="text-base font-semibold text-th-primary">Execution outline</h2>
-          <p className="mt-1 text-sm text-th-muted">
-            Plan steps and execution progress will live here.
-          </p>
-        </div>
-        <div className="p-4 space-y-3">
-          <PlanPlaceholder label="Draft plan" />
-          <PlanPlaceholder label="Step gates" />
-          <PlanPlaceholder label="Linked task conversations" />
-        </div>
+        <PlanPanel appId={appId} room={selectedRoom} />
       </aside>
     </div>
   );
@@ -385,11 +374,219 @@ function ConversationGroup({
   );
 }
 
-function PlanPlaceholder({ label }: { label: string }) {
+function PlanPanel({ appId, room }: { appId: number; room: HomeRoom | null }) {
+  const { data, mutate, isLoading } = useSWR<RoomPlanResponse>(
+    room ? `/api/apps/${appId}/rooms/${room.id}/plan` : null,
+    fetcher,
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stepTitle, setStepTitle] = useState("");
+  const [stepObjective, setStepObjective] = useState("");
+
+  const plan = data?.plan || null;
+  const steps = data?.steps || [];
+
+  const handleCreatePlan = async () => {
+    if (!room || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createRoomPlan(appId, room.id, {
+        title: `${room.title} plan`,
+        summary_md: room.purpose || "Structured execution plan for this room.",
+      });
+      await mutate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create plan");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMarkReady = async () => {
+    if (!room || !plan || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateRoomPlan(appId, room.id, { status: "ready" });
+      await mutate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update plan");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCreateStep = async () => {
+    if (!room || !plan || !stepTitle.trim() || busy) return;
+    const title = stepTitle.trim();
+    const objective = stepObjective.trim();
+    setBusy(true);
+    setError(null);
+    setStepTitle("");
+    setStepObjective("");
+    try {
+      await createPlanStep(appId, room.id, {
+        title,
+        objective_md: objective,
+        implementation_prompt_md: objective,
+        acceptance_criteria_md: "",
+      });
+      await mutate();
+    } catch (err) {
+      setStepTitle(title);
+      setStepObjective(objective);
+      setError(err instanceof Error ? err.message : "Failed to create plan step");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!room) {
+    return (
+      <div className="p-4">
+        <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-2">Plan</p>
+        <p className="text-sm text-th-muted">Select a room to draft a structured plan.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-dashed border-th p-3">
-      <p className="text-sm font-medium text-th-secondary">{label}</p>
-      <p className="mt-1 text-xs text-th-muted">Coming in the next implementation slice.</p>
+    <div className="flex flex-col min-h-0 h-full">
+      <div className="p-4 border-b border-th">
+        <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider mb-2">Plan</p>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold text-th-primary flex-1 min-w-0 truncate">
+            {plan?.title || "No plan yet"}
+          </h2>
+          {plan && (
+            <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
+              {plan.status}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-th-muted">
+          Draft scoped steps before launching implementation conversations.
+        </p>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+        {error && <p className="text-sm text-st-red">{error}</p>}
+
+        {isLoading ? (
+          <p className="text-sm text-th-muted">Loading plan...</p>
+        ) : !plan ? (
+          <div className="rounded-lg border border-dashed border-th p-4">
+            <Flag size={18} className="text-th-muted mb-2" />
+            <p className="text-sm font-medium text-th-secondary">Create a structured plan</p>
+            <p className="mt-1 text-xs text-th-muted">
+              The plan will hold executable steps, gates, task links, and progress.
+            </p>
+            <button
+              onClick={handleCreatePlan}
+              disabled={busy}
+              className="mt-3 w-full rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-60"
+            >
+              {busy ? "Creating..." : "Create draft plan"}
+            </button>
+          </div>
+        ) : (
+          <>
+            {plan.summary_md && (
+              <div className="rounded-lg border border-th bg-th-main p-3">
+                <p className="text-xs text-th-muted leading-relaxed whitespace-pre-wrap">{plan.summary_md}</p>
+              </div>
+            )}
+
+            <section>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider">Steps</p>
+                {plan.status === "draft" && steps.length > 0 && (
+                  <button
+                    onClick={handleMarkReady}
+                    disabled={busy}
+                    className="text-xs font-medium text-th-secondary hover:text-th-primary disabled:opacity-60"
+                  >
+                    Mark ready
+                  </button>
+                )}
+              </div>
+
+              {steps.length === 0 ? (
+                <p className="text-sm text-th-muted">No steps yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {steps.map((step) => (
+                    <PlanStepCard key={step.id} step={step} />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-lg border border-th bg-th-main p-3">
+              <p className="text-sm font-medium text-th-secondary mb-2">Add step</p>
+              <input
+                value={stepTitle}
+                onChange={(event) => setStepTitle(event.target.value)}
+                placeholder="Step title"
+                className="w-full rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
+                disabled={busy}
+              />
+              <textarea
+                value={stepObjective}
+                onChange={(event) => setStepObjective(event.target.value)}
+                placeholder="Objective or implementation brief"
+                rows={3}
+                className="mt-2 w-full resize-none rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
+                disabled={busy}
+              />
+              <button
+                onClick={handleCreateStep}
+                disabled={!stepTitle.trim() || busy}
+                className="mt-2 w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {busy ? "Saving..." : "Add step"}
+              </button>
+            </section>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlanStepCard({ step }: { step: PlanStep }) {
+  const gates = [
+    step.requires_architecture_review ? "Architecture" : null,
+    step.requires_security_review ? "Security" : null,
+    step.requires_browser_validation ? "Browser" : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="rounded-lg border border-th bg-th-main p-3">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-th-muted text-meta font-semibold text-th-secondary">
+          {step.position + 1}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-th-primary truncate">{step.title}</p>
+            <span className="ml-auto text-meta text-th-dimmed">{step.status}</span>
+          </div>
+          {step.objective_md && (
+            <p className="mt-1 text-xs text-th-muted whitespace-pre-wrap leading-relaxed">{step.objective_md}</p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-1">
+            <span className="rounded-full bg-th-muted px-2 py-0.5 text-meta text-th-dimmed">{step.risk_level} risk</span>
+            {gates.map((gate) => (
+              <span key={gate} className="rounded-full bg-th-muted px-2 py-0.5 text-meta text-th-dimmed">
+                {gate}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
