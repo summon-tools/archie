@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -28,6 +28,9 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<RoomMessage[]>([]);
+  const [awaitingReplyAfterId, setAwaitingReplyAfterId] = useState<number | null>(null);
+  const [awaitingReplyStartedAt, setAwaitingReplyStartedAt] = useState<number | null>(null);
 
   const selectedRoom = useMemo(() => {
     return rooms.find((room) => room.id === selectedRoomId) || rooms[0] || null;
@@ -35,8 +38,14 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
   const { data: messagesData, mutate: mutateMessages } = useSWR<{ messages: RoomMessage[] }>(
     selectedRoom ? `/api/apps/${appId}/rooms/${selectedRoom.id}/messages` : null,
     fetcher,
+    { refreshInterval: awaitingReplyAfterId ? 1500 : 0 },
   );
   const messages = messagesData?.messages || [];
+  const visibleMessages = useMemo(() => {
+    const persistedBodies = new Set(messages.map((message) => `${message.role}:${message.body_md}`));
+    const pending = pendingMessages.filter((message) => !persistedBodies.has(`${message.role}:${message.body_md}`));
+    return [...messages, ...pending];
+  }, [messages, pendingMessages]);
 
   const activeWorkItems = workItems.filter((item) => item.status !== "done");
   const completedWorkItems = workItems.filter((item) => item.status === "done");
@@ -63,20 +72,52 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
   const handleSendRoomMessage = async () => {
     if (!selectedRoom || !messageDraft.trim() || sendingMessage) return;
     const content = messageDraft.trim();
+    const optimisticMessage: RoomMessage = {
+      id: -Date.now(),
+      room_id: selectedRoom.id,
+      author_user_id: null,
+      agent_key: null,
+      role: "user",
+      kind: "message",
+      body_md: content,
+      payload_json: null,
+      created_at: new Date().toISOString(),
+    };
     setSendingMessage(true);
     setMessageError(null);
     setMessageDraft("");
+    setPendingMessages((prev) => [...prev, optimisticMessage]);
     try {
-      await sendRoomMessage(appId, selectedRoom.id, content);
+      const message = await sendRoomMessage(appId, selectedRoom.id, content);
+      setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
+      setAwaitingReplyAfterId(message.id);
+      setAwaitingReplyStartedAt(Date.now());
       await mutateMessages();
       await mutate();
     } catch (err) {
+      setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
       setMessageDraft(content);
       setMessageError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setSendingMessage(false);
     }
   };
+
+  useEffect(() => {
+    if (!awaitingReplyAfterId) return;
+    const hasReply = messages.some((message) => message.id > awaitingReplyAfterId && message.role === "agent");
+    if (hasReply) {
+      setAwaitingReplyAfterId(null);
+      setAwaitingReplyStartedAt(null);
+      return;
+    }
+
+    if (awaitingReplyStartedAt && Date.now() - awaitingReplyStartedAt > 90000) {
+      setAwaitingReplyAfterId(null);
+      setAwaitingReplyStartedAt(null);
+      setMessageError("Coordinator is taking longer than expected. Your message was saved; refresh the room or send another message to retry.");
+    }
+  }, [awaitingReplyAfterId, awaitingReplyStartedAt, messages]);
 
   return (
     <div className="flex-1 min-h-0 bg-th-main flex">
@@ -179,10 +220,11 @@ export default function HomePanel({ appId, workItems, onOpenConversation, onWork
         {selectedRoom ? (
           <RoomShell
             room={selectedRoom}
-            messages={messages}
+            messages={visibleMessages}
             draft={messageDraft}
             setDraft={setMessageDraft}
             sending={sendingMessage}
+            thinking={Boolean(awaitingReplyAfterId)}
             error={messageError}
             onSend={handleSendRoomMessage}
           />
@@ -219,6 +261,7 @@ function RoomShell({
   draft,
   setDraft,
   sending,
+  thinking,
   error,
   onSend,
 }: {
@@ -227,6 +270,7 @@ function RoomShell({
   draft: string;
   setDraft: (value: string) => void;
   sending: boolean;
+  thinking: boolean;
   error: string | null;
   onSend: () => void;
 }) {
@@ -310,7 +354,7 @@ function RoomShell({
               {sending ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneTilt size={16} weight="bold" />}
             </button>
           </div>
-          {sending && (
+          {(sending || thinking) && (
             <p className="mt-2 text-xs text-th-muted">Coordinator is thinking...</p>
           )}
         </div>

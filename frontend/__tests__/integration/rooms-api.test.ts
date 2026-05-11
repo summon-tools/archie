@@ -154,8 +154,91 @@ describe("rooms API", () => {
 
     expect(listed.status).toBe(200);
     const body = await listed.json();
-    expect(body.messages).toHaveLength(2);
+    expect(body.messages.length).toBeGreaterThanOrEqual(1);
     expect(body.messages[0].body_md).toBe("Please critique this plan.");
+    await vi.waitFor(() => {
+      const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ? ORDER BY id ASC").all(room.id) as any[];
+      expect(messages[1]).toMatchObject({
+        role: "agent",
+        agent_key: "coordinator",
+        body_md: "Mock coordinator reply.",
+      });
+    });
+  });
+
+  it("returns the user message before the coordinator reply completes", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    let resolveReply = () => {};
+    const createCoordinatorRoomReply = vi.fn(() => new Promise<void>((resolve) => {
+      resolveReply = resolve;
+    }));
+    vi.doMock("@/lib/server/room-agents", () => ({ createCoordinatorRoomReply }));
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/messages/route");
+
+    const created = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/messages`, {
+        token,
+        body: { content: "Please respond asynchronously." },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      role: "user",
+      body_md: "Please respond asynchronously.",
+    });
+    expect(createCoordinatorRoomReply).toHaveBeenCalledOnce();
+    const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ?").all(room.id) as any[];
+    expect(messages).toHaveLength(1);
+    resolveReply();
+  });
+
+  it("persists a coordinator response after a room message", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    vi.doMock("@/lib/server/room-agents", () => ({
+      createCoordinatorRoomReply: vi.fn(async ({ room }: any) => {
+        const roomsDal = await import("@/lib/server/dal/rooms");
+        return roomsDal.createRoomMessage({
+          room_id: room.id,
+          role: "agent",
+          agent_key: "coordinator",
+          body_md: "Mock coordinator reply.",
+        });
+      }),
+    }));
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/messages/route");
+
+    await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/messages`, {
+        token,
+        body: { content: "Please critique this plan." },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    await vi.waitFor(() => {
+      const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ? ORDER BY id ASC").all(room.id) as any[];
+      expect(messages[1]).toMatchObject({
+        role: "agent",
+        agent_key: "coordinator",
+        body_md: "Mock coordinator reply.",
+      });
+    });
+
+    const listed = await routes.GET(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/messages`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(listed.status).toBe(200);
+    const body = await listed.json();
     expect(body.messages[1]).toMatchObject({
       role: "agent",
       agent_key: "coordinator",

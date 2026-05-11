@@ -58,7 +58,7 @@ export async function POST(
       author_user_id: authUser.id,
     });
 
-    await createCoordinatorRoomReply({
+    void createCoordinatorRoomReply({
       app: result.app!,
       room: result.room!,
       userMessage: message,
