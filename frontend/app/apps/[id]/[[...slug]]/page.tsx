@@ -9,6 +9,7 @@ import ChatSidebar from "@/components/ChatSidebar";
 import ConversationView from "@/components/ConversationView";
 import AppSettingsPanel from "@/components/AppSettingsPanel";
 import NewChatView from "@/components/NewChatView";
+import HomePanel from "@/components/HomePanel";
 import SplitPanelLayout from "@/components/SplitPanelLayout";
 import PreviewPanel from "@/components/PreviewPanel";
 import SpecEditor from "@/components/SpecEditor";
@@ -33,6 +34,7 @@ export default function AppPage() {
   // Parse workItemId from optional catch-all slug: /apps/[id]/conversation/[itemId]
   const slug = params.slug as string[] | undefined;
   const itemIdFromUrl = slug && slug[0] === "conversation" && slug[1] ? Number(slug[1]) : null;
+  const isHomePage = slug?.[0] === "home";
   const isSettingsPage = slug?.[0] === "settings";
   const isSpecPage = slug?.[0] === "spec";
   const isCodebaseIndexPage = slug?.[0] === "codebase-index" || slug?.[0] === "knowledge";
@@ -43,13 +45,13 @@ export default function AppPage() {
   const [workItems, setWorkItems] = useState<Task[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(itemIdFromUrl);
   const [selectedItem, setSelectedItem] = useState<Task | null>(null);
-  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isSettingsPage && !isSpecPage && !isCodebaseIndexPage && !isSkillsPage && !isNotificationsPage);
+  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isHomePage && !isSettingsPage && !isSpecPage && !isCodebaseIndexPage && !isSkillsPage && !isNotificationsPage);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Active view: null = conversation/new, "settings" = app settings, "profile" = profile
-  const [activeView, setActiveView] = useState<string | null>(isSettingsPage ? "settings" : isSpecPage ? "spec" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isNotificationsPage ? "notifications" : null);
+  const [activeView, setActiveView] = useState<string | null>(isHomePage ? "home" : isSettingsPage ? "settings" : isSpecPage ? "spec" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isNotificationsPage ? "notifications" : null);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
 
@@ -146,7 +148,9 @@ export default function AppPage() {
   // Handle view change from sidebar (settings, profile)
   const handleViewChange = (view: string | null) => {
     setActiveView(view);
-    if (view === "settings") {
+    if (view === "home") {
+      window.history.replaceState(null, "", `/apps/${appId}/home`);
+    } else if (view === "settings") {
       window.history.replaceState(null, "", `/apps/${appId}/settings`);
     } else if (view === "spec") {
       window.history.replaceState(null, "", `/apps/${appId}/spec`);
@@ -342,6 +346,16 @@ export default function AppPage() {
             />
           </div>
         </div>
+      );
+    }
+
+    if (activeView === "home") {
+      return (
+        <HomePanel
+          appId={appId}
+          workItems={workItems}
+          onOpenConversation={handleSelectItem}
+        />
       );
     }
 

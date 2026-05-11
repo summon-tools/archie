@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { App, Task, GitStatus } from "@/lib/types";
 import { fetcher } from "@/lib/swr";
-import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, BookOpen, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell } from "@phosphor-icons/react";
+import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, BookOpen, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, House } from "@phosphor-icons/react";
 import BackgroundJobsBar from "./BackgroundJobsBar";
 
 interface ChatSidebarProps {
@@ -121,6 +121,18 @@ export default function ChatSidebar({
 
         {/* Work group: New conversation + conversations */}
         <div className="flex flex-col items-center py-1.5 gap-1">
+          <button
+            onClick={() => onViewChange?.("home")}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              activeView === "home"
+                ? "bg-btn-secondary text-btn-secondary"
+                : "text-th-muted hover:text-th-primary hover:bg-th-muted"
+            }`}
+            title="Home"
+            aria-label="Home"
+          >
+            <House size={16} weight="bold" />
+          </button>
           <button
             onClick={onNewItem}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
@@ -310,6 +322,18 @@ export default function ChatSidebar({
       {/* ── WORK ───────────────────────────────────────────── */}
       <SectionLabel label="Work" />
       <div className="px-3 pb-1 space-y-0.5">
+        <button
+          onClick={() => onViewChange?.("home")}
+          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
+            activeView === "home"
+              ? "text-th-primary font-medium"
+              : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+          }`}
+          title="Project home"
+        >
+          <House size={15} weight="bold" className="text-th-muted" />
+          Home
+        </button>
         <button
           onClick={onNewItem}
           className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
