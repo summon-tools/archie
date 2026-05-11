@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
+import { createCoordinatorRoomReply } from "@/lib/server/room-agents";
 
 function getRoomForApp(appId: number, roomId: number) {
   const app = dal.getApp(appId);
@@ -55,6 +56,12 @@ export async function POST(
       kind: "message",
       body_md: content,
       author_user_id: authUser.id,
+    });
+
+    await createCoordinatorRoomReply({
+      app: result.app!,
+      room: result.room!,
+      userMessage: message,
     });
 
     return NextResponse.json(message, { status: 201 });

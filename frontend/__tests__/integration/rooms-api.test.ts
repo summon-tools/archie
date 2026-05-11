@@ -13,6 +13,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.doUnmock("@/lib/server/room-agents");
+  vi.doUnmock("@/lib/server/agent");
   ctx.cleanup();
 });
 
@@ -118,6 +120,17 @@ describe("rooms API", () => {
     const token = await createAuthToken();
     const dal = await import("@/lib/server/dal/rooms");
     const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    vi.doMock("@/lib/server/room-agents", () => ({
+      createCoordinatorRoomReply: vi.fn(async ({ room }: any) => {
+        const roomsDal = await import("@/lib/server/dal/rooms");
+        return roomsDal.createRoomMessage({
+          room_id: room.id,
+          role: "agent",
+          agent_key: "coordinator",
+          body_md: "Mock coordinator reply.",
+        });
+      }),
+    }));
     const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/messages/route");
 
     const created = await routes.POST(
@@ -141,8 +154,53 @@ describe("rooms API", () => {
 
     expect(listed.status).toBe(200);
     const body = await listed.json();
-    expect(body.messages).toHaveLength(1);
+    expect(body.messages).toHaveLength(2);
     expect(body.messages[0].body_md).toBe("Please critique this plan.");
+    expect(body.messages[1]).toMatchObject({
+      role: "agent",
+      agent_key: "coordinator",
+      body_md: "Mock coordinator reply.",
+    });
+  });
+
+  it("persists a coordinator agent reply for room chat", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    const userMessage = dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Who am I talking to?",
+    });
+    const ephemeralQuery = vi.fn(async () => "You are talking to the Coordinator for this planning room.");
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ ephemeralQuery })),
+    }));
+    const { createCoordinatorRoomReply } = await import("@/lib/server/room-agents");
+
+    const reply = await createCoordinatorRoomReply({
+      app: appRow,
+      room,
+      userMessage,
+    });
+
+    expect(reply).toMatchObject({
+      role: "agent",
+      agent_key: "coordinator",
+      body_md: "You are talking to the Coordinator for this planning room.",
+    });
+    expect(ephemeralQuery).toHaveBeenCalledWith(
+      expect.stringContaining("Latest user message:\nWho am I talking to?"),
+      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app" }),
+    );
+
+    const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;
+    expect(run).toMatchObject({
+      agent_key: "coordinator",
+      status: "completed",
+      model_id: "claude-sonnet-4-6",
+    });
   });
 
   it("creates and updates room plans and steps", async () => {

@@ -2,11 +2,14 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ArrowSquareOut, ChatsCircle, CheckCircle, CircleNotch, Flag, PaperPlaneTilt, PlayCircle, Plus, Sparkle, UsersThree } from "@phosphor-icons/react";
 import { advancePlanStepGate, createPlanStep, createRoom, createRoomPlan, executeNextPlanStep, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
+import { PROSE_CLASSES } from "@/lib/prose";
 
 interface HomePanelProps {
   appId: number;
@@ -307,6 +310,9 @@ function RoomShell({
               {sending ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneTilt size={16} weight="bold" />}
             </button>
           </div>
+          {sending && (
+            <p className="mt-2 text-xs text-th-muted">Coordinator is thinking...</p>
+          )}
         </div>
       </div>
     </div>
@@ -332,7 +338,13 @@ function RoomMessageBubble({ message }: { message: RoomMessage }) {
             </span>
           )}
         </div>
-        <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p>
+        {isUser ? (
+          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p>
+        ) : (
+          <div className={PROSE_CLASSES}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.body_md}</ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );
