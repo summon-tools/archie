@@ -17,7 +17,7 @@ import type {
 } from "../types";
 
 const CODEX_MODELS: ModelEntry[] = [
-  { id: "gpt-5.4", label: "GPT-5.4", provider: "codex" },
+  { id: "gpt-5.5", label: "GPT-5.5", provider: "codex" },
   { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "codex" },
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", provider: "codex" },
 ];
