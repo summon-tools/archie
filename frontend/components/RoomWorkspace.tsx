@@ -11,6 +11,7 @@ import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
 import RoomChatInput from "@/components/RoomChatInput";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
 
 interface RoomWorkspaceProps {
   appId: number;
@@ -20,6 +21,12 @@ interface RoomWorkspaceProps {
 }
 
 export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated }: RoomWorkspaceProps) {
+  const { leftWidth, isDragging, containerRef, dragHandleProps } = useResizablePanel({
+    storageKey: "archie-room-plan-ratio",
+    defaultWidth: 78,
+    minWidth: 58,
+    maxWidth: 84,
+  });
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
@@ -100,8 +107,11 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   }, [awaitingReplyAfterId, awaitingReplyAgentKey, awaitingReplyStartedAt, messages]);
 
   return (
-    <div className="flex-1 min-h-0 bg-th-main flex">
-      <main className="flex-1 min-w-0 flex flex-col">
+    <div className="flex-1 min-h-0 bg-th-main flex" ref={containerRef}>
+      <main
+        className="h-full min-w-0 flex flex-col"
+        style={{ width: `${leftWidth}%` }}
+      >
         {room ? (
           <RoomShell
             room={room}
@@ -131,7 +141,28 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
         )}
       </main>
 
-      <aside className="w-80 border-l border-th bg-th-panel flex flex-col min-h-0">
+      <div
+        className={`w-1 flex-shrink-0 relative group transition-colors ${
+          isDragging
+            ? "bg-brand-400/40"
+            : "bg-th-subtle hover:bg-brand-400/30"
+        }`}
+        {...dragHandleProps}
+      >
+        <div
+          className={`absolute inset-y-0 -left-0.5 -right-0.5 ${
+            isDragging ? "" : "group-hover:bg-brand-400/10"
+          }`}
+        />
+      </div>
+
+      <aside
+        className="h-full min-w-0 bg-th-panel flex flex-col"
+        style={{
+          width: `${100 - leftWidth}%`,
+          pointerEvents: isDragging ? "none" : undefined,
+        }}
+      >
         <PlanPanel
           appId={appId}
           room={room}

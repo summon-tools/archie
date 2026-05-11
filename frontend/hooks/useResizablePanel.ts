@@ -7,16 +7,28 @@ const DEFAULT_WIDTH = 50;
 const MIN_WIDTH = 30;
 const MAX_WIDTH = 70;
 
-export function useResizablePanel() {
+interface ResizablePanelOptions {
+  storageKey?: string;
+  defaultWidth?: number;
+  minWidth?: number;
+  maxWidth?: number;
+}
+
+export function useResizablePanel(options: ResizablePanelOptions = {}) {
+  const storageKey = options.storageKey ?? STORAGE_KEY;
+  const defaultWidth = options.defaultWidth ?? DEFAULT_WIDTH;
+  const minWidth = options.minWidth ?? MIN_WIDTH;
+  const maxWidth = options.maxWidth ?? MAX_WIDTH;
+
   const [leftWidth, setLeftWidth] = useState(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         const val = parseFloat(saved);
-        if (!isNaN(val) && val >= MIN_WIDTH && val <= MAX_WIDTH) return val;
+        if (!isNaN(val) && val >= minWidth && val <= maxWidth) return val;
       }
     }
-    return DEFAULT_WIDTH;
+    return defaultWidth;
   });
 
   const [isDragging, setIsDragging] = useState(false);
@@ -35,14 +47,14 @@ export function useResizablePanel() {
       if (!container) return;
       const rect = container.getBoundingClientRect();
       const pct = ((e.clientX - rect.left) / rect.width) * 100;
-      const clamped = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, pct));
+      const clamped = Math.max(minWidth, Math.min(maxWidth, pct));
       setLeftWidth(clamped);
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
       setLeftWidth((w) => {
-        localStorage.setItem(STORAGE_KEY, String(w));
+        localStorage.setItem(storageKey, String(w));
         return w;
       });
     };
@@ -53,7 +65,7 @@ export function useResizablePanel() {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isDragging]);
+  }, [isDragging, maxWidth, minWidth, storageKey]);
 
   return {
     leftWidth,
