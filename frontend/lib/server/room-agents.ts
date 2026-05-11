@@ -1,5 +1,5 @@
 import { DEFAULT_HOME_AGENTS, getHomeAgent, type HomeAgentDefinition } from "@/lib/home/agents";
-import { getProvider } from "@/lib/server/agent";
+import { getProvider, type AgentProvider, type ToolStreamEvent } from "@/lib/server/agent";
 import * as dal from "./dal";
 import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
 
@@ -32,6 +32,8 @@ function buildRoomAgentPrompt({
       : "- Surface the most important risks, tradeoffs, questions, and recommendations in your area.",
     isCoordinator ? "- Route concerns to the fixed agent team when useful." : null,
     "- Do not claim that implementation has started unless a plan step has been executed.",
+    "- You may inspect the repository for context, but this is read-only planning chat.",
+    "- Do not edit files, install dependencies, change git state, or create commits from this room reply.",
     "- Keep replies concise and practical.",
     "",
     "Agent team:",
@@ -76,6 +78,37 @@ function getReplyAgent(message: RoomMessageRow): HomeAgentDefinition {
   return getTaggedAgent(message) || getHomeAgent("coordinator");
 }
 
+async function runPlanningAgentQuery({
+  provider,
+  prompt,
+  model,
+  cwd,
+}: {
+  provider: AgentProvider;
+  prompt: string;
+  model: string;
+  cwd: string;
+}): Promise<{ text: string; events: ToolStreamEvent[] }> {
+  const events: ToolStreamEvent[] = [];
+  let text = "";
+
+  for await (const event of provider.toolEnabledStream(prompt, {
+    model,
+    cwd,
+    maxTurns: 6,
+  })) {
+    events.push(event);
+    if (event.type === "result" && event.resultText) {
+      text = event.resultText;
+    }
+    if (event.type === "error") {
+      throw new Error(event.detail);
+    }
+  }
+
+  return { text, events };
+}
+
 export async function createRoomAgentReply({
   app,
   room,
@@ -99,23 +132,25 @@ export async function createRoomAgentReply({
     provider_id: agent.defaultProvider,
     model_id: agent.defaultModel,
     phase: "planning",
-    tool_policy_json: JSON.stringify({ mode: "planning_chat", tools: "none" }),
+    tool_policy_json: JSON.stringify({ mode: "planning_chat", tools: "read_only_codebase" }),
     input_json: JSON.stringify({ prompt }),
   });
 
   try {
     const provider = getProvider(agent.defaultProvider);
-    const text = (await provider.ephemeralQuery(prompt, {
+    const result = await runPlanningAgentQuery({
+      provider,
+      prompt,
       model: agent.defaultModel,
-      maxTurns: 1,
       cwd: app.directory,
-    })).trim();
+    });
+    const text = result.text.trim();
 
     const replyText = text || `I am the ${agent.name} for this planning room. I can help with ${agent.role.toLowerCase()}`;
 
     dal.updateRoomAgentRun(run.id, {
       status: "completed",
-      result_json: JSON.stringify({ text: replyText }),
+      result_json: JSON.stringify({ text: replyText, events: result.events }),
     });
 
     return dal.createRoomMessage({

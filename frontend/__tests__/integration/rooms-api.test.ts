@@ -258,9 +258,16 @@ describe("rooms API", () => {
       role: "user",
       body_md: "Who am I talking to?",
     });
-    const ephemeralQuery = vi.fn(async () => "You are talking to the Coordinator for this planning room.");
+    const toolEnabledStream = vi.fn(async function* () {
+      yield { type: "tool_use", tool: "Grep", detail: "/agent/" };
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: "You are talking to the Coordinator for this planning room.",
+      };
+    });
     vi.doMock("@/lib/server/agent", () => ({
-      getProvider: vi.fn(() => ({ ephemeralQuery })),
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
     }));
     const { createRoomAgentReply } = await import("@/lib/server/room-agents");
 
@@ -275,11 +282,11 @@ describe("rooms API", () => {
       agent_key: "coordinator",
       body_md: "You are talking to the Coordinator for this planning room.",
     });
-    expect(ephemeralQuery).toHaveBeenCalledWith(
+    expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Latest user message:\nWho am I talking to?"),
-      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app" }),
+      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 6 }),
     );
-    expect(ephemeralQuery).toHaveBeenCalledWith(
+    expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Respond as Coordinator."),
       expect.any(Object),
     );
@@ -289,7 +296,9 @@ describe("rooms API", () => {
       agent_key: "coordinator",
       status: "completed",
       model_id: "claude-sonnet-4-6",
+      tool_policy_json: JSON.stringify({ mode: "planning_chat", tools: "read_only_codebase" }),
     });
+    expect(JSON.parse(run.result_json).events[0]).toMatchObject({ type: "tool_use", tool: "Grep" });
   });
 
   it("routes tagged room messages to the selected agent", async () => {
@@ -303,9 +312,15 @@ describe("rooms API", () => {
       body_md: "Review the architecture.",
       payload_json: JSON.stringify({ target_agent_key: "architect" }),
     });
-    const ephemeralQuery = vi.fn(async () => "Architect perspective: split the work into bounded steps.");
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: "Architect perspective: split the work into bounded steps.",
+      };
+    });
     vi.doMock("@/lib/server/agent", () => ({
-      getProvider: vi.fn(() => ({ ephemeralQuery })),
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
     }));
     const { createRoomAgentReply } = await import("@/lib/server/room-agents");
 
@@ -320,11 +335,11 @@ describe("rooms API", () => {
       agent_key: "architect",
       body_md: "Architect perspective: split the work into bounded steps.",
     });
-    expect(ephemeralQuery).toHaveBeenCalledWith(
+    expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("You are the Architect agent inside an Archie planning room"),
-      expect.objectContaining({ model: "claude-opus-4-7", cwd: "/tmp/test-app" }),
+      expect.objectContaining({ model: "claude-opus-4-7", cwd: "/tmp/test-app", maxTurns: 6 }),
     );
-    expect(ephemeralQuery).toHaveBeenCalledWith(
+    expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Respond as Architect."),
       expect.any(Object),
     );
