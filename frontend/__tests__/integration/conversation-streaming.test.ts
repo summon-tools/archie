@@ -117,4 +117,89 @@ describe("conversation streaming", () => {
     const statusEvents = events.filter((e: any) => e.type === "status");
     expect(statusEvents.length).toBeGreaterThan(0);
   });
+
+  it("starts plan step gates when a linked implementation conversation completes", async () => {
+    const app = seedApp(db);
+    const conversation = seedConversation(db, app.id);
+    const workItemsDal = await import("@/lib/server/dal/work-items");
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const workItem = workItemsDal.createWorkItem({
+      app_id: app.id,
+      primary_conversation_id: conversation.id,
+      title: "Room plan execution",
+      origin_type: "room_plan",
+    });
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Execution Room" });
+    const plan = roomsDal.createPlan({ room_id: room.id, title: "Execution Plan", status: "executing" });
+    const step = roomsDal.createPlanStep({
+      plan_id: plan.id,
+      title: "Implement persistence",
+      status: "implementing",
+    });
+    roomsDal.updatePlanStep(step.id, {
+      linked_work_item_id: workItem.id,
+      linked_conversation_id: conversation.id,
+    });
+    roomsDal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "implementation",
+      agent_key: "coordinator",
+      status: "started",
+      summary_md: "Started implementation conversation.",
+    });
+
+    const mockProvider = createMockProvider({
+      streamTask: async function* () {
+        yield {
+          type: "result" as const,
+          result: {
+            text: "Implementation complete.",
+            sessionId: "mock-sess-plan",
+            costUsd: 0.001,
+            durationMs: 50,
+            numTurns: 1,
+            usage: { inputTokens: 10, outputTokens: 5 },
+            models: ["mock-model"],
+          },
+        };
+      },
+    });
+
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: () => mockProvider,
+    }));
+    vi.doMock("@/lib/server/knowledge/indexer", () => ({ refreshIfStale: async () => {} }));
+    vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
+    vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
+    vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
+    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
+    vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
+    vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
+
+    const { streamConversationMessage } = await import("@/lib/server/conversation");
+    const stream = await streamConversationMessage(
+      conversation.id,
+      "Finish this step",
+      "Test App",
+      ctx.tmpDir,
+    );
+
+    const reader = stream.getReader();
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    const updatedStep = roomsDal.getPlanStep(step.id)!;
+    expect(updatedStep.status).toBe("reviewing");
+    const events = roomsDal.getPlanStepEvents(step.id);
+    expect(events.find((event) => event.phase === "implementation")?.status).toBe("completed");
+    expect(events.filter((event) => event.status === "pending").map((event) => event.phase)).toEqual([
+      "code_review",
+      "qa_validation",
+      "commit",
+    ]);
+    const roomMessage = db.prepare("SELECT * FROM room_messages WHERE room_id = ? AND kind = 'execution_event'").get(room.id) as any;
+    expect(roomMessage.body_md).toContain("Started review gates");
+  });
 });

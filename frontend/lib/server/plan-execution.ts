@@ -359,6 +359,40 @@ export function startPlanStepGates({
   return result;
 }
 
+export function startPlanStepGatesForCompletedConversation({
+  appId,
+  conversationId,
+}: {
+  appId: number;
+  conversationId: number;
+}): {
+  plan: PlanRow;
+  step: PlanStepRow;
+  events: PlanStepEventRow[];
+} | null {
+  const step = dal.getActivePlanStepByConversation(conversationId);
+  if (!step) return null;
+
+  const plan = dal.getPlan(step.plan_id);
+  if (!plan) return null;
+
+  const room = dal.getRoom(plan.room_id);
+  if (!room || room.app_id !== appId) return null;
+
+  try {
+    return startPlanStepGates({ appId, roomId: room.id, stepId: step.id });
+  } catch (error) {
+    if (error instanceof PlanExecutionError && error.code === "gate_already_pending") {
+      return {
+        plan,
+        step,
+        events: dal.getPlanStepEvents(step.id),
+      };
+    }
+    throw error;
+  }
+}
+
 export function advancePlanStepGate({
   appId,
   roomId,

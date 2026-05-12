@@ -451,6 +451,18 @@ export async function streamConversationMessage(
                 }
                 dal.updateRun(run.id, runUpdate);
 
+                try {
+                  const { startPlanStepGatesForCompletedConversation } = await import("./plan-execution");
+                  startPlanStepGatesForCompletedConversation({
+                    appId: conversation.app_id,
+                    conversationId,
+                  });
+                } catch {
+                  // Plan execution advancement is best-effort here. The
+                  // conversation result is already persisted and should still
+                  // complete even if the plan linkage is stale.
+                }
+
                 safeEnqueue(`event: status\ndata: ${JSON.stringify({ status: "completed" })}\n\n`);
 
                 // Fire-and-forget: generate brief immediately, defer heavier work

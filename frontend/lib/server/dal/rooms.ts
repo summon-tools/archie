@@ -206,6 +206,16 @@ export function getPlanStep(stepId: number): PlanStepRow | undefined {
   return getDb().prepare("SELECT * FROM plan_steps WHERE id = ?").get(stepId) as PlanStepRow | undefined;
 }
 
+export function getActivePlanStepByConversation(conversationId: number): PlanStepRow | undefined {
+  return getDb().prepare(
+    `SELECT * FROM plan_steps
+     WHERE linked_conversation_id = ?
+       AND status IN ('implementing', 'fixing')
+     ORDER BY updated_at DESC, id DESC
+     LIMIT 1`
+  ).get(conversationId) as PlanStepRow | undefined;
+}
+
 export function getPlanSteps(planId: number): PlanStepRow[] {
   return getDb().prepare(
     `SELECT * FROM plan_steps
