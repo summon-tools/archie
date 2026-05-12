@@ -452,11 +452,24 @@ export async function streamConversationMessage(
                 dal.updateRun(run.id, runUpdate);
 
                 try {
-                  const { startPlanStepGatesForCompletedConversation } = await import("./plan-execution");
-                  startPlanStepGatesForCompletedConversation({
+                  const {
+                    scheduleAutomatedPlanStepGates,
+                    startPlanStepGatesForCompletedConversation,
+                  } = await import("./plan-execution");
+                  const gateResult = startPlanStepGatesForCompletedConversation({
                     appId: conversation.app_id,
                     conversationId,
                   });
+                  if (gateResult) {
+                    const planRoom = dal.getRoom(gateResult.plan.room_id);
+                    if (planRoom) {
+                      scheduleAutomatedPlanStepGates({
+                        appId: conversation.app_id,
+                        roomId: planRoom.id,
+                        stepId: gateResult.step.id,
+                      });
+                    }
+                  }
                 } catch {
                   // Plan execution advancement is best-effort here. The
                   // conversation result is already persisted and should still

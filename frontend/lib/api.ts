@@ -304,6 +304,10 @@ export async function startPlanStepGates(appId: number, roomId: number, stepId: 
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps/${stepId}/gates/start`, { method: "POST" });
 }
 
+export async function runPlanStepGates(appId: number, roomId: number, stepId: number): Promise<{ status: string }> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps/${stepId}/gates/run`, { method: "POST" });
+}
+
 export async function advancePlanStepGate(
   appId: number,
   roomId: number,

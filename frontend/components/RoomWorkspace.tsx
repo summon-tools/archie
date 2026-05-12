@@ -5,7 +5,7 @@ import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CaretDown, CaretRight, ChatsCircle, CheckCircle, Flag, PlayCircle, Sparkle, X } from "@phosphor-icons/react";
-import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
+import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, runPlanStepGates, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
@@ -361,21 +361,59 @@ function PlanPanel({
   const { data, mutate, isLoading } = useSWR<RoomPlanResponse>(
     room ? `/api/apps/${appId}/rooms/${room.id}/plan` : null,
     fetcher,
+    { refreshInterval: room ? 2000 : 0 },
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
+  const [autoGateRunKey, setAutoGateRunKey] = useState<string | null>(null);
 
   const plan = data?.plan || null;
   const steps = data?.steps || [];
   const planningContext = data?.planning_context_md || room?.planning_context_md || "";
   const activeStep = steps.find((step) => ["implementing", "reviewing", "fixing", "validating", "committing"].includes(step.status));
   const nextPendingStep = steps.find((step) => step.status === "pending");
+  const lastCompletedStep = [...steps].reverse().find((step) => step.status === "completed");
   const roomClosed = room?.status !== "open";
 
   useEffect(() => {
     setPlanningContextCollapsed(true);
+    setAutoGateRunKey(null);
   }, [room?.id]);
+
+  const currentGate = activeStep?.events?.find((event) => (
+    GATE_LABELS[event.phase] && (event.status === "pending" || event.status === "running")
+  ));
+
+  useEffect(() => {
+    if (!room || roomClosed || !activeStep || !currentGate) return;
+    if (!["reviewing", "validating", "committing"].includes(activeStep.status)) return;
+
+    const key = `${room.id}:${activeStep.id}:${currentGate.id}:${currentGate.status}`;
+    if (autoGateRunKey === key) return;
+    setAutoGateRunKey(key);
+
+    void runPlanStepGates(appId, room.id, activeStep.id)
+      .then(() => mutate())
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to run automated gate");
+      });
+  }, [activeStep, appId, autoGateRunKey, currentGate, mutate, room, roomClosed]);
+
+  useEffect(() => {
+    if (!room || roomClosed || !plan || activeStep || !nextPendingStep || !lastCompletedStep) return;
+    if (plan.status !== "executing") return;
+
+    const key = `${room.id}:continue:${lastCompletedStep.id}:${nextPendingStep.id}`;
+    if (autoGateRunKey === key) return;
+    setAutoGateRunKey(key);
+
+    void runPlanStepGates(appId, room.id, lastCompletedStep.id)
+      .then(() => mutate())
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to continue plan execution");
+      });
+  }, [activeStep, appId, autoGateRunKey, lastCompletedStep, mutate, nextPendingStep, plan, room, roomClosed]);
 
   const handleGeneratePlan = async () => {
     if (!room || roomClosed || busy) return;
@@ -620,6 +658,10 @@ function PlanStepCard({
   ].filter(Boolean);
   const events = step.events?.filter((event) => GATE_LABELS[event.phase]) || [];
   const pendingEvent = events.find((event) => event.status === "pending");
+  const runningEvent = events.find((event) => event.status === "running");
+  const latestDetailedEvent = [...events].reverse().find((event) => (
+    event.summary_md && event.summary_md !== GATE_LABELS[event.phase]
+  ));
 
   return (
     <div className="rounded-lg border border-th bg-th-main p-3">
@@ -652,6 +694,21 @@ function PlanStepCard({
               ))}
             </div>
           )}
+          {runningEvent && (
+            <p className="mt-2 text-xs text-th-muted">
+              {GATE_LABELS[runningEvent.phase]} is running...
+            </p>
+          )}
+          {latestDetailedEvent && (
+            <div className="mt-2 rounded-lg border border-th bg-th-subtle p-2">
+              <div className="mb-1 text-meta font-semibold uppercase tracking-wider text-th-dimmed">
+                {GATE_LABELS[latestDetailedEvent.phase]} feedback
+              </div>
+              <div className={PROSE_CLASSES}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{latestDetailedEvent.summary_md}</ReactMarkdown>
+              </div>
+            </div>
+          )}
           {(step.status === "implementing" || step.status === "fixing") && step.linked_work_item_id && (
             <button
               onClick={() => onStartGates(step)}
@@ -661,7 +718,7 @@ function PlanStepCard({
               Start review gates
             </button>
           )}
-          {pendingEvent && ["reviewing", "validating", "committing"].includes(step.status) && (
+          {pendingEvent && !runningEvent && ["reviewing", "validating", "committing"].includes(step.status) && (
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 onClick={() => onAdvanceGate(step, "passed")}

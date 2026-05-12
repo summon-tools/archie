@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import fs from "fs";
+import path from "path";
+import { execSync } from "child_process";
 import { createTestContext, getTestDb, type TestContext } from "../helpers/test-db";
 import { seedApp, seedUser } from "../helpers/seed";
+import { createTempGitRepo } from "../helpers/temp-git";
 import type Database from "better-sqlite3";
 
 let ctx: TestContext;
@@ -975,6 +979,142 @@ describe("rooms API", () => {
     expect(completedStep.commit_sha).toBe("abc123");
     expect(dal.getPlan(plan.id)!.status).toBe("completed");
     expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "completed")).toHaveLength(7);
+  });
+
+  it("runs automated gate agents and commits the completed step", async () => {
+    const repo = createTempGitRepo("archie-plan-gates-");
+    try {
+      fs.writeFileSync(path.join(repo.dir, "feature.txt"), "implemented\n");
+
+      const app = seedApp(db, { directory: repo.dir });
+      const roomsDal = await import("@/lib/server/dal/rooms");
+      const workItemsDal = await import("@/lib/server/dal/work-items");
+      const conversation = db.prepare(
+        "INSERT INTO conversations (app_id, kind, title) VALUES (?, 'task', ?)",
+      ).run(app.id, "Plan execution");
+      const conversationId = Number(conversation.lastInsertRowid);
+      const workItem = workItemsDal.createWorkItem({
+        app_id: app.id,
+        primary_conversation_id: conversationId,
+        title: "Add public blog",
+        origin_type: "room_plan",
+      });
+      workItemsDal.updateWorkItemEnv(workItem.id, {
+        worktree_dir: repo.dir,
+        branch_name: "main",
+        worktree_status: "ready",
+      });
+
+      const room = roomsDal.createRoom({ app_id: app.id, title: "Automated Gates" });
+      const plan = roomsDal.createPlan({ room_id: room.id, title: "Automated Plan", status: "executing" });
+      const step = roomsDal.createPlanStep({
+        plan_id: plan.id,
+        title: "Add public blog",
+        status: "reviewing",
+      });
+      roomsDal.updatePlanStep(step.id, {
+        linked_work_item_id: workItem.id,
+        linked_conversation_id: conversationId,
+      });
+      roomsDal.createPlanStepEvent({
+        plan_step_id: step.id,
+        phase: "code_review",
+        agent_key: "reviewer",
+        status: "pending",
+        summary_md: "Code review",
+      });
+      roomsDal.createPlanStepEvent({
+        plan_step_id: step.id,
+        phase: "qa_validation",
+        agent_key: "qa",
+        status: "pending",
+        summary_md: "QA validation",
+      });
+      roomsDal.createPlanStepEvent({
+        plan_step_id: step.id,
+        phase: "commit",
+        agent_key: "coordinator",
+        status: "pending",
+        summary_md: "Commit checkpoint",
+      });
+
+      const toolEnabledStream = vi.fn(async function* () {
+        yield {
+          type: "result" as const,
+          detail: "done",
+          resultText: JSON.stringify({
+            status: "passed",
+            summary_md: "Gate passed.",
+            feedback_md: "No blocking issues.",
+          }),
+        };
+      });
+      vi.doMock("@/lib/server/agent", () => ({
+        getProvider: vi.fn(() => ({ toolEnabledStream })),
+      }));
+
+      const { runAutomatedPlanStepGates } = await import("@/lib/server/plan-execution");
+      const result = await runAutomatedPlanStepGates({
+        appId: app.id,
+        roomId: room.id,
+        stepId: step.id,
+      });
+
+      expect(result?.step.status).toBe("completed");
+      expect(roomsDal.getPlan(plan.id)!.status).toBe("completed");
+      expect(roomsDal.getPlanStepEvents(step.id).map((event) => event.status)).toEqual([
+        "completed",
+        "completed",
+        "completed",
+      ]);
+      expect(toolEnabledStream).toHaveBeenCalledTimes(2);
+
+      const gitStatus = execSync("git status --porcelain", { cwd: repo.dir, encoding: "utf-8" }).trim();
+      expect(gitStatus).toBe("");
+      const commitSubject = execSync("git log -1 --format=%s", { cwd: repo.dir, encoding: "utf-8" }).trim();
+      expect(commitSubject).toBe("chore: add public blog");
+      expect(roomsDal.getPlanStep(step.id)!.commit_sha).toBeTruthy();
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not apply a stale gate result to a later pending gate", async () => {
+    const app = seedApp(db);
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Stale Gate Room" });
+    const plan = roomsDal.createPlan({ room_id: room.id, title: "Stale Gate Plan", status: "executing" });
+    const step = roomsDal.createPlanStep({
+      plan_id: plan.id,
+      title: "Guard gate ordering",
+      status: "validating",
+    });
+    const completedReview = roomsDal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "code_review",
+      agent_key: "reviewer",
+      status: "completed",
+      summary_md: "Code review passed",
+    });
+    const pendingQa = roomsDal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "qa_validation",
+      agent_key: "qa",
+      status: "pending",
+      summary_md: "QA validation",
+    });
+
+    const { advancePlanStepGate, PlanExecutionError } = await import("@/lib/server/plan-execution");
+    expect(() => advancePlanStepGate({
+      appId: app.id,
+      roomId: room.id,
+      stepId: step.id,
+      gateEventId: completedReview.id,
+      outcome: "passed",
+      summary: "Stale code review result",
+    })).toThrow(PlanExecutionError);
+
+    expect(roomsDal.getPlanStepEvents(step.id).find((event) => event.id === pendingQa.id)?.status).toBe("pending");
   });
 
   it("moves a step back to fixing when a gate fails", async () => {
