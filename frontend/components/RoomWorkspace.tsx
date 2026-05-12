@@ -339,13 +339,17 @@ function PlanPanel({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [planningContextCollapsed, setPlanningContextCollapsed] = useState(false);
+  const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
 
   const plan = data?.plan || null;
   const steps = data?.steps || [];
   const planningContext = data?.planning_context_md || room?.planning_context_md || "";
   const activeStep = steps.find((step) => ["implementing", "reviewing", "fixing", "validating", "committing"].includes(step.status));
   const nextPendingStep = steps.find((step) => step.status === "pending");
+
+  useEffect(() => {
+    setPlanningContextCollapsed(true);
+  }, [room?.id]);
 
   const handleGeneratePlan = async () => {
     if (!room || busy) return;
