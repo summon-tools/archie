@@ -5,7 +5,7 @@ import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatsCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
-import { advancePlanStepGate, createPlanStep, executeNextPlanStep, generateRoomPlan, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
+import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
@@ -339,8 +339,6 @@ function PlanPanel({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stepTitle, setStepTitle] = useState("");
-  const [stepObjective, setStepObjective] = useState("");
 
   const plan = data?.plan || null;
   const steps = data?.steps || [];
@@ -414,31 +412,6 @@ function PlanPanel({
       await mutate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update plan");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleCreateStep = async () => {
-    if (!room || !plan || !stepTitle.trim() || busy) return;
-    const title = stepTitle.trim();
-    const objective = stepObjective.trim();
-    setBusy(true);
-    setError(null);
-    setStepTitle("");
-    setStepObjective("");
-    try {
-      await createPlanStep(appId, room.id, {
-        title,
-        objective_md: objective,
-        implementation_prompt_md: objective,
-        acceptance_criteria_md: "",
-      });
-      await mutate();
-    } catch (err) {
-      setStepTitle(title);
-      setStepObjective(objective);
-      setError(err instanceof Error ? err.message : "Failed to create plan step");
     } finally {
       setBusy(false);
     }
@@ -559,31 +532,6 @@ function PlanPanel({
                   )}
                 </section>
 
-                <section className="rounded-lg border border-th bg-th-main p-3">
-                  <p className="text-sm font-medium text-th-secondary mb-2">Add step</p>
-                  <input
-                    value={stepTitle}
-                    onChange={(event) => setStepTitle(event.target.value)}
-                    placeholder="Step title"
-                    className="w-full rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
-                    disabled={busy}
-                  />
-                  <textarea
-                    value={stepObjective}
-                    onChange={(event) => setStepObjective(event.target.value)}
-                    placeholder="Objective or implementation brief"
-                    rows={3}
-                    className="mt-2 w-full resize-none rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none focus:border-th-strong"
-                    disabled={busy}
-                  />
-                  <button
-                    onClick={handleCreateStep}
-                    disabled={!stepTitle.trim() || busy}
-                    className="mt-2 w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {busy ? "Saving..." : "Add step"}
-                  </button>
-                </section>
               </>
             )}
           </>
