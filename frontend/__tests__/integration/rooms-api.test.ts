@@ -1047,6 +1047,110 @@ describe("rooms API", () => {
     );
   });
 
+  it("pauses plan execution and prevents automated gates from continuing", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Pause Room" });
+    const plan = roomsDal.createPlan({ room_id: room.id, title: "Pause Plan", status: "executing" });
+    roomsDal.updatePlan(plan.id, {
+      execution_state: "running",
+      execution_started_at: "2000-01-01T10:00:00.000Z",
+    });
+    const step = roomsDal.createPlanStep({
+      plan_id: plan.id,
+      title: "Paused gate step",
+      status: "reviewing",
+    });
+    const gate = roomsDal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "code_review",
+      agent_key: "reviewer",
+      status: "pending",
+      summary_md: "Code review",
+    });
+    const pauseRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/pause/route");
+
+    const paused = await pauseRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/pause`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(paused.status).toBe(200);
+    const pausedBody = await paused.json();
+    expect(pausedBody.plan.execution_state).toBe("paused");
+    expect(pausedBody.plan.execution_elapsed_ms).toBeGreaterThan(0);
+
+    const { runAutomatedPlanStepGates } = await import("@/lib/server/plan-execution");
+    const result = await runAutomatedPlanStepGates({
+      appId: app.id,
+      roomId: room.id,
+      stepId: step.id,
+    });
+
+    expect(result?.plan.execution_state).toBe("paused");
+    expect(roomsDal.getPlanStepEvents(step.id).find((event) => event.id === gate.id)?.status).toBe("pending");
+  });
+
+  it("resumes paused plan execution and continues the current gate", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Resume Room" });
+    const plan = roomsDal.createPlan({ room_id: room.id, title: "Resume Plan", status: "executing" });
+    roomsDal.updatePlan(plan.id, {
+      execution_state: "paused",
+      execution_started_at: "2000-01-01T10:00:00.000Z",
+      execution_paused_at: "2000-01-01T10:01:00.000Z",
+    });
+    const step = roomsDal.createPlanStep({
+      plan_id: plan.id,
+      title: "Resume gate step",
+      status: "reviewing",
+    });
+    roomsDal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "code_review",
+      agent_key: "reviewer",
+      status: "pending",
+      summary_md: "Code review",
+    });
+
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        detail: "done",
+        resultText: JSON.stringify({
+          status: "passed",
+          summary_md: "Gate passed after resume.",
+          feedback_md: "No blockers.",
+        }),
+      };
+    });
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
+    }));
+    const resumeRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/resume/route");
+
+    const resumed = await resumeRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/resume`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(resumed.status).toBe(200);
+    const resumedBody = await resumed.json();
+    expect(resumedBody.plan.execution_state).toBe("running");
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(toolEnabledStream).toHaveBeenCalledTimes(1);
+    expect(roomsDal.getPlanStep(step.id)!.status).toBe("completed");
+    expect(roomsDal.getPlan(plan.id)!).toMatchObject({
+      status: "completed",
+      execution_state: "completed",
+    });
+  });
+
   it("orchestrates review, security, qa, browser, and commit gates deterministically", async () => {
     const app = seedApp(db);
     const token = await createAuthToken();

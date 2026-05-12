@@ -232,6 +232,7 @@ export type HomeRoomStatus = "open" | "archived";
 export type RoomMessageRole = "user" | "agent" | "system";
 export type RoomMessageKind = "message" | "decision" | "plan_update" | "execution_event" | "error";
 export type PlanStatus = "draft" | "ready" | "executing" | "completed" | "blocked" | "cancelled";
+export type PlanExecutionState = "idle" | "running" | "paused" | "completed";
 export type PlanStepRiskLevel = "low" | "medium" | "high";
 export type PlanStepStatus = "pending" | "implementing" | "reviewing" | "fixing" | "validating" | "committing" | "completed" | "blocked" | "failed" | "skipped";
 
@@ -266,6 +267,11 @@ export interface Plan {
   title: string;
   summary_md: string;
   status: PlanStatus;
+  execution_state: PlanExecutionState;
+  execution_started_at: string | null;
+  execution_paused_at: string | null;
+  execution_paused_ms: number;
+  execution_elapsed_ms: number;
   current_version: number;
   created_at: string;
   updated_at: string;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
+import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
 import * as dal from "@/lib/server/dal";
 
 function getRoomForApp(appId: number, roomId: number) {
@@ -22,7 +23,10 @@ function serializePlan(roomId: number) {
     events: dal.getPlanStepEvents(step.id),
   })) : [];
   return {
-    plan,
+    plan: plan ? {
+      ...plan,
+      execution_elapsed_ms: getPlanExecutionElapsedMs(plan),
+    } : null,
     steps,
     planning_context_md: room?.planning_context_md || "",
     planning_context_updated_at: room?.planning_context_updated_at || null,
@@ -99,7 +103,15 @@ export async function PATCH(
     const fields: Record<string, unknown> = {};
     if (body.title !== undefined) fields.title = String(body.title).trim();
     if (body.summary_md !== undefined) fields.summary_md = String(body.summary_md);
-    if (body.status !== undefined) fields.status = body.status;
+    if (body.status !== undefined) {
+      fields.status = body.status;
+      if (body.status === "ready" || body.status === "draft") {
+        fields.execution_state = "idle";
+        fields.execution_started_at = null;
+        fields.execution_paused_at = null;
+        fields.execution_paused_ms = 0;
+      }
+    }
     if (body.current_version !== undefined) fields.current_version = Number(body.current_version);
 
     dal.updatePlan(plan.id, fields);

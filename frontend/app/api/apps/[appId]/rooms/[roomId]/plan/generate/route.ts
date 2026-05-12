@@ -3,6 +3,7 @@ import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { getHomeAgent } from "@/lib/home/agents";
 import { generateRoomPlanFromDiscussion } from "@/lib/server/room-plan-generator";
+import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
 
 function serializePlan(roomId: number) {
   const room = dal.getRoom(roomId);
@@ -12,7 +13,10 @@ function serializePlan(roomId: number) {
     events: dal.getPlanStepEvents(step.id),
   })) : [];
   return {
-    plan,
+    plan: plan ? {
+      ...plan,
+      execution_elapsed_ms: getPlanExecutionElapsedMs(plan),
+    } : null,
     steps,
     planning_context_md: room?.planning_context_md || "",
     planning_context_updated_at: room?.planning_context_updated_at || null,

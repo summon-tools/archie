@@ -197,7 +197,17 @@ export function createPlan(data: {
 
 export function updatePlan(
   planId: number,
-  fields: Partial<Pick<PlanRow, "title" | "summary_md" | "status" | "current_version">>,
+  fields: Partial<Pick<
+    PlanRow,
+    | "title"
+    | "summary_md"
+    | "status"
+    | "execution_state"
+    | "execution_started_at"
+    | "execution_paused_at"
+    | "execution_paused_ms"
+    | "current_version"
+  >>,
 ): void {
   buildUpdate("plans", "id", planId, fields);
 }

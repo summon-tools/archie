@@ -300,6 +300,14 @@ export async function executeNextPlanStep(appId: number, roomId: number): Promis
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/execute-next`, { method: "POST" });
 }
 
+export async function pausePlanExecution(appId: number, roomId: number): Promise<RoomPlanResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/pause`, { method: "POST" });
+}
+
+export async function resumePlanExecution(appId: number, roomId: number): Promise<RoomPlanResponse> {
+  return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/resume`, { method: "POST" });
+}
+
 export async function startPlanStepGates(appId: number, roomId: number, stepId: number): Promise<PlanStepGateResponse> {
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps/${stepId}/gates/start`, { method: "POST" });
 }

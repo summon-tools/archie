@@ -40,6 +40,45 @@ export class PlanExecutionError extends Error {
   }
 }
 
+function parseDbTimestampMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+export function getPlanExecutionElapsedMs(plan: PlanRow, nowMs = Date.now()): number {
+  const startedAt = parseDbTimestampMs(plan.execution_started_at);
+  if (!startedAt) return 0;
+
+  const accumulatedPausedMs = Math.max(0, plan.execution_paused_ms || 0);
+  const currentPausedMs = plan.execution_state === "paused"
+    ? Math.max(0, nowMs - (parseDbTimestampMs(plan.execution_paused_at) || nowMs))
+    : 0;
+
+  return Math.max(0, nowMs - startedAt - accumulatedPausedMs - currentPausedMs);
+}
+
+function runningExecutionFields(plan: PlanRow): Partial<PlanRow> {
+  return {
+    execution_state: "running",
+    execution_started_at: plan.execution_started_at || nowIso(),
+    execution_paused_at: null,
+  };
+}
+
+function isPlanPaused(plan: PlanRow): boolean {
+  return plan.status === "executing" && plan.execution_state === "paused";
+}
+
+function isPlanRunning(plan: PlanRow): boolean {
+  return plan.status === "executing" && plan.execution_state !== "paused";
+}
+
 export function buildPlanStepImplementationPrompt({
   app,
   room,
@@ -119,6 +158,9 @@ export function launchNextPlanStep({
   if (plan.status === "draft") {
     throw new PlanExecutionError("plan_not_ready", "Plan must be marked ready before execution", 409);
   }
+  if (isPlanPaused(plan)) {
+    throw new PlanExecutionError("execution_paused", "Plan execution is paused", 409);
+  }
   if (["completed", "cancelled", "blocked"].includes(plan.status)) {
     throw new PlanExecutionError("plan_not_executable", `Plan is ${plan.status}`, 409);
   }
@@ -166,8 +208,11 @@ export function launchNextPlanStep({
       body_md: prompt,
     });
 
-    if (plan.status === "ready") {
-      dal.updatePlan(plan.id, { status: "executing" });
+    if (plan.status === "ready" || plan.execution_state !== "running") {
+      dal.updatePlan(plan.id, {
+        status: "executing",
+        ...runningExecutionFields(plan),
+      });
     }
 
     dal.updatePlanStep(nextStep.id, {
@@ -244,6 +289,95 @@ function getStepContext(appId: number, roomId: number, stepId: number): {
   }
 
   return { app, room, plan, step };
+}
+
+function getPlanContext(appId: number, roomId: number): {
+  app: AppRow;
+  room: HomeRoomRow;
+  plan: PlanRow;
+} {
+  const app = dal.getApp(appId);
+  if (!app) throw new PlanExecutionError("app_not_found", "App not found", 404);
+
+  const room = dal.getRoom(roomId);
+  if (!room || room.app_id !== app.id) {
+    throw new PlanExecutionError("room_not_found", "Room not found", 404);
+  }
+
+  const plan = dal.getPlansByRoom(room.id)[0];
+  if (!plan) throw new PlanExecutionError("plan_not_found", "Plan not found", 404);
+
+  return { app, room, plan };
+}
+
+export function pausePlanExecution({
+  appId,
+  roomId,
+}: {
+  appId: number;
+  roomId: number;
+}): { plan: PlanRow; steps: PlanStepRow[] } {
+  const { room, plan } = getPlanContext(appId, roomId);
+  if (plan.status !== "executing") {
+    throw new PlanExecutionError("plan_not_executing", "Plan execution is not running", 409);
+  }
+  if (plan.execution_state === "paused") {
+    return { plan, steps: dal.getPlanSteps(plan.id) };
+  }
+
+  getDb().transaction(() => {
+    dal.updatePlan(plan.id, {
+      execution_state: "paused",
+      execution_paused_at: nowIso(),
+    });
+    dal.createRoomMessage({
+      room_id: room.id,
+      role: "system",
+      kind: "execution_event",
+      body_md: `Paused execution for plan: ${plan.title}`,
+      payload_json: JSON.stringify({ plan_id: plan.id, execution_state: "paused" }),
+    });
+  })();
+
+  return { plan: dal.getPlan(plan.id)!, steps: dal.getPlanSteps(plan.id) };
+}
+
+export function resumePlanExecution({
+  appId,
+  roomId,
+}: {
+  appId: number;
+  roomId: number;
+}): { plan: PlanRow; steps: PlanStepRow[] } {
+  const { room, plan } = getPlanContext(appId, roomId);
+  if (plan.status !== "executing") {
+    throw new PlanExecutionError("plan_not_executing", "Plan execution is not running", 409);
+  }
+  if (plan.execution_state !== "paused") {
+    return { plan, steps: dal.getPlanSteps(plan.id) };
+  }
+
+  const pausedAt = parseDbTimestampMs(plan.execution_paused_at);
+  const additionalPausedMs = pausedAt ? Math.max(0, Date.now() - pausedAt) : 0;
+
+  getDb().transaction(() => {
+    dal.updatePlan(plan.id, {
+      execution_state: "running",
+      execution_started_at: plan.execution_started_at || nowIso(),
+      execution_paused_at: null,
+      execution_paused_ms: Math.max(0, plan.execution_paused_ms || 0) + additionalPausedMs,
+    });
+    dal.createRoomMessage({
+      room_id: room.id,
+      role: "system",
+      kind: "execution_event",
+      body_md: `Resumed execution for plan: ${plan.title}`,
+      payload_json: JSON.stringify({ plan_id: plan.id, execution_state: "running" }),
+    });
+  })();
+
+  schedulePlanExecutionContinuation({ appId, roomId, delayMs: 0 });
+  return { plan: dal.getPlan(plan.id)!, steps: dal.getPlanSteps(plan.id) };
 }
 
 function buildGateSequence(step: PlanStepRow): GateDefinition[] {
@@ -323,7 +457,11 @@ function getExistingExecutionTarget(steps: PlanStepRow[]): {
 function syncPlanCompletion(planId: number): PlanRow {
   const steps = dal.getPlanSteps(planId);
   if (steps.length > 0 && steps.every((step) => step.status === "completed" || step.status === "skipped")) {
-    dal.updatePlan(planId, { status: "completed" });
+    dal.updatePlan(planId, {
+      status: "completed",
+      execution_state: "completed",
+      execution_paused_at: null,
+    });
   }
   return dal.getPlan(planId)!;
 }
@@ -342,6 +480,9 @@ export function startPlanStepGates({
   events: PlanStepEventRow[];
 } {
   const { room, plan, step } = getStepContext(appId, roomId, stepId);
+  if (isPlanPaused(plan)) {
+    throw new PlanExecutionError("execution_paused", "Plan execution is paused", 409);
+  }
   if (!["implementing", "fixing"].includes(step.status)) {
     throw new PlanExecutionError("step_not_ready_for_gates", "Step must be implementing or fixing before gates can start", 409);
   }
@@ -409,6 +550,13 @@ export function startPlanStepGatesForCompletedConversation({
 
   const room = dal.getRoom(plan.room_id);
   if (!room || room.app_id !== appId) return null;
+  if (isPlanPaused(plan)) {
+    return {
+      plan,
+      step,
+      events: dal.getPlanStepEvents(step.id),
+    };
+  }
 
   try {
     return startPlanStepGates({ appId, roomId: room.id, stepId: step.id });
@@ -916,6 +1064,87 @@ async function launchAndRunNextStep({
   }
 }
 
+async function continuePlanExecution({
+  appId,
+  roomId,
+}: {
+  appId: number;
+  roomId: number;
+}): Promise<void> {
+  const app = dal.getApp(appId);
+  const room = dal.getRoom(roomId);
+  if (!app || !room || room.app_id !== app.id) return;
+
+  const plan = dal.getPlansByRoom(room.id)[0];
+  if (!plan || !isPlanRunning(plan)) return;
+
+  const steps = dal.getPlanSteps(plan.id);
+  const activeStep = steps.find((step) => ACTIVE_STEP_STATUSES.has(step.status));
+  if (activeStep) {
+    const events = dal.getPlanStepEvents(activeStep.id);
+    const gate = getAutomatedGate(events);
+    if (gate) {
+      await runAutomatedPlanStepGates({ appId, roomId, stepId: activeStep.id });
+      return;
+    }
+
+    if (activeStep.status === "fixing" && activeStep.linked_conversation_id) {
+      const failedGate = [...events].reverse().find((event) => GATE_PHASES.has(event.phase) && event.status === "failed");
+      const { isConversationRunning } = await import("./conversation");
+      if (failedGate && !isConversationRunning(activeStep.linked_conversation_id)) {
+        await sendFixPromptToImplementation({
+          app,
+          step: activeStep,
+          gate: failedGate,
+          decision: {
+            status: "failed",
+            summary_md: failedGate.summary_md || `${failedGate.phase} requested fixes.`,
+            feedback_md: failedGate.summary_md || `${failedGate.phase} requested fixes.`,
+          },
+        });
+      }
+      return;
+    }
+
+    if (["implementing", "fixing"].includes(activeStep.status) && activeStep.linked_conversation_id) {
+      const { isConversationRunning } = await import("./conversation");
+      const session = dal.getSessionForConversation(activeStep.linked_conversation_id);
+      if (!isConversationRunning(activeStep.linked_conversation_id) && session?.status === "completed") {
+        const started = startPlanStepGates({ appId, roomId, stepId: activeStep.id });
+        scheduleAutomatedPlanStepGates({ appId, roomId, stepId: started.step.id, delayMs: 0 });
+      }
+      return;
+    }
+
+    return;
+  }
+
+  const hasPendingStep = steps.some((step) => step.status === "pending");
+  if (!hasPendingStep) return;
+
+  const lastCompletedStep = [...steps].reverse().find((step) => step.status === "completed");
+  if (lastCompletedStep) {
+    await runAutomatedPlanStepGates({ appId, roomId, stepId: lastCompletedStep.id });
+    return;
+  }
+
+  await launchAndRunNextStep({ appId, roomId });
+}
+
+export function schedulePlanExecutionContinuation({
+  appId,
+  roomId,
+  delayMs = 250,
+}: {
+  appId: number;
+  roomId: number;
+  delayMs?: number;
+}): void {
+  setTimeout(() => {
+    void continuePlanExecution({ appId, roomId });
+  }, delayMs);
+}
+
 const gateRunState = globalThis as typeof globalThis & {
   __archiePlanGateRuns?: Set<number>;
 };
@@ -959,6 +1188,10 @@ export async function runAutomatedPlanStepGates({
   try {
     while (true) {
       const { app, room, plan, step } = getStepContext(appId, roomId, stepId);
+      if (!isPlanRunning(plan)) {
+        return { plan, step, events: dal.getPlanStepEvents(step.id) };
+      }
+
       const events = dal.getPlanStepEvents(step.id);
       const gate = getAutomatedGate(events);
       if (!gate) {
@@ -1010,11 +1243,13 @@ export async function runAutomatedPlanStepGates({
       }
 
       if (decision.status === "failed") {
+        if (!isPlanRunning(dal.getPlan(updated.plan.id)!)) return updated;
         await sendFixPromptToImplementation({ app, step, gate, decision });
         return updated;
       }
 
       if (gate.phase === "commit") {
+        if (!isPlanRunning(updated.plan) && updated.plan.status !== "completed") return updated;
         if (updated.plan.status === "completed") {
           notifyPlanReadyForApproval({ room, plan: updated.plan, step: updated.step });
           return updated;

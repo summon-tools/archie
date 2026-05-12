@@ -4,14 +4,44 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CaretDown, CaretRight, ChatsCircle, CheckCircle, Flag, PlayCircle, Sparkle, X } from "@phosphor-icons/react";
-import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, runPlanStepGates, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
+import { CaretDown, CaretRight, ChatsCircle, CheckCircle, Flag, PauseCircle, PlayCircle, Sparkle, Timer, X } from "@phosphor-icons/react";
+import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
 import RoomChatInput from "@/components/RoomChatInput";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
+
+function parseDbTimestampMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function planElapsedMs(plan: NonNullable<RoomPlanResponse["plan"]>, now: number): number {
+  const startedAt = parseDbTimestampMs(plan.execution_started_at);
+  if (!startedAt) return 0;
+
+  const accumulatedPausedMs = Math.max(0, plan.execution_paused_ms || 0);
+  const currentPausedMs = plan.execution_state === "paused"
+    ? Math.max(0, now - (parseDbTimestampMs(plan.execution_paused_at) || now))
+    : 0;
+
+  return Math.max(0, now - startedAt - accumulatedPausedMs - currentPausedMs);
+}
 
 interface RoomWorkspaceProps {
   appId: number;
@@ -367,6 +397,7 @@ function PlanPanel({
   const [error, setError] = useState<string | null>(null);
   const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
   const [autoGateRunKey, setAutoGateRunKey] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const plan = data?.plan || null;
   const steps = data?.steps || [];
@@ -375,6 +406,9 @@ function PlanPanel({
   const nextPendingStep = steps.find((step) => step.status === "pending");
   const lastCompletedStep = [...steps].reverse().find((step) => step.status === "completed");
   const roomClosed = room?.status !== "open";
+  const executionPaused = plan?.execution_state === "paused";
+  const executionRunning = plan?.status === "executing" && plan.execution_state !== "paused";
+  const executionElapsedMs = plan ? planElapsedMs(plan, now) : 0;
 
   useEffect(() => {
     setPlanningContextCollapsed(true);
@@ -384,9 +418,16 @@ function PlanPanel({
   const currentGate = activeStep?.events?.find((event) => (
     GATE_LABELS[event.phase] && (event.status === "pending" || event.status === "running")
   ));
+  const runningGateStartedAt = currentGate?.status === "running" ? parseDbTimestampMs(currentGate.created_at) : null;
 
   useEffect(() => {
-    if (!room || roomClosed || !activeStep || !currentGate) return;
+    if (!plan || (!executionRunning && !executionPaused && !runningGateStartedAt)) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [executionPaused, executionRunning, plan, runningGateStartedAt]);
+
+  useEffect(() => {
+    if (!room || roomClosed || executionPaused || !activeStep || !currentGate) return;
     if (!["reviewing", "validating", "committing"].includes(activeStep.status)) return;
 
     const key = `${room.id}:${activeStep.id}:${currentGate.id}:${currentGate.status}`;
@@ -398,10 +439,10 @@ function PlanPanel({
       .catch((err) => {
         setError(err instanceof Error ? err.message : "Failed to run automated gate");
       });
-  }, [activeStep, appId, autoGateRunKey, currentGate, mutate, room, roomClosed]);
+  }, [activeStep, appId, autoGateRunKey, currentGate, executionPaused, mutate, room, roomClosed]);
 
   useEffect(() => {
-    if (!room || roomClosed || !plan || activeStep || !nextPendingStep || !lastCompletedStep) return;
+    if (!room || roomClosed || executionPaused || !plan || activeStep || !nextPendingStep || !lastCompletedStep) return;
     if (plan.status !== "executing") return;
 
     const key = `${room.id}:continue:${lastCompletedStep.id}:${nextPendingStep.id}`;
@@ -413,7 +454,7 @@ function PlanPanel({
       .catch((err) => {
         setError(err instanceof Error ? err.message : "Failed to continue plan execution");
       });
-  }, [activeStep, appId, autoGateRunKey, lastCompletedStep, mutate, nextPendingStep, plan, room, roomClosed]);
+  }, [activeStep, appId, autoGateRunKey, executionPaused, lastCompletedStep, mutate, nextPendingStep, plan, room, roomClosed]);
 
   const handleGeneratePlan = async () => {
     if (!room || roomClosed || busy) return;
@@ -439,6 +480,34 @@ function PlanPanel({
       onWorkItemCreated(result.work_item);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to execute next step");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePauseExecution = async () => {
+    if (!room || !plan || roomClosed || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await pausePlanExecution(appId, room.id);
+      await mutate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to pause execution");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResumeExecution = async () => {
+    if (!room || !plan || roomClosed || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await resumePlanExecution(appId, room.id);
+      await mutate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resume execution");
     } finally {
       setBusy(false);
     }
@@ -560,8 +629,48 @@ function PlanPanel({
                       {plan.title}
                     </h3>
                     <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
-                      {plan.status}
+                      {executionPaused ? "paused" : plan.status}
                     </span>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-lg border border-th bg-th-main px-3 py-2">
+                    <Timer size={15} className="text-th-dimmed flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-th-secondary">
+                        {plan.execution_state === "paused"
+                          ? `Paused after ${formatDuration(executionElapsedMs)}`
+                          : plan.execution_state === "running"
+                            ? `Running for ${formatDuration(executionElapsedMs)}`
+                            : plan.execution_state === "completed"
+                              ? `Completed in ${formatDuration(executionElapsedMs || plan.execution_elapsed_ms || 0)}`
+                              : "Not started"}
+                      </p>
+                      {runningGateStartedAt && (
+                        <p className="text-meta text-th-dimmed">
+                          {GATE_LABELS[currentGate!.phase]} running for {formatDuration(now - runningGateStartedAt)}
+                        </p>
+                      )}
+                    </div>
+                    {plan.status === "executing" && (
+                      executionPaused ? (
+                        <button
+                          onClick={handleResumeExecution}
+                          disabled={busy || roomClosed}
+                          className="inline-flex items-center gap-1 rounded-md border border-th px-2 py-1 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
+                        >
+                          <PlayCircle size={14} />
+                          Resume
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handlePauseExecution}
+                          disabled={busy || roomClosed}
+                          className="inline-flex items-center gap-1 rounded-md border border-th px-2 py-1 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
+                        >
+                          <PauseCircle size={14} />
+                          Pause
+                        </button>
+                      )
+                    )}
                   </div>
                   {activeStep?.linked_work_item_id ? (
                     <button
@@ -582,7 +691,7 @@ function PlanPanel({
                   ) : (
                     <button
                       onClick={handleExecuteNext}
-                      disabled={busy || roomClosed || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
+                      disabled={busy || roomClosed || executionPaused || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
                       className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <PlayCircle size={16} />
@@ -613,7 +722,7 @@ function PlanPanel({
                           busy={busy}
                           onStartGates={handleStartGates}
                           onAdvanceGate={handleAdvanceGate}
-                          disabled={roomClosed}
+                          disabled={roomClosed || executionPaused}
                         />
                       ))}
                     </div>

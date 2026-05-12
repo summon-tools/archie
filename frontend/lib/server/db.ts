@@ -344,6 +344,10 @@ function initDb(db: Database.Database): void {
       title TEXT NOT NULL,
       summary_md TEXT DEFAULT '',
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'ready', 'executing', 'completed', 'blocked', 'cancelled')),
+      execution_state TEXT NOT NULL DEFAULT 'idle',
+      execution_started_at TEXT DEFAULT NULL,
+      execution_paused_at TEXT DEFAULT NULL,
+      execution_paused_ms INTEGER NOT NULL DEFAULT 0,
       current_version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
@@ -407,6 +411,22 @@ function initDb(db: Database.Database): void {
 
   addColumnIfMissing(db, "home_rooms", "planning_context_md", "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, "home_rooms", "planning_context_updated_at", "TEXT DEFAULT NULL");
+
+  addColumnIfMissing(db, "plans", "execution_state", "TEXT NOT NULL DEFAULT 'idle'");
+  addColumnIfMissing(db, "plans", "execution_started_at", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "plans", "execution_paused_at", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "plans", "execution_paused_ms", "INTEGER NOT NULL DEFAULT 0");
+  db.exec(`
+    UPDATE plans
+    SET execution_state = 'running',
+        execution_started_at = COALESCE(execution_started_at, updated_at, created_at)
+    WHERE status = 'executing' AND execution_state = 'idle';
+
+    UPDATE plans
+    SET execution_state = 'completed',
+        execution_paused_at = NULL
+    WHERE status = 'completed' AND execution_state != 'completed';
+  `);
 
   // ── Clean stale agent sessions ────────────────────────────────
   db.exec("UPDATE agent_sessions SET status = 'idle' WHERE status = 'running'");
