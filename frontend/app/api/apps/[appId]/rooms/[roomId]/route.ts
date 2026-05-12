@@ -1,34 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-
-function getRoomForApp(appId: number, roomId: number) {
-  const app = dal.getApp(appId);
-  if (!app) return { error: NextResponse.json({ detail: "App not found" }, { status: 404 }) };
-
-  const room = dal.getRoom(roomId);
-  if (!room || room.app_id !== app.id) {
-    return { error: NextResponse.json({ detail: "Room not found" }, { status: 404 }) };
-  }
-
-  return { app, room };
-}
+import { handleRoomRouteError, readJsonBody, requireRoomAccess } from "@/lib/server/room-route-utils";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; roomId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId } = await params;
-    const result = getRoomForApp(Number(appId), Number(roomId));
-    if (result.error) return result.error;
+    const { room } = await requireRoomAccess(request, appId, roomId);
 
-    return NextResponse.json(result.room);
+    return NextResponse.json(room);
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -38,23 +23,20 @@ export async function PATCH(
   { params }: { params: Promise<{ appId: string; roomId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId } = await params;
-    const result = getRoomForApp(Number(appId), Number(roomId));
-    if (result.error) return result.error;
+    const { room } = await requireRoomAccess(request, appId, roomId);
 
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const fields: Record<string, unknown> = {};
     if (body.title !== undefined) fields.title = String(body.title).trim();
     if (body.purpose !== undefined) fields.purpose = String(body.purpose);
     if (body.status !== undefined) fields.status = body.status;
 
-    dal.updateRoom(result.room!.id, fields);
-    return NextResponse.json(dal.getRoom(result.room!.id));
+    dal.updateRoom(room.id, fields);
+    return NextResponse.json(dal.getRoom(room.id));
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

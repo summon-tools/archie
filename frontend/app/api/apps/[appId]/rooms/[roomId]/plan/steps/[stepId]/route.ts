@@ -1,65 +1,62 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
+import { handleRoomRouteError, readJsonBody, RouteInputError, requirePlanStepAccess } from "@/lib/server/room-route-utils";
 
-function getStepForRoom(appId: number, roomId: number, stepId: number) {
-  const app = dal.getApp(appId);
-  if (!app) return { error: NextResponse.json({ detail: "App not found" }, { status: 404 }) };
-
-  const room = dal.getRoom(roomId);
-  if (!room || room.app_id !== app.id) {
-    return { error: NextResponse.json({ detail: "Room not found" }, { status: 404 }) };
-  }
-
-  const step = dal.getPlanStep(stepId);
-  if (!step) {
-    return { error: NextResponse.json({ detail: "Plan step not found" }, { status: 404 }) };
-  }
-
-  const plan = dal.getPlan(step.plan_id);
-  if (!plan || plan.room_id !== room.id) {
-    return { error: NextResponse.json({ detail: "Plan step not found" }, { status: 404 }) };
-  }
-
-  return { app, room, plan, step };
-}
+const EDITABLE_STEP_FIELDS = new Set([
+  "title",
+  "objective_md",
+  "implementation_prompt_md",
+  "acceptance_criteria_md",
+  "risk_level",
+  "requires_architecture_review",
+  "requires_security_review",
+  "requires_browser_validation",
+]);
+const PLAN_STEP_RISK_LEVELS = new Set(["low", "medium", "high"]);
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; roomId: string; stepId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId, stepId } = await params;
-    const result = getStepForRoom(Number(appId), Number(roomId), Number(stepId));
-    if (result.error) return result.error;
+    const { plan, step } = await requirePlanStepAccess(request, appId, roomId, stepId);
+    if (plan.status === "executing" || plan.status === "completed" || plan.status === "blocked" || plan.status === "cancelled") {
+      throw new RouteInputError("Plan steps can only be edited before execution", 409);
+    }
 
-    const body = await request.json();
+    const body = await readJsonBody(request);
+    for (const key of Object.keys(body)) {
+      if (!EDITABLE_STEP_FIELDS.has(key)) {
+        throw new RouteInputError(`Field ${key} cannot be updated through this endpoint`);
+      }
+    }
+
     const fields: Record<string, unknown> = {};
-    for (const key of [
-      "title",
-      "objective_md",
-      "implementation_prompt_md",
-      "acceptance_criteria_md",
-      "risk_level",
-      "requires_architecture_review",
-      "requires_security_review",
-      "requires_browser_validation",
-      "status",
-      "linked_work_item_id",
-      "linked_conversation_id",
-      "commit_sha",
-      "result_summary_md",
-    ]) {
-      if (body[key] !== undefined) fields[key] = body[key];
+    for (const key of ["title", "objective_md", "implementation_prompt_md", "acceptance_criteria_md"] as const) {
+      if (body[key] !== undefined) fields[key] = String(body[key]);
+    }
+    if (body.title !== undefined) fields.title = String(body.title).trim();
+    if (body.risk_level !== undefined) {
+      if (typeof body.risk_level !== "string" || !PLAN_STEP_RISK_LEVELS.has(body.risk_level)) {
+        throw new RouteInputError("risk_level must be low, medium, or high");
+      }
+      fields.risk_level = body.risk_level;
+    }
+    for (const key of ["requires_architecture_review", "requires_security_review", "requires_browser_validation"] as const) {
+      if (body[key] !== undefined) {
+        if (typeof body[key] !== "boolean") {
+          throw new RouteInputError(`${key} must be a boolean`);
+        }
+        fields[key] = body[key];
+      }
     }
 
-    dal.updatePlanStep(result.step!.id, fields);
-    return NextResponse.json(dal.getPlanStep(result.step!.id));
+    dal.updatePlanStep(step.id, fields);
+    return NextResponse.json(dal.getPlanStep(step.id));
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

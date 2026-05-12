@@ -1,19 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
 import * as dal from "@/lib/server/dal";
+import { handleRoomRouteError, readJsonBody, RouteInputError, requireRoomAccess } from "@/lib/server/room-route-utils";
 
-function getRoomForApp(appId: number, roomId: number) {
-  const app = dal.getApp(appId);
-  if (!app) return { error: NextResponse.json({ detail: "App not found" }, { status: 404 }) };
-
-  const room = dal.getRoom(roomId);
-  if (!room || room.app_id !== app.id) {
-    return { error: NextResponse.json({ detail: "Room not found" }, { status: 404 }) };
-  }
-
-  return { app, room };
-}
+const CLIENT_EDITABLE_PLAN_STATUSES = new Set(["draft", "ready"]);
 
 function serializePlan(roomId: number) {
   const room = dal.getRoom(roomId);
@@ -38,16 +28,13 @@ export async function GET(
   { params }: { params: Promise<{ appId: string; roomId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId } = await params;
-    const result = getRoomForApp(Number(appId), Number(roomId));
-    if (result.error) return result.error;
+    const { room } = await requireRoomAccess(request, appId, roomId);
 
-    return NextResponse.json(serializePlan(result.room!.id));
+    return NextResponse.json(serializePlan(room.id));
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -57,29 +44,33 @@ export async function POST(
   { params }: { params: Promise<{ appId: string; roomId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId } = await params;
-    const result = getRoomForApp(Number(appId), Number(roomId));
-    if (result.error) return result.error;
+    const { room } = await requireRoomAccess(request, appId, roomId);
 
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const title = typeof body.title === "string" ? body.title.trim() : "";
     if (!title) {
       return NextResponse.json({ detail: "title is required" }, { status: 400 });
     }
+    if (dal.getPlansByRoom(room.id)[0]) {
+      return NextResponse.json({ detail: "Plan already exists for this room" }, { status: 409 });
+    }
+    const status = typeof body.status === "string" ? body.status : "draft";
+    if (!CLIENT_EDITABLE_PLAN_STATUSES.has(status)) {
+      return NextResponse.json({ detail: "status must be draft or ready" }, { status: 400 });
+    }
 
     dal.createPlan({
-      room_id: result.room!.id,
+      room_id: room.id,
       title,
       summary_md: typeof body.summary_md === "string" ? body.summary_md : "",
-      status: body.status || "draft",
+      status: status as "draft" | "ready",
     });
 
-    return NextResponse.json(serializePlan(result.room!.id), { status: 201 });
+    return NextResponse.json(serializePlan(room.id), { status: 201 });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -89,21 +80,22 @@ export async function PATCH(
   { params }: { params: Promise<{ appId: string; roomId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId } = await params;
-    const result = getRoomForApp(Number(appId), Number(roomId));
-    if (result.error) return result.error;
+    const { room } = await requireRoomAccess(request, appId, roomId);
 
-    const plan = dal.getPlansByRoom(result.room!.id)[0];
+    const plan = dal.getPlansByRoom(room.id)[0];
     if (!plan) {
       return NextResponse.json({ detail: "Plan not found" }, { status: 404 });
     }
 
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const fields: Record<string, unknown> = {};
     if (body.title !== undefined) fields.title = String(body.title).trim();
     if (body.summary_md !== undefined) fields.summary_md = String(body.summary_md);
     if (body.status !== undefined) {
+      if (typeof body.status !== "string" || !CLIENT_EDITABLE_PLAN_STATUSES.has(body.status)) {
+        throw new RouteInputError("status can only be changed to draft or ready");
+      }
       fields.status = body.status;
       if (body.status === "ready" || body.status === "draft") {
         fields.execution_state = "idle";
@@ -112,14 +104,19 @@ export async function PATCH(
         fields.execution_paused_ms = 0;
       }
     }
-    if (body.current_version !== undefined) fields.current_version = Number(body.current_version);
+    if (body.current_version !== undefined) {
+      const version = Number(body.current_version);
+      if (!Number.isInteger(version) || version < 1) {
+        throw new RouteInputError("current_version must be a positive integer");
+      }
+      fields.current_version = version;
+    }
 
     dal.updatePlan(plan.id, fields);
-    return NextResponse.json(serializePlan(result.room!.id));
+    return NextResponse.json(serializePlan(room.id));
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

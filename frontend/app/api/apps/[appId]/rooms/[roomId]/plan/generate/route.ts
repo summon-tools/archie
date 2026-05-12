@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { getHomeAgent } from "@/lib/home/agents";
 import { generateRoomPlanFromDiscussion } from "@/lib/server/room-plan-generator";
 import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
+import { handleRoomRouteError, requireRoomAccess } from "@/lib/server/room-route-utils";
 
 function serializePlan(roomId: number) {
   const room = dal.getRoom(roomId);
@@ -23,39 +23,24 @@ function serializePlan(roomId: number) {
   };
 }
 
-function getRoomForApp(appId: number, roomId: number) {
-  const app = dal.getApp(appId);
-  if (!app) return { error: NextResponse.json({ detail: "App not found" }, { status: 404 }) };
-
-  const room = dal.getRoom(roomId);
-  if (!room || room.app_id !== app.id) {
-    return { error: NextResponse.json({ detail: "Room not found" }, { status: 404 }) };
-  }
-
-  return { app, room };
-}
-
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; roomId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId } = await params;
-    const result = getRoomForApp(Number(appId), Number(roomId));
-    if (result.error) return result.error;
+    const { app, room } = await requireRoomAccess(request, appId, roomId);
 
     await generateRoomPlanFromDiscussion({
-      app: result.app!,
-      room: result.room!,
+      app,
+      room,
       agent: getHomeAgent("coordinator"),
     });
 
-    return NextResponse.json(serializePlan(result.room!.id), { status: 201 });
+    return NextResponse.json(serializePlan(room.id), { status: 201 });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     const detail = e instanceof Error && e.message.includes("Plan generator")
       ? "The model returned an unstructured plan response. Please try again."
       : e instanceof Error ? e.message : "Failed to generate plan";

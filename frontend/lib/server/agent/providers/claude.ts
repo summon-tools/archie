@@ -14,6 +14,7 @@ import type {
   EphemeralOpts,
   ModelEntry,
   ToolStreamEvent,
+  AgentToolPolicy,
 } from "../types";
 
 // Ensure subprocess has enough output token budget
@@ -26,6 +27,21 @@ const CLAUDE_MODELS: ModelEntry[] = [
   { id: "claude-opus-4-7", label: "Opus 4.7", provider: "claude" },
   { id: "claude-opus-4-6", label: "Opus 4.6", provider: "claude" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", provider: "claude" },
+];
+
+const CLAUDE_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "LS"] as const;
+const CLAUDE_BLOCKED_PLANNING_TOOLS = [
+  "Bash",
+  "BashOutput",
+  "KillBash",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "Task",
+  "TodoWrite",
+  "WebFetch",
+  "WebSearch",
 ];
 
 // Cached SDK query function
@@ -57,6 +73,24 @@ function buildSdkOptions(cwd?: string, sessionId?: string): Options {
   }
   opts.settingSources = [];
   return opts;
+}
+
+function applyToolPolicy(options: Options, policy: AgentToolPolicy = "full_access"): Options {
+  if (policy === "full_access") return options;
+
+  delete (options as any).allowDangerouslySkipPermissions;
+  options.permissionMode = policy === "no_tools" ? "plan" : "acceptEdits";
+
+  if (policy === "no_tools") {
+    options.tools = [];
+    options.allowedTools = [];
+    return options;
+  }
+
+  options.tools = [...CLAUDE_READ_ONLY_TOOLS];
+  options.allowedTools = [...CLAUDE_READ_ONLY_TOOLS];
+  options.disallowedTools = [...CLAUDE_BLOCKED_PLANNING_TOOLS];
+  return options;
 }
 
 function extractResultInfo(result: SDKResultSuccess | SDKResultError): AgentResult {
@@ -194,11 +228,13 @@ export class ClaudeProvider implements AgentProvider {
           tools: [],
           persistSession: false,
           settingSources: [],
-          ...getPermissionOptions(),
+          permissionMode: "plan",
           maxTurns: opts?.maxTurns ?? 1,
         };
+        applyToolPolicy(options, opts?.toolPolicy === "read_only_codebase" ? "no_tools" : opts?.toolPolicy || "no_tools");
         if (opts?.model) options.model = opts.model;
         if (opts?.abortController) options.abortController = opts.abortController;
+        if (opts?.cwd) options.cwd = opts.cwd;
 
         const q = sdkQuery({ prompt, options });
         let resultText = "";
@@ -245,6 +281,7 @@ export class ClaudeProvider implements AgentProvider {
       ...getPermissionOptions(),
       maxTurns: opts?.maxTurns ?? Infinity,
     };
+    applyToolPolicy(options, opts?.toolPolicy);
     if (opts?.model) options.model = opts.model;
     if (opts?.abortController) options.abortController = opts.abortController;
     if (opts?.cwd) options.cwd = opts.cwd;

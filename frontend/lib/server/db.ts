@@ -344,7 +344,7 @@ function initDb(db: Database.Database): void {
       title TEXT NOT NULL,
       summary_md TEXT DEFAULT '',
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'ready', 'executing', 'completed', 'blocked', 'cancelled')),
-      execution_state TEXT NOT NULL DEFAULT 'idle',
+      execution_state TEXT NOT NULL DEFAULT 'idle' CHECK(execution_state IN ('idle', 'running', 'paused', 'completed')),
       execution_started_at TEXT DEFAULT NULL,
       execution_paused_at TEXT DEFAULT NULL,
       execution_paused_ms INTEGER NOT NULL DEFAULT 0,
@@ -371,6 +371,7 @@ function initDb(db: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'implementing', 'reviewing', 'fixing', 'validating', 'committing', 'completed', 'blocked', 'failed', 'skipped')),
       linked_work_item_id INTEGER DEFAULT NULL,
       linked_conversation_id INTEGER DEFAULT NULL,
+      fix_attempts INTEGER NOT NULL DEFAULT 0,
       commit_sha TEXT DEFAULT NULL,
       result_summary_md TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now')),
@@ -381,6 +382,7 @@ function initDb(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_plan_steps_plan_id ON plan_steps(plan_id);
     CREATE INDEX IF NOT EXISTS idx_plan_steps_status ON plan_steps(status);
+    CREATE INDEX IF NOT EXISTS idx_plan_steps_linked_conversation_id ON plan_steps(linked_conversation_id);
 
     CREATE TABLE IF NOT EXISTS plan_step_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -416,7 +418,14 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "plans", "execution_started_at", "TEXT DEFAULT NULL");
   addColumnIfMissing(db, "plans", "execution_paused_at", "TEXT DEFAULT NULL");
   addColumnIfMissing(db, "plans", "execution_paused_ms", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "plan_steps", "fix_attempts", "INTEGER NOT NULL DEFAULT 0");
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_plan_steps_linked_conversation_id ON plan_steps(linked_conversation_id);
+
+    UPDATE plans
+    SET execution_state = 'idle'
+    WHERE execution_state NOT IN ('idle', 'running', 'paused', 'completed');
+
     UPDATE plans
     SET execution_state = 'running',
         execution_started_at = COALESCE(execution_started_at, updated_at, created_at)

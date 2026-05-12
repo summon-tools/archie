@@ -292,6 +292,7 @@ export interface PlanStep {
   status: PlanStepStatus;
   linked_work_item_id: number | null;
   linked_conversation_id: number | null;
+  fix_attempts: number;
   commit_sha: string | null;
   result_summary_md: string;
   created_at: string;

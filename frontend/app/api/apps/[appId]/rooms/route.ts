@@ -1,25 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
+import { handleRoomRouteError, readJsonBody, requireAppAccess } from "@/lib/server/room-route-utils";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId } = await params;
-
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
+    const { app } = await requireAppAccess(request, appId);
 
     return NextResponse.json({ rooms: dal.getRoomsByApp(app.id) });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -29,15 +23,10 @@ export async function POST(
   { params }: { params: Promise<{ appId: string }> },
 ) {
   try {
-    const authUser = await getAuthUser(request);
     const { appId } = await params;
+    const { user: authUser, app } = await requireAppAccess(request, appId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const title = typeof body.title === "string" ? body.title.trim() : "";
     if (!title) {
       return NextResponse.json({ detail: "title is required" }, { status: 400 });
@@ -61,9 +50,8 @@ export async function POST(
 
     return NextResponse.json(room, { status: 201 });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

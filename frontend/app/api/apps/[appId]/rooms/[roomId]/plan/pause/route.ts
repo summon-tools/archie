@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import { getPlanExecutionElapsedMs, pausePlanExecution, PlanExecutionError } from "@/lib/server/plan-execution";
 import * as dal from "@/lib/server/dal";
+import { handleRoomRouteError, requireRoomAccess } from "@/lib/server/room-route-utils";
 
 function serializePlan(roomId: number) {
   const room = dal.getRoom(roomId);
@@ -27,14 +27,13 @@ export async function POST(
   { params }: { params: Promise<{ appId: string; roomId: string }> },
 ) {
   try {
-    await getAuthUser(request);
     const { appId, roomId } = await params;
-    pausePlanExecution({ appId: Number(appId), roomId: Number(roomId) });
-    return NextResponse.json(serializePlan(Number(roomId)));
+    const { app, room } = await requireRoomAccess(request, appId, roomId);
+    pausePlanExecution({ appId: app.id, roomId: room.id });
+    return NextResponse.json(serializePlan(room.id));
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     if (e instanceof PlanExecutionError) {
       return NextResponse.json({ detail: e.message, code: e.code }, { status: e.status });
     }

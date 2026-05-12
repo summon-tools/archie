@@ -25,12 +25,19 @@ function buildUpdate(
   const keys = Object.keys(fields).filter((key) => fields[key] !== undefined);
   if (keys.length === 0) return;
 
-  const setParts = keys.map((key) => `${key} = ?`);
+  const setParts = keys.map((key) => `${quoteIdentifier(key)} = ?`);
   const values = keys.map((key) => fields[key]);
   setParts.push("updated_at = datetime('now')");
   values.push(id);
 
-  getDb().prepare(`UPDATE ${table} SET ${setParts.join(", ")} WHERE ${idColumn} = ?`).run(...values);
+  getDb().prepare(`UPDATE ${quoteIdentifier(table)} SET ${setParts.join(", ")} WHERE ${quoteIdentifier(idColumn)} = ?`).run(...values);
+}
+
+function quoteIdentifier(identifier: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(identifier)) {
+    throw new Error(`Invalid SQL identifier: ${identifier}`);
+  }
+  return `"${identifier}"`;
 }
 
 export function getRoom(roomId: number): HomeRoomRow | undefined {
@@ -292,11 +299,22 @@ export function updatePlanStep(
     | "status"
     | "linked_work_item_id"
     | "linked_conversation_id"
+    | "fix_attempts"
     | "commit_sha"
     | "result_summary_md"
   >>,
 ): void {
-  buildUpdate("plan_steps", "id", stepId, fields);
+  const normalizedFields = fields as Record<string, unknown>;
+  for (const key of [
+    "requires_architecture_review",
+    "requires_security_review",
+    "requires_browser_validation",
+  ] as const) {
+    if (typeof normalizedFields[key] === "boolean") {
+      normalizedFields[key] = normalizedFields[key] ? 1 : 0;
+    }
+  }
+  buildUpdate("plan_steps", "id", stepId, normalizedFields);
 }
 
 export function createPlanStepEvent(data: {

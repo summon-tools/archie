@@ -25,11 +25,14 @@ afterEach(() => {
 
 function makeRequest(
   url: string,
-  options?: { body?: object; token?: string },
+  options?: { body?: object; token?: string; jsonThrows?: boolean },
 ) {
   const target = new URL(url);
   return {
-    json: async () => options?.body || {},
+    json: async () => {
+      if (options?.jsonThrows) throw new Error("Malformed JSON");
+      return options?.body || {};
+    },
     cookies: {
       get: (name: string) => {
         if (name === "session_token" && options?.token) return { value: options.token };
@@ -48,6 +51,18 @@ async function createAuthToken() {
   return createToken(user.id, "API Tester", "admin");
 }
 
+async function createMemberToken(name = "Member User") {
+  const suffix = `${Date.now()}-${Math.random()}`;
+  const user = seedUser(db, {
+    username: `member-${suffix}`,
+    email: `member-${suffix}@example.com`,
+    name,
+    role: "member",
+  });
+  const { createToken } = await import("@/lib/server/auth");
+  return { token: await createToken(user.id, name, "member"), user };
+}
+
 describe("rooms API", () => {
   it("requires authentication", async () => {
     const app = seedApp(db);
@@ -59,6 +74,34 @@ describe("rooms API", () => {
     );
 
     expect(response.status).toBe(401);
+  });
+
+  it("rejects invalid room route ids", async () => {
+    const token = await createAuthToken();
+    const { GET } = await import("@/app/api/apps/[appId]/rooms/route");
+
+    const response = await GET(
+      makeRequest("http://localhost:8080/api/apps/not-a-number/rooms", { token }),
+      { params: Promise.resolve({ appId: "not-a-number" }) },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ detail: "appId must be a positive integer" });
+  });
+
+  it("requires app ownership or admin role for room APIs", async () => {
+    const app = seedApp(db);
+    const owner = seedUser(db, { username: "owner", name: "Owner", role: "member" });
+    db.prepare("UPDATE apps SET project_owner_user_id = ? WHERE id = ?").run(owner.id, app.id);
+    const { token } = await createMemberToken("Other Member");
+    const { GET } = await import("@/app/api/apps/[appId]/rooms/route");
+
+    const response = await GET(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms`, { token }),
+      { params: Promise.resolve({ appId: String(app.id) }) },
+    );
+
+    expect(response.status).toBe(403);
   });
 
   it("creates rooms and lists them for an app", async () => {
@@ -288,8 +331,13 @@ describe("rooms API", () => {
       body_md: "You are talking to the Coordinator for this planning room.",
     });
     expect(toolEnabledStream).toHaveBeenCalledWith(
-      expect.stringContaining("Latest user message:\nWho am I talking to?"),
-      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 6 }),
+      expect.stringContaining("<latest_user_message>\nWho am I talking to?"),
+      expect.objectContaining({
+        model: "claude-sonnet-4-6",
+        cwd: "/tmp/test-app",
+        maxTurns: 6,
+        toolPolicy: "read_only_codebase",
+      }),
     );
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Respond as Coordinator."),
@@ -342,7 +390,12 @@ describe("rooms API", () => {
     });
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("You are the Architect agent inside an Archie planning room"),
-      expect.objectContaining({ model: "claude-opus-4-7", cwd: "/tmp/test-app", maxTurns: 6 }),
+      expect.objectContaining({
+        model: "claude-opus-4-7",
+        cwd: "/tmp/test-app",
+        maxTurns: 6,
+        toolPolicy: "read_only_codebase",
+      }),
     );
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Respond as Architect."),
@@ -408,12 +461,17 @@ describe("rooms API", () => {
       agent_key: "architect",
       body_md: "Architect perspective: the discussed blog plan is reasonable, but split public rendering from admin editing.",
     });
-    expect(toolEnabledStream.mock.calls[0][0]).toContain("Planning context summary:\n## Current direction");
+    expect(toolEnabledStream.mock.calls[0][0]).toContain("Planning context summary:\n<planning_context>\n## Current direction");
     expect(toolEnabledStream.mock.calls[0][0]).toContain("Structured plan: none created yet");
     expect(toolEnabledStream.mock.calls[0][0]).toContain("review the working plan from discussion");
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Update the room planning context summary"),
-      expect.objectContaining({ model: "claude-opus-4-7", cwd: "/tmp/test-app", maxTurns: 3 }),
+      expect.objectContaining({
+        model: "claude-opus-4-7",
+        cwd: "/tmp/test-app",
+        maxTurns: 3,
+        toolPolicy: "read_only_codebase",
+      }),
     );
     expect(dal.getRoom(room.id)!.planning_context_md).toContain("Blog feature plan reviewed by Architect.");
   });
@@ -477,7 +535,12 @@ describe("rooms API", () => {
     });
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Return ONLY valid JSON"),
-      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 8 }),
+      expect.objectContaining({
+        model: "claude-sonnet-4-6",
+        cwd: "/tmp/test-app",
+        maxTurns: 8,
+        toolPolicy: "read_only_codebase",
+      }),
     );
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Create the implementation plan from this discussion."),
@@ -584,7 +647,12 @@ describe("rooms API", () => {
     });
     expect(ephemeralQuery).toHaveBeenCalledWith(
       expect.stringContaining("Convert the following plan-generator output into the required JSON object."),
-      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 1 }),
+      expect.objectContaining({
+        model: "claude-sonnet-4-6",
+        cwd: "/tmp/test-app",
+        maxTurns: 1,
+        toolPolicy: "no_tools",
+      }),
     );
 
     const plans = dal.getPlansByRoom(room.id);
@@ -731,7 +799,12 @@ describe("rooms API", () => {
     });
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Recent room messages:"),
-      expect.objectContaining({ model: "claude-sonnet-4-6", cwd: "/tmp/test-app", maxTurns: 8 }),
+      expect.objectContaining({
+        model: "claude-sonnet-4-6",
+        cwd: "/tmp/test-app",
+        maxTurns: 8,
+        toolPolicy: "read_only_codebase",
+      }),
     );
   });
 
@@ -776,7 +849,7 @@ describe("rooms API", () => {
     const updatedStep = await stepDetailRoutes.PATCH(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}`, {
         token,
-        body: { status: "reviewing", result_summary_md: "Storage is ready." },
+        body: { title: "Persist rooms safely", requires_architecture_review: true },
       }),
       { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
     );
@@ -784,9 +857,18 @@ describe("rooms API", () => {
     expect(updatedStep.status).toBe(200);
     await expect(updatedStep.json()).resolves.toMatchObject({
       id: step.id,
-      status: "reviewing",
-      result_summary_md: "Storage is ready.",
+      title: "Persist rooms safely",
+      requires_architecture_review: 1,
     });
+
+    const rejectedStepStatePatch = await stepDetailRoutes.PATCH(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}`, {
+        token,
+        body: { status: "reviewing" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+    expect(rejectedStepStatePatch.status).toBe(400);
 
     const patchedPlan = await planRoutes.PATCH(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan`, {
@@ -800,6 +882,34 @@ describe("rooms API", () => {
     const patchedBody = await patchedPlan.json();
     expect(patchedBody.plan.status).toBe("ready");
     expect(patchedBody.steps).toHaveLength(1);
+
+    const rejectedPlanStatePatch = await planRoutes.PATCH(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan`, {
+        token,
+        body: { status: "completed" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+    expect(rejectedPlanStatePatch.status).toBe(400);
+  });
+
+  it("returns a 400 response for malformed room plan JSON", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    const planRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/route");
+
+    const response = await planRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan`, {
+        token,
+        jsonThrows: true,
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ detail: "Request body must be valid JSON" });
   });
 
   it("launches the next pending plan step as a scoped execution conversation", async () => {
@@ -1035,9 +1145,90 @@ describe("rooms API", () => {
     });
 
     expect(roomsDal.getPlanStep(step.id)!.status).toBe("fixing");
+    expect(toolEnabledStream).toHaveBeenCalledWith(
+      expect.stringContaining("read-only gate"),
+      expect.objectContaining({ toolPolicy: "read_only_codebase" }),
+    );
     expect(streamConversationMessage).toHaveBeenCalledWith(
       conversationId,
       expect.stringContaining("Tighten the test coverage before advancing."),
+      "Test App",
+      "/tmp/test-app",
+      "gpt-5.5",
+      undefined,
+      false,
+      "codex",
+    );
+  });
+
+  it("fails closed when an automated gate returns malformed status JSON", async () => {
+    const app = seedApp(db);
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const workItemsDal = await import("@/lib/server/dal/work-items");
+    const conversation = db.prepare(
+      "INSERT INTO conversations (app_id, kind, title) VALUES (?, 'task', ?)",
+    ).run(app.id, "Plan execution");
+    const conversationId = Number(conversation.lastInsertRowid);
+    const workItem = workItemsDal.createWorkItem({
+      app_id: app.id,
+      primary_conversation_id: conversationId,
+      title: "Malformed gate",
+      origin_type: "room_plan",
+    });
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Malformed Gate Room" });
+    const plan = roomsDal.createPlan({ room_id: room.id, title: "Malformed Gate Plan", status: "executing" });
+    const step = roomsDal.createPlanStep({
+      plan_id: plan.id,
+      title: "Malformed gate step",
+      status: "reviewing",
+    });
+    roomsDal.updatePlanStep(step.id, {
+      linked_work_item_id: workItem.id,
+      linked_conversation_id: conversationId,
+    });
+    roomsDal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "code_review",
+      agent_key: "reviewer",
+      status: "pending",
+      summary_md: "Code review",
+    });
+
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        detail: "done",
+        resultText: JSON.stringify({
+          status: "error",
+          summary_md: "Ambiguous gate result.",
+          feedback_md: "This should fail closed.",
+        }),
+      };
+    });
+    const streamConversationMessage = vi.fn(async () => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    }));
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
+    }));
+    vi.doMock("@/lib/server/conversation", () => ({ streamConversationMessage }));
+    const { runAutomatedPlanStepGates } = await import("@/lib/server/plan-execution");
+
+    await runAutomatedPlanStepGates({
+      appId: app.id,
+      roomId: room.id,
+      stepId: step.id,
+    });
+
+    expect(roomsDal.getPlanStep(step.id)).toMatchObject({
+      status: "fixing",
+      fix_attempts: 1,
+    });
+    expect(streamConversationMessage).toHaveBeenCalledWith(
+      conversationId,
+      expect.stringContaining("failed to produce a usable result"),
       "Test App",
       "/tmp/test-app",
       "gpt-5.5",
@@ -1141,13 +1332,13 @@ describe("rooms API", () => {
     const resumedBody = await resumed.json();
     expect(resumedBody.plan.execution_state).toBe("running");
 
-    await new Promise((resolve) => setTimeout(resolve, 25));
-
-    expect(toolEnabledStream).toHaveBeenCalledTimes(1);
-    expect(roomsDal.getPlanStep(step.id)!.status).toBe("completed");
-    expect(roomsDal.getPlan(plan.id)!).toMatchObject({
-      status: "completed",
-      execution_state: "completed",
+    await vi.waitFor(() => {
+      expect(toolEnabledStream).toHaveBeenCalledTimes(1);
+      expect(roomsDal.getPlanStep(step.id)!.status).toBe("completed");
+      expect(roomsDal.getPlan(plan.id)!).toMatchObject({
+        status: "completed",
+        execution_state: "completed",
+      });
     });
   });
 
@@ -1209,6 +1400,39 @@ describe("rooms API", () => {
     expect(completedStep.commit_sha).toBe("abc123");
     expect(dal.getPlan(plan.id)!.status).toBe("completed");
     expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "completed")).toHaveLength(7);
+  });
+
+  it("rejects unknown manual gate statuses instead of passing them", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Gate Status Room" });
+    const plan = dal.createPlan({ room_id: room.id, title: "Gate Status Plan", status: "executing" });
+    const step = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Reject malformed gate status",
+      status: "reviewing",
+    });
+    const gate = dal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "code_review",
+      agent_key: "reviewer",
+      status: "pending",
+      summary_md: "Code review",
+    });
+    const advanceRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/advance/route");
+
+    const response = await advanceRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/advance`, {
+        token,
+        body: { status: "fail", summary_md: "Should not pass." },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(dal.getPlanStepEvents(step.id).find((event) => event.id === gate.id)?.status).toBe("pending");
+    expect(dal.getPlanStep(step.id)!.status).toBe("reviewing");
   });
 
   it("runs automated gate agents and commits the completed step", async () => {
@@ -1304,6 +1528,10 @@ describe("rooms API", () => {
       const commitSubject = execSync("git log -1 --format=%s", { cwd: repo.dir, encoding: "utf-8" }).trim();
       expect(commitSubject).toBe("chore: add public blog");
       expect(roomsDal.getPlanStep(step.id)!.commit_sha).toBeTruthy();
+      expect(toolEnabledStream).toHaveBeenCalledWith(
+        expect.stringContaining("Return only a JSON object"),
+        expect.objectContaining({ toolPolicy: "read_only_codebase" }),
+      );
 
       const roomMessage = db.prepare(
         "SELECT * FROM room_messages WHERE room_id = ? ORDER BY id DESC LIMIT 1",
@@ -1397,6 +1625,57 @@ describe("rooms API", () => {
     expect(failed.status).toBe(200);
     const failedBody = await failed.json();
     expect(failedBody.step.status).toBe("fixing");
+    expect(failedBody.step.fix_attempts).toBe(1);
     expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "skipped")).toHaveLength(2);
+  });
+
+  it("blocks a plan step after the maximum fix attempts are exhausted", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Fix Cap Room" });
+    const plan = dal.createPlan({ room_id: room.id, title: "Fix Cap Plan", status: "executing" });
+    const step = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Repeatedly failing step",
+      status: "reviewing",
+    });
+    dal.updatePlanStep(step.id, { fix_attempts: 2 });
+    dal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "code_review",
+      agent_key: "reviewer",
+      status: "pending",
+      summary_md: "Code review",
+    });
+    dal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "qa_validation",
+      agent_key: "qa",
+      status: "pending",
+      summary_md: "QA validation",
+    });
+    const advanceRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/advance/route");
+
+    const failed = await advanceRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/advance`, {
+        token,
+        body: { status: "failed", summary_md: "Still failing after fixes." },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+
+    expect(failed.status).toBe(200);
+    const failedBody = await failed.json();
+    expect(failedBody.step).toMatchObject({
+      status: "blocked",
+      fix_attempts: 3,
+      result_summary_md: "Still failing after fixes.",
+    });
+    expect(failedBody.plan).toMatchObject({
+      status: "blocked",
+      execution_state: "idle",
+    });
+    expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "skipped")).toHaveLength(1);
   });
 });
