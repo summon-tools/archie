@@ -75,11 +75,12 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   );
   const messages = messagesData?.messages || [];
   const visibleMessages = useMemo(() => {
-    const persistedBodies = new Set(messages.map((message) => `${message.role}:${message.body_md}`));
+    const chatMessages = messages.filter((message) => !isExecutionLogMessage(message));
+    const persistedBodies = new Set(chatMessages.map((message) => `${message.role}:${message.body_md}`));
     const pending = pendingMessages.filter((message) => (
       message.room_id === room?.id && !persistedBodies.has(`${message.role}:${message.body_md}`)
     ));
-    return [...messages, ...pending];
+    return [...chatMessages, ...pending];
   }, [messages, pendingMessages, room?.id]);
 
   const handleSendRoomMessage = async () => {
@@ -202,6 +203,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
         <PlanPanel
           appId={appId}
           room={room}
+          messages={messages}
           onOpenConversation={onOpenConversation}
           onWorkItemCreated={onWorkItemCreated}
         />
@@ -322,20 +324,20 @@ function RoomMessageBubble({ message }: { message: RoomMessage }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-[78%] rounded-xl px-3 py-2 ${
-        isUser ? "bg-btn-primary text-btn-primary" : "bg-th-panel border border-th text-th-primary"
+        isUser ? "bg-th-muted text-th-primary rounded-2xl rounded-tr-sm" : "bg-th-panel border border-th text-th-primary"
       }`}>
         <div className="flex items-center gap-2 mb-1">
-          <span className={`text-meta font-semibold ${isUser ? "text-btn-primary/80" : "text-th-dimmed"}`}>
+          <span className={`text-meta font-semibold ${isUser ? "text-th-dimmed" : "text-th-dimmed"}`}>
             {label}
           </span>
           {message.kind !== "message" && (
-            <span className={`text-meta ${isUser ? "text-btn-primary/70" : "text-th-dimmed"}`}>
+            <span className={`text-meta ${isUser ? "text-th-dimmed" : "text-th-dimmed"}`}>
               {message.kind.replace("_", " ")}
             </span>
           )}
           {taggedAgent && (
             <span className={`rounded-full px-1.5 py-0.5 text-meta font-medium ${
-              isUser ? "bg-black/10 text-btn-primary/70" : "bg-th-muted text-th-dimmed"
+              isUser ? "bg-th-subtle text-th-secondary" : "bg-th-muted text-th-dimmed"
             }`}>
               @{taggedAgent}
             </span>
@@ -351,6 +353,10 @@ function RoomMessageBubble({ message }: { message: RoomMessage }) {
       </div>
     </div>
   );
+}
+
+function isExecutionLogMessage(message: RoomMessage): boolean {
+  return message.role === "system" && (message.kind === "execution_event" || message.kind === "error");
 }
 
 function getTaggedAgentName(message: RoomMessage): string | null {
@@ -380,11 +386,13 @@ function formatAgentLabel(agentKey: string): string {
 function PlanPanel({
   appId,
   room,
+  messages,
   onOpenConversation,
   onWorkItemCreated,
 }: {
   appId: number;
   room: HomeRoom | null;
+  messages: RoomMessage[];
   onOpenConversation: (itemId: number) => void;
   onWorkItemCreated: (item: Task) => void;
 }) {
@@ -397,6 +405,7 @@ function PlanPanel({
   const [error, setError] = useState<string | null>(null);
   const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
   const [autoGateRunKey, setAutoGateRunKey] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"planning" | "execution">("planning");
   const [now, setNow] = useState(() => Date.now());
 
   const plan = data?.plan || null;
@@ -409,10 +418,14 @@ function PlanPanel({
   const executionPaused = plan?.execution_state === "paused";
   const executionRunning = plan?.status === "executing" && plan.execution_state !== "paused";
   const executionElapsedMs = plan ? planElapsedMs(plan, now) : 0;
+  const executionLogEntries = useMemo(() => (
+    buildExecutionLogEntries(messages, plan?.execution_started_at || null)
+  ), [messages, plan?.execution_started_at]);
 
   useEffect(() => {
     setPlanningContextCollapsed(true);
     setAutoGateRunKey(null);
+    setActiveTab("planning");
   }, [room?.id]);
 
   const currentGate = activeStep?.events?.find((event) => (
@@ -557,8 +570,21 @@ function PlanPanel({
 
   return (
     <div className="flex flex-col min-h-0 h-full">
-      <header className="h-10 px-4 border-b border-th flex items-center">
-        <h2 className="text-sm font-semibold text-th-primary">Plan</h2>
+      <header className="h-10 px-2 border-b border-th flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab("planning")}
+          className={tabClass(activeTab === "planning")}
+        >
+          Planning Context
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("execution")}
+          className={tabClass(activeTab === "execution")}
+        >
+          Execution Log
+        </button>
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
@@ -566,6 +592,8 @@ function PlanPanel({
 
         {!room ? (
           <p className="text-sm text-th-muted">Select a room to draft a structured plan.</p>
+        ) : activeTab === "execution" ? (
+          <ExecutionLogPanel entries={executionLogEntries} />
         ) : (
           <>
             <section className="rounded-lg border border-th bg-th-main p-3">
@@ -628,7 +656,7 @@ function PlanPanel({
                     <h3 className="text-base font-semibold text-th-primary flex-1 min-w-0 truncate">
                       {plan.title}
                     </h3>
-                    <span className="text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
+                    <span className={`text-meta font-medium rounded-full px-2 py-1 ${statusBadgeClass(executionPaused ? "paused" : plan.status)}`}>
                       {executionPaused ? "paused" : plan.status}
                     </span>
                   </div>
@@ -708,7 +736,7 @@ function PlanPanel({
 
                 <section>
                   <div className="flex items-center justify-between gap-2 mb-2">
-                    <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider">Steps</p>
+                    <p className="text-meta font-semibold text-th-primary uppercase tracking-wider">Steps</p>
                   </div>
 
                   {steps.length === 0 ? (
@@ -747,6 +775,132 @@ const GATE_LABELS: Record<string, string> = {
   commit: "Commit",
 };
 
+type ExecutionLogEntry = {
+  id: string;
+  body: string;
+  kind: RoomMessage["kind"];
+  createdAt: string;
+  createdAtMs: number;
+  durationSincePreviousMs: number;
+};
+
+function tabClass(active: boolean): string {
+  return [
+    "h-7 min-w-0 flex-1 truncate rounded-md px-1.5 text-meta font-medium transition-colors",
+    active
+      ? "bg-th-muted text-th-primary"
+      : "text-th-muted hover:text-th-primary hover:bg-th-subtle",
+  ].join(" ");
+}
+
+function buildExecutionLogEntries(messages: RoomMessage[], executionStartedAt: string | null): ExecutionLogEntry[] {
+  const entries = messages
+    .filter(isExecutionLogMessage)
+    .map((message) => ({
+      id: `message:${message.id}`,
+      body: message.body_md,
+      kind: message.kind,
+      createdAt: message.created_at,
+      createdAtMs: parseDbTimestampMs(message.created_at) || 0,
+      durationSincePreviousMs: 0,
+    }))
+    .sort((a, b) => a.createdAtMs - b.createdAtMs);
+
+  let previousMs = parseDbTimestampMs(executionStartedAt) || entries[0]?.createdAtMs || null;
+  return entries.map((entry) => {
+    const durationSincePreviousMs = previousMs === null
+      ? 0
+      : Math.max(0, entry.createdAtMs - previousMs);
+    previousMs = entry.createdAtMs;
+    return { ...entry, durationSincePreviousMs };
+  });
+}
+
+function formatLogTimestamp(value: string): string {
+  const ms = parseDbTimestampMs(value);
+  if (!ms) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(ms));
+}
+
+function ExecutionLogPanel({ entries }: { entries: ExecutionLogEntry[] }) {
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-lg border border-th bg-th-main p-4">
+        <p className="text-sm text-th-muted">Execution events will appear here when the plan starts running.</p>
+      </div>
+    );
+  }
+
+  return (
+    <section className="space-y-3">
+      {entries.map((entry) => (
+        <article
+          key={entry.id}
+          className={`rounded-lg border p-3 ${
+            entry.kind === "error"
+              ? "border-st-red bg-th-main"
+              : "border-th bg-th-main"
+          }`}
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <time className="text-meta font-medium text-th-secondary">
+              {formatLogTimestamp(entry.createdAt)}
+            </time>
+            <span className="text-meta text-th-dimmed">
+              +{formatDuration(entry.durationSincePreviousMs)}
+            </span>
+          </div>
+          <div className={PROSE_CLASSES}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.body}</ReactMarkdown>
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function statusTextClass(status: string): string {
+  switch (status) {
+    case "completed":
+    case "passed":
+      return "text-st-green";
+    case "blocked":
+    case "failed":
+    case "error":
+      return "text-st-red";
+    case "fixing":
+      return "text-st-amber";
+    case "running":
+    case "implementing":
+    case "reviewing":
+    case "validating":
+    case "committing":
+      return "text-th-primary";
+    default:
+      return "text-th-dimmed";
+  }
+}
+
+function statusBadgeClass(status: string): string {
+  switch (status) {
+    case "completed":
+    case "passed":
+      return "bg-st-green text-st-green border border-st-green";
+    case "blocked":
+    case "failed":
+    case "error":
+      return "bg-st-red text-st-red border border-st-red";
+    case "fixing":
+      return "bg-st-amber text-st-amber border border-st-yellow";
+    default:
+      return "bg-th-muted text-th-secondary border border-th";
+  }
+}
+
 function PlanStepCard({
   step,
   busy,
@@ -775,13 +929,13 @@ function PlanStepCard({
   return (
     <div className="rounded-lg border border-th bg-th-main p-3">
       <div className="flex items-start gap-2">
-        <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-th-muted text-meta font-semibold text-th-secondary">
+        <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-th bg-th-muted text-meta font-semibold text-st-green">
           {step.position + 1}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium text-th-primary truncate">{step.title}</p>
-            <span className="ml-auto text-meta text-th-dimmed">{step.status}</span>
+            <span className={`ml-auto text-meta font-semibold ${statusTextClass(step.status)}`}>{step.status}</span>
           </div>
           {step.objective_md && (
             <p className="mt-1 text-xs text-th-muted whitespace-pre-wrap leading-relaxed">{step.objective_md}</p>
@@ -797,7 +951,7 @@ function PlanStepCard({
           {events.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {events.map((event) => (
-                <span key={event.id} className="rounded-full bg-th-muted px-2 py-0.5 text-meta text-th-dimmed">
+                <span key={event.id} className={`rounded-full px-2 py-0.5 text-meta font-medium ${statusBadgeClass(event.status)}`}>
                   {GATE_LABELS[event.phase]}: {event.status}
                 </span>
               ))}
