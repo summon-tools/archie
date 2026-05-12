@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CaretDown, CaretRight, ChatsCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, ChatsCircle, CheckCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
 import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
@@ -502,6 +502,15 @@ function PlanPanel({
                     >
                       Open active task
                     </button>
+                  ) : plan.status === "draft" && steps.length > 0 ? (
+                    <button
+                      onClick={handleMarkReady}
+                      disabled={busy}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <CheckCircle size={16} />
+                      {busy ? "Updating..." : "Mark ready"}
+                    </button>
                   ) : (
                     <button
                       onClick={handleExecuteNext}
@@ -523,15 +532,6 @@ function PlanPanel({
                 <section>
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider">Steps</p>
-                    {plan.status === "draft" && steps.length > 0 && (
-                      <button
-                        onClick={handleMarkReady}
-                        disabled={busy}
-                        className="text-xs font-medium text-th-secondary hover:text-th-primary disabled:opacity-60"
-                      >
-                        Mark ready
-                      </button>
-                    )}
                   </div>
 
                   {steps.length === 0 ? (
