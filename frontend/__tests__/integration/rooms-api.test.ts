@@ -1074,6 +1074,19 @@ describe("rooms API", () => {
       const commitSubject = execSync("git log -1 --format=%s", { cwd: repo.dir, encoding: "utf-8" }).trim();
       expect(commitSubject).toBe("chore: add public blog");
       expect(roomsDal.getPlanStep(step.id)!.commit_sha).toBeTruthy();
+
+      const roomMessage = db.prepare(
+        "SELECT * FROM room_messages WHERE room_id = ? ORDER BY id DESC LIMIT 1",
+      ).get(room.id) as any;
+      expect(roomMessage.body_md).toContain("ready for your approval");
+      expect(JSON.parse(roomMessage.payload_json)).toMatchObject({ ready_for_approval: true });
+
+      const conversationMessage = db.prepare(
+        "SELECT * FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1",
+      ).get(conversationId) as any;
+      expect(conversationMessage.role).toBe("assistant");
+      expect(conversationMessage.body_md).toContain("ready for your approval");
+      expect(conversationMessage.body_md).toContain("The task is still open");
     } finally {
       repo.cleanup();
     }

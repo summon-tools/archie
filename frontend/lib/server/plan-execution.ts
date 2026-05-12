@@ -3,6 +3,7 @@ import { getProvider, type ToolStreamEvent } from "./agent";
 import * as dal from "./dal";
 import { getHomeAgent, type HomeAgentDefinition } from "@/lib/home/agents";
 import { enrichWorkItem } from "./work-item-view";
+import { emitConversationEvent } from "./conversation-events";
 import { runGitSafe } from "./worktrees";
 import type { AppRow, ConversationRow, HomeRoomRow, PlanRow, PlanStepEventRow, PlanStepRow, PlanStepStatus, WorkItemRow } from "./types";
 
@@ -681,6 +682,72 @@ function buildCommitMessage(step: PlanStepRow): string {
   return `chore: ${normalized || "complete plan step"}`;
 }
 
+function buildApprovalReadyMessage({
+  plan,
+  step,
+}: {
+  plan: PlanRow;
+  step: PlanStepRow;
+}): string {
+  const workItem = step.linked_work_item_id ? dal.getWorkItem(step.linked_work_item_id) : null;
+  const env = step.linked_work_item_id ? dal.getWorkItemEnv(step.linked_work_item_id) : null;
+  const branchLine = env?.branch_name ? `\n\nBranch: \`${env.branch_name}\`` : "";
+  const taskLine = workItem ? `\nTask: ${workItem.title}` : "";
+
+  return [
+    `The plan **${plan.title}** is complete and ready for your approval.`,
+    "",
+    "All implementation steps and review gates have finished. The task is still open so you can review the result, request changes, or approve it for PR/merge.",
+    taskLine.trim(),
+    branchLine.trim(),
+  ].filter(Boolean).join("\n");
+}
+
+function notifyPlanReadyForApproval({
+  room,
+  plan,
+  step,
+}: {
+  room: HomeRoomRow;
+  plan: PlanRow;
+  step: PlanStepRow;
+}): void {
+  const message = buildApprovalReadyMessage({ plan, step });
+  dal.createRoomMessage({
+    room_id: room.id,
+    role: "system",
+    kind: "execution_event",
+    body_md: message,
+    payload_json: JSON.stringify({
+      plan_id: plan.id,
+      plan_step_id: step.id,
+      ready_for_approval: true,
+    }),
+  });
+
+  if (!step.linked_conversation_id) return;
+
+  const assistantMessage = dal.createMessage({
+    conversation_id: step.linked_conversation_id,
+    role: "assistant",
+    kind: "text",
+    body_md: message,
+  });
+  emitConversationEvent(step.linked_conversation_id, {
+    type: "message",
+    message: {
+      id: assistantMessage.id,
+      conversation_id: step.linked_conversation_id,
+      role: "assistant",
+      content: message,
+      message_type: "text",
+      created_by_name: null,
+      created_by_color: null,
+      created_at: assistantMessage.created_at,
+    },
+  });
+}
+
 function runCommitGate(app: AppRow, step: PlanStepRow): GateDecision & { commitSha?: string | null } {
   const directory = getWorktreeDirectory(app, step);
   const status = runGitSafe(directory, ["status", "--porcelain"], 10_000);
@@ -942,13 +1009,7 @@ export async function runAutomatedPlanStepGates({
 
       if (gate.phase === "commit") {
         if (updated.plan.status === "completed") {
-          dal.createRoomMessage({
-            room_id: room.id,
-            role: "system",
-            kind: "execution_event",
-            body_md: `Plan completed: ${plan.title}`,
-            payload_json: JSON.stringify({ plan_id: plan.id, plan_step_id: step.id }),
-          });
+          notifyPlanReadyForApproval({ room, plan: updated.plan, step: updated.step });
           return updated;
         }
 
