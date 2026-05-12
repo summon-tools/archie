@@ -222,16 +222,61 @@ async function parseOrRepairGeneratedPlan({
   }
 }
 
-function extractJsonObject(text: string): unknown {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const raw = fenced?.[1] || text;
+function stripOuterJsonFence(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("```")) return trimmed;
+
+  const firstLineEnd = trimmed.indexOf("\n");
+  if (firstLineEnd === -1) return trimmed;
+
+  const withoutOpeningFence = trimmed.slice(firstLineEnd + 1).trim();
+  return withoutOpeningFence.endsWith("```")
+    ? withoutOpeningFence.slice(0, -3).trim()
+    : withoutOpeningFence;
+}
+
+function findBalancedJsonObject(raw: string): string {
   const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
+  if (start === -1) {
     throw new Error("Plan generator did not return JSON");
   }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return raw.slice(start, index + 1);
+      }
+    }
+  }
+
+  throw new Error("Plan generator did not return JSON");
+}
+
+function extractJsonObject(text: string): unknown {
+  const raw = stripOuterJsonFence(text);
+  const jsonText = findBalancedJsonObject(raw);
   try {
-    return JSON.parse(raw.slice(start, end + 1));
+    return JSON.parse(jsonText);
   } catch {
     throw new Error("Plan generator returned invalid JSON");
   }

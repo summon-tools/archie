@@ -601,6 +601,66 @@ describe("rooms API", () => {
     });
   });
 
+  it("parses fenced plan JSON when step prompts contain markdown code fences", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Fence Room" });
+    const userMessage = dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Create the structured plan for this blog feature.",
+    });
+    const fencedPlan = {
+      title: "Code fence plan",
+      summary_md: "Generated JSON includes markdown fences inside a string.",
+      steps: [
+        {
+          title: "Add model code",
+          objective_md: "Create model code.",
+          implementation_prompt_md: "Use this pattern:\n```ruby\nclass Blog < ApplicationRecord\nend\n```",
+          acceptance_criteria_md: "- Model exists",
+          risk_level: "medium",
+          requires_architecture_review: true,
+          requires_security_review: false,
+          requires_browser_validation: false,
+        },
+        {
+          title: "Render pages",
+          objective_md: "Render public pages.",
+          implementation_prompt_md: "Add index and detail views.",
+          acceptance_criteria_md: "- Pages render",
+          risk_level: "low",
+          requires_architecture_review: false,
+          requires_security_review: false,
+          requires_browser_validation: true,
+        },
+      ],
+    };
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: `\`\`\`json\n${JSON.stringify(fencedPlan, null, 2)}\n\`\`\``,
+      };
+    });
+    const ephemeralQuery = vi.fn();
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream, ephemeralQuery })),
+    }));
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
+
+    const reply = await createRoomAgentReply({ app: appRow, room, userMessage });
+
+    expect(reply.kind).toBe("plan_update");
+    expect(ephemeralQuery).not.toHaveBeenCalled();
+    const plans = dal.getPlansByRoom(room.id);
+    const steps = dal.getPlanSteps(plans[0].id);
+    expect(plans[0].title).toBe("Code fence plan");
+    expect(steps[0].implementation_prompt_md).toContain("```ruby");
+    expect(steps[1].title).toBe("Render pages");
+  });
+
   it("generates a room plan from the plan API", async () => {
     const app = seedApp(db);
     const token = await createAuthToken();
