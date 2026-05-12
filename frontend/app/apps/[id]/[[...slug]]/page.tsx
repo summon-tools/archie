@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react"
 import { useParams, useRouter } from "next/navigation";
 import { SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 import { App, HomeRoom, Task } from "@/lib/types";
-import { getApp, getApps, getRooms, createRoom, getWorkItem, getWorkItems, startApp, stopApp, restartApp, archiveConversation } from "@/lib/api";
+import { getApp, getApps, getRooms, createRoom, updateRoom, getWorkItem, getWorkItems, startApp, stopApp, restartApp, archiveConversation } from "@/lib/api";
 import ChatSidebar from "@/components/ChatSidebar";
 import ConversationView from "@/components/ConversationView";
 import AppSettingsPanel from "@/components/AppSettingsPanel";
@@ -175,6 +175,30 @@ export default function AppPage() {
     }
   }, [appId, rooms.length, handleSelectRoom]);
 
+  const handleCloseRoom = useCallback(async (roomId: number) => {
+    try {
+      const closedRoom = await updateRoom(appId, roomId, { status: "archived" });
+      const updatedRooms = rooms.map((room) => (room.id === roomId ? closedRoom : room));
+      const nextRoomId = updatedRooms.find((room) => room.status === "open" && room.id !== roomId)?.id ?? null;
+      setRooms(updatedRooms);
+
+      if (selectedRoomId === roomId) {
+        if (nextRoomId) {
+          handleSelectRoom(nextRoomId);
+        } else {
+          setSelectedRoomId(null);
+          setSelectedItemId(null);
+          setSelectedItem(null);
+          setShowNewItem(false);
+          setActiveView("room");
+          window.history.replaceState(null, "", `/apps/${appId}/rooms`);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to close room:", err);
+    }
+  }, [appId, handleSelectRoom, rooms, selectedRoomId]);
+
   // Handle new item
   const handleNewItem = () => {
     setSelectedItemId(null);
@@ -194,9 +218,12 @@ export default function AppPage() {
       setShowNewItem(false);
       if (selectedRoomId) {
         window.history.replaceState(null, "", `/apps/${appId}/rooms/${selectedRoomId}`);
-      } else if (rooms[0]) {
-        handleSelectRoom(rooms[0].id);
       } else {
+        const firstOpenRoom = rooms.find((room) => room.status === "open");
+        if (firstOpenRoom) {
+          handleSelectRoom(firstOpenRoom.id);
+          return;
+        }
         window.history.replaceState(null, "", `/apps/${appId}/rooms`);
       }
     } else if (view === "settings") {
@@ -310,8 +337,10 @@ export default function AppPage() {
     : null;
 
   useEffect(() => {
-    if (loading || activeView !== "room" || selectedRoomId || rooms.length === 0) return;
-    handleSelectRoom(rooms[0].id);
+    if (loading || activeView !== "room" || selectedRoomId) return;
+    const firstOpenRoom = rooms.find((room) => room.status === "open");
+    if (!firstOpenRoom) return;
+    handleSelectRoom(firstOpenRoom.id);
   }, [activeView, handleSelectRoom, loading, rooms, selectedRoomId]);
 
   // Handle marking a work item as done from the sidebar
@@ -416,6 +445,7 @@ export default function AppPage() {
           room={selectedRoom}
           onOpenConversation={handleSelectItem}
           onWorkItemCreated={handleItemCreated}
+          onCloseRoom={handleCloseRoom}
         />
       );
     }
@@ -510,6 +540,7 @@ export default function AppPage() {
         activeWorkMode={activeView === "room" ? "rooms" : "tasks"}
         onSelectRoom={handleSelectRoom}
         onNewRoom={handleNewRoom}
+        onCloseRoom={handleCloseRoom}
         onSelectItem={handleSelectItem}
         onNewItem={handleNewItem}
         onMarkDone={handleSidebarMarkDone}

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CaretDown, CaretRight, ChatsCircle, CheckCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, ChatsCircle, CheckCircle, Flag, PlayCircle, Sparkle, X } from "@phosphor-icons/react";
 import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
@@ -18,9 +18,10 @@ interface RoomWorkspaceProps {
   room: HomeRoom | null;
   onOpenConversation: (itemId: number) => void;
   onWorkItemCreated: (item: Task) => void;
+  onCloseRoom: (roomId: number) => void;
 }
 
-export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated }: RoomWorkspaceProps) {
+export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated, onCloseRoom }: RoomWorkspaceProps) {
   const { mutate: mutateGlobal } = useSWRConfig();
   const { leftWidth, isDragging, containerRef, dragHandleProps } = useResizablePanel({
     storageKey: "archie-room-plan-ratio",
@@ -129,6 +130,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             setSelectedAgentKey={setSelectedAgentKey}
             thinkingAgentKey={awaitingReplyAgentKey}
             onSend={handleSendRoomMessage}
+            onCloseRoom={() => onCloseRoom(room.id)}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center p-8">
@@ -190,6 +192,7 @@ function RoomShell({
   setSelectedAgentKey,
   thinkingAgentKey,
   onSend,
+  onCloseRoom,
 }: {
   room: HomeRoom;
   messages: RoomMessage[];
@@ -202,16 +205,30 @@ function RoomShell({
   setSelectedAgentKey: (agentKey: string | null) => void;
   thinkingAgentKey: string | null;
   onSend: () => void;
+  onCloseRoom: () => void;
 }) {
   const statusAgentName = getAgentName(thinkingAgentKey || selectedAgentKey);
+  const isClosed = room.status !== "open";
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <header className="h-10 px-6 border-b border-th flex items-center justify-between gap-3">
         <h2 className="min-w-0 truncate text-sm font-semibold text-th-primary">{room.title}</h2>
-        <span className="flex-shrink-0 text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
-          {room.status}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="flex-shrink-0 text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
+            {isClosed ? "closed" : room.status}
+          </span>
+          {!isClosed && (
+            <button
+              onClick={onCloseRoom}
+              className="flex-shrink-0 p-1.5 rounded-lg text-th-muted hover:text-st-red hover:bg-th-muted transition-colors"
+              title="Close room"
+              aria-label="Close room"
+            >
+              <X size={14} weight="bold" />
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -243,17 +260,25 @@ function RoomShell({
             <p className="text-sm text-st-red">{error}</p>
           </div>
         )}
-        <RoomChatInput
-          value={draft}
-          onChange={setDraft}
-          onSubmit={onSend}
-          agents={DEFAULT_HOME_AGENTS}
-          selectedAgentKey={selectedAgentKey}
-          onSelectAgent={setSelectedAgentKey}
-          disabled={sending}
-          isLoading={sending}
-          statusText={sending || thinking ? `${statusAgentName} is thinking...` : undefined}
-        />
+        {isClosed ? (
+          <div className="max-w-3xl mx-auto px-6 pb-5 pt-2">
+            <div className="rounded-lg border border-th bg-th-panel px-3 py-2 text-sm text-th-muted">
+              This room is closed.
+            </div>
+          </div>
+        ) : (
+          <RoomChatInput
+            value={draft}
+            onChange={setDraft}
+            onSubmit={onSend}
+            agents={DEFAULT_HOME_AGENTS}
+            selectedAgentKey={selectedAgentKey}
+            onSelectAgent={setSelectedAgentKey}
+            disabled={sending}
+            isLoading={sending}
+            statusText={sending || thinking ? `${statusAgentName} is thinking...` : undefined}
+          />
+        )}
       </div>
     </div>
   );
@@ -346,13 +371,14 @@ function PlanPanel({
   const planningContext = data?.planning_context_md || room?.planning_context_md || "";
   const activeStep = steps.find((step) => ["implementing", "reviewing", "fixing", "validating", "committing"].includes(step.status));
   const nextPendingStep = steps.find((step) => step.status === "pending");
+  const roomClosed = room?.status !== "open";
 
   useEffect(() => {
     setPlanningContextCollapsed(true);
   }, [room?.id]);
 
   const handleGeneratePlan = async () => {
-    if (!room || busy) return;
+    if (!room || roomClosed || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -366,7 +392,7 @@ function PlanPanel({
   };
 
   const handleExecuteNext = async () => {
-    if (!room || !plan || busy) return;
+    if (!room || !plan || roomClosed || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -381,7 +407,7 @@ function PlanPanel({
   };
 
   const handleStartGates = async (step: PlanStep) => {
-    if (!room || busy) return;
+    if (!room || roomClosed || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -395,7 +421,7 @@ function PlanPanel({
   };
 
   const handleAdvanceGate = async (step: PlanStep, status: "passed" | "failed") => {
-    if (!room || busy) return;
+    if (!room || roomClosed || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -409,7 +435,7 @@ function PlanPanel({
   };
 
   const handleMarkReady = async () => {
-    if (!room || !plan || busy) return;
+    if (!room || !plan || roomClosed || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -482,7 +508,7 @@ function PlanPanel({
                 </p>
                 <button
                   onClick={handleGeneratePlan}
-                  disabled={busy}
+                  disabled={busy || roomClosed}
                   className="mt-3 w-full rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-60"
                 >
                   {busy ? "Generating..." : "Generate draft plan"}
@@ -509,7 +535,7 @@ function PlanPanel({
                   ) : plan.status === "draft" && steps.length > 0 ? (
                     <button
                       onClick={handleMarkReady}
-                      disabled={busy}
+                      disabled={busy || roomClosed}
                       className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <CheckCircle size={16} />
@@ -518,7 +544,7 @@ function PlanPanel({
                   ) : (
                     <button
                       onClick={handleExecuteNext}
-                      disabled={busy || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
+                      disabled={busy || roomClosed || !nextPendingStep || !["ready", "executing"].includes(plan.status)}
                       className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-btn-primary text-btn-primary px-3 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <PlayCircle size={16} />
@@ -549,6 +575,7 @@ function PlanPanel({
                           busy={busy}
                           onStartGates={handleStartGates}
                           onAdvanceGate={handleAdvanceGate}
+                          disabled={roomClosed}
                         />
                       ))}
                     </div>
@@ -576,11 +603,13 @@ const GATE_LABELS: Record<string, string> = {
 function PlanStepCard({
   step,
   busy,
+  disabled,
   onStartGates,
   onAdvanceGate,
 }: {
   step: PlanStep;
   busy: boolean;
+  disabled?: boolean;
   onStartGates: (step: PlanStep) => void;
   onAdvanceGate: (step: PlanStep, status: "passed" | "failed") => void;
 }) {
@@ -626,7 +655,7 @@ function PlanStepCard({
           {(step.status === "implementing" || step.status === "fixing") && step.linked_work_item_id && (
             <button
               onClick={() => onStartGates(step)}
-              disabled={busy}
+              disabled={busy || disabled}
               className="mt-3 w-full rounded-lg border border-th px-3 py-2 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
             >
               Start review gates
@@ -636,14 +665,14 @@ function PlanStepCard({
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 onClick={() => onAdvanceGate(step, "passed")}
-                disabled={busy}
+                disabled={busy || disabled}
                 className="rounded-lg border border-th px-3 py-2 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
               >
                 Pass gate
               </button>
               <button
                 onClick={() => onAdvanceGate(step, "failed")}
-                disabled={busy}
+                disabled={busy || disabled}
                 className="rounded-lg border border-th px-3 py-2 text-xs font-medium text-st-red hover:bg-th-subtle disabled:opacity-50"
               >
                 Needs fixes

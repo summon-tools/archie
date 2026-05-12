@@ -21,6 +21,7 @@ interface ChatSidebarProps {
   activeWorkMode: "rooms" | "tasks";
   onSelectRoom: (roomId: number) => void;
   onNewRoom: () => void;
+  onCloseRoom?: (roomId: number) => void;
   onSelectItem: (itemId: number) => void;
   onNewItem: () => void;
   onMarkDone?: (itemId: number) => void;
@@ -73,6 +74,7 @@ export default function ChatSidebar({
   activeWorkMode,
   onSelectRoom,
   onNewRoom,
+  onCloseRoom,
   onSelectItem,
   onNewItem,
   onMarkDone,
@@ -109,9 +111,10 @@ export default function ChatSidebar({
   }, [showProjectPicker]);
 
   const appInitial = app?.name?.charAt(0).toUpperCase() || "?";
+  const openRoomItems = rooms.filter((room) => room.status === "open");
   const openRooms = () => {
     if (selectedRoomId) onSelectRoom(selectedRoomId);
-    else if (rooms[0]) onSelectRoom(rooms[0].id);
+    else if (openRoomItems[0]) onSelectRoom(openRoomItems[0].id);
     else onViewChange?.("room");
   };
 
@@ -175,7 +178,7 @@ export default function ChatSidebar({
         {/* Work dots */}
         <div className="flex-1 overflow-y-auto py-1">
           {activeWorkMode === "rooms"
-            ? rooms.map((room) => (
+            ? openRoomItems.map((room) => (
                 <button
                   key={room.id}
                   onClick={() => onSelectRoom(room.id)}
@@ -414,6 +417,7 @@ export default function ChatSidebar({
           selectedRoomId={selectedRoomId}
           loading={roomsLoading}
           onSelectRoom={onSelectRoom}
+          onCloseRoom={onCloseRoom}
         />
       ) : (
         <ConversationList
@@ -609,12 +613,18 @@ function RoomList({
   selectedRoomId,
   loading,
   onSelectRoom,
+  onCloseRoom,
 }: {
   rooms: HomeRoom[];
   selectedRoomId: number | null;
   loading?: boolean;
   onSelectRoom: (roomId: number) => void;
+  onCloseRoom?: (roomId: number) => void;
 }) {
+  const [showClosed, setShowClosed] = useState(false);
+  const openRooms = rooms.filter((room) => room.status === "open");
+  const closedRooms = rooms.filter((room) => room.status !== "open");
+
   return (
     <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
       {loading ? (
@@ -624,31 +634,98 @@ function RoomList({
           No rooms yet
         </div>
       ) : (
-        <div>
-          {rooms.map((room) => (
-            <button
-              key={room.id}
-              onClick={() => onSelectRoom(room.id)}
-              className={`group w-full text-left px-4 py-2 border-l-2 transition-colors duration-150 ${
-                room.id === selectedRoomId
-                  ? "bg-th-muted border-l-th-strong"
-                  : "border-l-transparent hover:bg-th-subtle"
-              }`}
-              title={room.title}
-            >
-              <div className="flex items-center gap-2 pl-2">
-                <UsersThree size={15} className="text-th-muted flex-shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-th-primary truncate">{room.title}</p>
-                  {room.purpose && (
-                    <p className="mt-0.5 text-xs text-th-muted truncate">{room.purpose}</p>
-                  )}
-                </div>
+        <>
+          <div>
+            {openRooms.length === 0 ? (
+              <div className="p-4 text-center text-sm text-th-muted">
+                No open rooms
               </div>
-            </button>
-          ))}
-        </div>
+            ) : (
+              openRooms.map((room) => (
+                <RoomEntry
+                  key={room.id}
+                  room={room}
+                  isSelected={room.id === selectedRoomId}
+                  onSelect={() => onSelectRoom(room.id)}
+                  onClose={onCloseRoom ? () => onCloseRoom(room.id) : undefined}
+                />
+              ))
+            )}
+          </div>
+
+          {closedRooms.length > 0 && (
+            <div className="mt-auto">
+              <button
+                onClick={() => setShowClosed(!showClosed)}
+                className="w-full flex items-center gap-2 px-4 py-1.5 text-xs text-th-dimmed hover:text-th-muted transition-colors"
+              >
+                <CheckCircle size={12} />
+                <span>Closed ({closedRooms.length})</span>
+                <CaretDown
+                  size={10}
+                  className={`ml-auto transition-transform ${showClosed ? "" : "-rotate-90"}`}
+                />
+              </button>
+              {showClosed && (
+                <div className="pb-1">
+                  {closedRooms.map((room) => (
+                    <RoomEntry
+                      key={room.id}
+                      room={room}
+                      isSelected={room.id === selectedRoomId}
+                      isClosed
+                      onSelect={() => onSelectRoom(room.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+function RoomEntry({
+  room,
+  isSelected,
+  isClosed,
+  onSelect,
+  onClose,
+}: {
+  room: HomeRoom;
+  isSelected: boolean;
+  isClosed?: boolean;
+  onSelect: () => void;
+  onClose?: () => void;
+}) {
+  return (
+    <div
+      className={`group w-full text-left px-4 py-2 transition-colors duration-150 ${
+        isSelected
+          ? "bg-th-muted border-l-2 border-l-th-strong"
+          : "border-l-2 border-l-transparent hover:bg-th-subtle"
+      } ${isClosed ? "opacity-50" : ""}`}
+    >
+      <div className="flex items-center gap-2 pl-2">
+        <UsersThree size={15} className="text-th-muted flex-shrink-0" />
+        <button onClick={onSelect} className="min-w-0 flex-1 text-left" title={room.title}>
+          <p className="text-sm text-th-primary truncate">{room.title}</p>
+          {room.purpose && (
+            <p className="mt-0.5 text-xs text-th-muted truncate">{room.purpose}</p>
+          )}
+        </button>
+        {onClose && !isClosed && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            className="flex-shrink-0 p-1.5 rounded text-th-muted opacity-0 group-hover:opacity-100 hover:text-st-red hover:bg-th-muted transition-all"
+            title="Close room"
+          >
+            <X size={14} weight="bold" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
