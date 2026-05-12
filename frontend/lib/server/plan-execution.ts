@@ -848,12 +848,17 @@ async function sendFixPromptToImplementation({
   decision: GateDecision;
 }): Promise<void> {
   if (!step.linked_conversation_id) return;
+  const implementer = getHomeAgent("implementer");
   const { streamConversationMessage } = await import("./conversation");
   const stream = await streamConversationMessage(
     step.linked_conversation_id,
     buildFixPrompt({ step, gate, decision }),
     app.name,
     app.directory,
+    implementer.defaultModel,
+    undefined,
+    false,
+    implementer.defaultProvider,
   );
   await drainConversationStream(stream);
 }
@@ -870,6 +875,7 @@ async function runImplementationConversation({
   step: PlanStepRow;
 }): Promise<void> {
   if (!step.linked_conversation_id) return;
+  const implementer = getHomeAgent("implementer");
   const { streamConversationMessage } = await import("./conversation");
   const prompt = buildPlanStepImplementationPrompt({ app, room, plan, step });
   const stream = await streamConversationMessage(
@@ -877,9 +883,10 @@ async function runImplementationConversation({
     prompt,
     app.name,
     app.directory,
-    undefined,
+    implementer.defaultModel,
     undefined,
     true,
+    implementer.defaultProvider,
   );
   await drainConversationStream(stream);
 }

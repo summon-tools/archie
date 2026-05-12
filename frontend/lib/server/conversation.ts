@@ -232,10 +232,11 @@ export async function streamConversationMessage(
 
   // Get or create agent session
   const session = dal.getSessionForConversation(conversationId);
-  const sessionId = session?.external_session_id || undefined;
 
   // Resolve provider
   const resolvedProviderId = providerId || session?.provider_id || "claude";
+  const isProviderSwitch = Boolean(session && providerId && session.provider_id !== resolvedProviderId);
+  const sessionId = isProviderSwitch ? undefined : session?.external_session_id || undefined;
   const provider = getProvider(resolvedProviderId);
 
   // Resolve worktree for task conversations
@@ -341,7 +342,11 @@ export async function streamConversationMessage(
   }
 
   // Update session status and provider
-  dal.upsertSessionForConversation(conversationId, { status: "running", provider_id: resolvedProviderId });
+  dal.upsertSessionForConversation(conversationId, {
+    status: "running",
+    provider_id: resolvedProviderId,
+    ...(isProviderSwitch ? { external_session_id: null } : {}),
+  });
   emitConversationEvent(conversationId, { type: "status", status: "running" });
 
   // Create a run record with budget

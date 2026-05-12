@@ -118,6 +118,89 @@ describe("conversation streaming", () => {
     expect(statusEvents.length).toBeGreaterThan(0);
   });
 
+  it("starts a new provider session when an explicit provider override changes providers", async () => {
+    const app = seedApp(db);
+    const conversation = seedConversation(db, app.id);
+    db.prepare(
+      "INSERT INTO agent_sessions (conversation_id, provider_id, external_session_id, status) VALUES (?, ?, ?, ?)",
+    ).run(conversation.id, "claude", "claude-session-1", "completed");
+
+    const streamTask = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        result: {
+          text: "Implemented with Codex.",
+          sessionId: "codex-session-1",
+          costUsd: 0.001,
+          durationMs: 50,
+          numTurns: 1,
+          usage: { inputTokens: 10, outputTokens: 5 },
+          models: ["gpt-5.5"],
+        },
+      };
+    });
+    const resumeSession = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        result: {
+          text: "Should not resume Claude.",
+          sessionId: "claude-session-1",
+          costUsd: 0.001,
+          durationMs: 50,
+          numTurns: 1,
+          usage: { inputTokens: 10, outputTokens: 5 },
+          models: ["claude-sonnet-4-6"],
+        },
+      };
+    });
+    const mockProvider = createMockProvider({ streamTask, resumeSession });
+    const getProvider = vi.fn(() => mockProvider);
+
+    vi.doMock("@/lib/server/agent", () => ({ getProvider }));
+    vi.doMock("@/lib/server/knowledge/indexer", () => ({ refreshIfStale: async () => {} }));
+    vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
+    vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
+    vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
+    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
+    vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
+    vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
+
+    const { streamConversationMessage } = await import("@/lib/server/conversation");
+    const stream = await streamConversationMessage(
+      conversation.id,
+      "Implement with the configured implementer.",
+      "Test App",
+      ctx.tmpDir,
+      "gpt-5.5",
+      undefined,
+      false,
+      "codex",
+    );
+
+    const reader = stream.getReader();
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    expect(getProvider).toHaveBeenCalledWith("codex");
+    expect(resumeSession).not.toHaveBeenCalled();
+    expect(streamTask).toHaveBeenCalledWith(expect.objectContaining({
+      model: "gpt-5.5",
+    }));
+
+    const session = db.prepare("SELECT * FROM agent_sessions WHERE conversation_id = ?").get(conversation.id) as any;
+    expect(session.provider_id).toBe("codex");
+    expect(session.external_session_id).toBe("codex-session-1");
+
+    const run = db.prepare("SELECT * FROM runs WHERE conversation_id = ? ORDER BY id DESC LIMIT 1").get(conversation.id) as any;
+    expect(run).toMatchObject({
+      provider_id: "codex",
+      model_id: "gpt-5.5",
+      status: "completed",
+    });
+  });
+
   it("starts plan step gates when a linked implementation conversation completes", async () => {
     const app = seedApp(db);
     const conversation = seedConversation(db, app.id);

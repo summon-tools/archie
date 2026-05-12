@@ -19,6 +19,7 @@ beforeEach(async () => {
 afterEach(() => {
   vi.doUnmock("@/lib/server/room-agents");
   vi.doUnmock("@/lib/server/agent");
+  vi.doUnmock("@/lib/server/conversation");
   ctx.cleanup();
 });
 
@@ -919,6 +920,131 @@ describe("rooms API", () => {
       conversation_id: firstBody.conversation.id,
       reused_execution_conversation: true,
     });
+  });
+
+  it("runs launched implementation steps through the configured Implementer model", async () => {
+    const app = seedApp(db);
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Execution Room" });
+    const plan = dal.createPlan({
+      room_id: room.id,
+      title: "Implementation Routing Plan",
+      status: "executing",
+    });
+    const completedStep = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Completed step",
+      status: "completed",
+    });
+    const nextStep = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Routed implementation step",
+      objective_md: "Verify implementation routing.",
+      implementation_prompt_md: "Implement only the routed step.",
+    });
+    const streamConversationMessage = vi.fn(async () => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    }));
+    vi.doMock("@/lib/server/conversation", () => ({
+      isConversationRunning: () => false,
+      streamConversationMessage,
+    }));
+    const { runAutomatedPlanStepGates } = await import("@/lib/server/plan-execution");
+
+    await runAutomatedPlanStepGates({
+      appId: app.id,
+      roomId: room.id,
+      stepId: completedStep.id,
+    });
+
+    const updatedNextStep = dal.getPlanStep(nextStep.id)!;
+    expect(updatedNextStep.status).toBe("implementing");
+    expect(streamConversationMessage).toHaveBeenCalledWith(
+      updatedNextStep.linked_conversation_id,
+      expect.stringContaining("Implement only the routed step."),
+      "Test App",
+      "/tmp/test-app",
+      "gpt-5.5",
+      undefined,
+      true,
+      "codex",
+    );
+  });
+
+  it("sends automated gate fix prompts through the configured Implementer model", async () => {
+    const app = seedApp(db);
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const workItemsDal = await import("@/lib/server/dal/work-items");
+    const conversation = db.prepare(
+      "INSERT INTO conversations (app_id, kind, title) VALUES (?, 'task', ?)",
+    ).run(app.id, "Plan execution");
+    const conversationId = Number(conversation.lastInsertRowid);
+    const workItem = workItemsDal.createWorkItem({
+      app_id: app.id,
+      primary_conversation_id: conversationId,
+      title: "Gate fixes",
+      origin_type: "room_plan",
+    });
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Gate Fix Room" });
+    const plan = roomsDal.createPlan({ room_id: room.id, title: "Gate Fix Plan", status: "executing" });
+    const step = roomsDal.createPlanStep({
+      plan_id: plan.id,
+      title: "Fix routed step",
+      status: "reviewing",
+    });
+    roomsDal.updatePlanStep(step.id, {
+      linked_work_item_id: workItem.id,
+      linked_conversation_id: conversationId,
+    });
+    roomsDal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "code_review",
+      agent_key: "reviewer",
+      status: "pending",
+      summary_md: "Code review",
+    });
+
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        detail: "done",
+        resultText: JSON.stringify({
+          status: "failed",
+          summary_md: "Review found a blocker.",
+          feedback_md: "Tighten the test coverage before advancing.",
+        }),
+      };
+    });
+    const streamConversationMessage = vi.fn(async () => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    }));
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
+    }));
+    vi.doMock("@/lib/server/conversation", () => ({ streamConversationMessage }));
+    const { runAutomatedPlanStepGates } = await import("@/lib/server/plan-execution");
+
+    await runAutomatedPlanStepGates({
+      appId: app.id,
+      roomId: room.id,
+      stepId: step.id,
+    });
+
+    expect(roomsDal.getPlanStep(step.id)!.status).toBe("fixing");
+    expect(streamConversationMessage).toHaveBeenCalledWith(
+      conversationId,
+      expect.stringContaining("Tighten the test coverage before advancing."),
+      "Test App",
+      "/tmp/test-app",
+      "gpt-5.5",
+      undefined,
+      false,
+      "codex",
+    );
   });
 
   it("orchestrates review, security, qa, browser, and commit gates deterministically", async () => {
