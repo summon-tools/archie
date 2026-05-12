@@ -797,7 +797,7 @@ describe("rooms API", () => {
     expect(patchedBody.steps).toHaveLength(1);
   });
 
-  it("launches the next pending plan step as a scoped task conversation", async () => {
+  it("launches the next pending plan step as a scoped execution conversation", async () => {
     const app = seedApp(db);
     const token = await createAuthToken();
     const dal = await import("@/lib/server/dal/rooms");
@@ -835,6 +835,8 @@ describe("rooms API", () => {
     expect(body.step.status).toBe("implementing");
     expect(body.step.linked_work_item_id).toBe(body.work_item.id);
     expect(body.step.linked_conversation_id).toBe(body.conversation.id);
+    expect(body.conversation.title).toBe("Plan Mode");
+    expect(body.work_item.title).toBe("Plan Mode");
     expect(body.work_item.origin_type).toBe("room_plan");
 
     const message = db.prepare("SELECT body_md FROM messages WHERE conversation_id = ?").get(body.conversation.id) as { body_md: string };
@@ -848,6 +850,71 @@ describe("rooms API", () => {
 
     const roomMessage = db.prepare("SELECT * FROM room_messages WHERE room_id = ? AND kind = 'execution_event'").get(room.id) as any;
     expect(roomMessage.body_md).toContain("Started implementation");
+  });
+
+  it("reuses the same execution conversation for later plan steps", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Execution Room" });
+    const plan = dal.createPlan({
+      room_id: room.id,
+      title: "Reusable Execution Plan",
+      status: "ready",
+    });
+    const firstStep = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "First implementation step",
+      objective_md: "Do the first scoped piece.",
+      implementation_prompt_md: "Implement only the first scoped piece.",
+    });
+    const secondStep = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Second implementation step",
+      objective_md: "Do the second scoped piece.",
+      implementation_prompt_md: "Continue in the same task branch for the second scoped piece.",
+    });
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/execute-next/route");
+
+    const firstResponse = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/execute-next`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+    expect(firstResponse.status).toBe(201);
+    const firstBody = await firstResponse.json();
+
+    dal.updatePlanStep(firstStep.id, { status: "completed" });
+
+    const secondResponse = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/execute-next`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(secondResponse.status).toBe(201);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.step.id).toBe(secondStep.id);
+    expect(secondBody.step.status).toBe("implementing");
+    expect(secondBody.step.linked_work_item_id).toBe(firstBody.work_item.id);
+    expect(secondBody.step.linked_conversation_id).toBe(firstBody.conversation.id);
+    expect(secondBody.work_item.id).toBe(firstBody.work_item.id);
+    expect(secondBody.conversation.id).toBe(firstBody.conversation.id);
+
+    const workItems = db.prepare("SELECT * FROM work_items WHERE app_id = ? AND origin_type = 'room_plan'").all(app.id) as any[];
+    expect(workItems).toHaveLength(1);
+
+    const userMessages = db.prepare(
+      "SELECT body_md FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY seq ASC, id ASC",
+    ).all(firstBody.conversation.id) as { body_md: string }[];
+    expect(userMessages).toHaveLength(2);
+    expect(userMessages[0].body_md).toContain("Implement only the first scoped piece");
+    expect(userMessages[1].body_md).toContain("Continue in the same task branch");
+
+    const event = db.prepare("SELECT * FROM plan_step_events WHERE plan_step_id = ?").get(secondStep.id) as any;
+    expect(JSON.parse(event.payload_json)).toMatchObject({
+      work_item_id: firstBody.work_item.id,
+      conversation_id: firstBody.conversation.id,
+      reused_execution_conversation: true,
+    });
   });
 
   it("orchestrates review, security, qa, browser, and commit gates deterministically", async () => {

@@ -117,27 +117,28 @@ export function launchNextPlanStep({
   }
 
   const prompt = buildPlanStepImplementationPrompt({ app, room, plan, step: nextStep });
+  const existingExecutionTarget = getExistingExecutionTarget(steps);
   const db = getDb();
 
   const result = db.transaction(() => {
-    const conversation = dal.createConversation({
+    const conversation = existingExecutionTarget?.conversation || dal.createConversation({
       app_id: app.id,
       kind: "task",
-      title: nextStep.title,
+      title: plan.title,
       created_by: userId,
       origin_type: "room_plan",
-      origin_automation_key: `room:${room.id}:plan:${plan.id}:step:${nextStep.id}`,
+      origin_automation_key: `room:${room.id}:plan:${plan.id}`,
     });
 
-    const workItem = dal.createWorkItem({
+    const workItem = existingExecutionTarget?.workItem || dal.createWorkItem({
       app_id: app.id,
       primary_conversation_id: conversation.id,
-      title: nextStep.title,
+      title: plan.title,
       summary: prompt,
       kind: "task",
       created_by: userId,
       origin_type: "room_plan",
-      origin_automation_key: `room:${room.id}:plan:${plan.id}:step:${nextStep.id}`,
+      origin_automation_key: `room:${room.id}:plan:${plan.id}`,
     });
 
     dal.createMessage({
@@ -162,10 +163,13 @@ export function launchNextPlanStep({
       phase: "implementation",
       agent_key: "coordinator",
       status: "started",
-      summary_md: `Started implementation conversation for "${nextStep.title}".`,
+      summary_md: existingExecutionTarget
+        ? `Queued implementation step "${nextStep.title}" in the existing execution conversation.`
+        : `Started implementation conversation for "${nextStep.title}".`,
       payload_json: JSON.stringify({
         work_item_id: workItem.id,
         conversation_id: conversation.id,
+        reused_execution_conversation: Boolean(existingExecutionTarget),
       }),
     });
 
@@ -173,12 +177,15 @@ export function launchNextPlanStep({
       room_id: room.id,
       role: "system",
       kind: "execution_event",
-      body_md: `Started implementation for step ${nextStep.position + 1}: ${nextStep.title}`,
+      body_md: existingExecutionTarget
+        ? `Queued step ${nextStep.position + 1} in the existing implementation task: ${nextStep.title}`
+        : `Started implementation for step ${nextStep.position + 1}: ${nextStep.title}`,
       payload_json: JSON.stringify({
         plan_id: plan.id,
         plan_step_id: nextStep.id,
         work_item_id: workItem.id,
         conversation_id: conversation.id,
+        reused_execution_conversation: Boolean(existingExecutionTarget),
       }),
     });
 
@@ -264,6 +271,22 @@ function statusForGatePhase(phase: string | null): PlanStepStatus {
 
 function getPendingGate(events: PlanStepEventRow[]): PlanStepEventRow | undefined {
   return events.find((event) => GATE_PHASES.has(event.phase) && event.status === "pending");
+}
+
+function getExistingExecutionTarget(steps: PlanStepRow[]): {
+  conversation: ConversationRow;
+  workItem: WorkItemRow;
+} | null {
+  for (const step of steps) {
+    if (!step.linked_conversation_id || !step.linked_work_item_id) continue;
+    const conversation = dal.getConversation(step.linked_conversation_id);
+    const workItem = dal.getWorkItem(step.linked_work_item_id);
+    if (conversation && workItem) {
+      return { conversation, workItem };
+    }
+  }
+
+  return null;
 }
 
 function syncPlanCompletion(planId: number): PlanRow {
