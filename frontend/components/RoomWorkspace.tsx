@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatsCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, ChatsCircle, Flag, PlayCircle, Sparkle } from "@phosphor-icons/react";
 import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
@@ -339,6 +339,7 @@ function PlanPanel({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [planningContextCollapsed, setPlanningContextCollapsed] = useState(false);
 
   const plan = data?.plan || null;
   const steps = data?.steps || [];
@@ -431,20 +432,38 @@ function PlanPanel({
         ) : (
           <>
             <section className="rounded-lg border border-th bg-th-main p-3">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="text-meta font-semibold text-th-dimmed uppercase tracking-wider">Planning Context</p>
+              <button
+                type="button"
+                onClick={() => setPlanningContextCollapsed((collapsed) => !collapsed)}
+                aria-expanded={!planningContextCollapsed}
+                className="w-full flex items-center justify-between gap-2 text-left"
+              >
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  {planningContextCollapsed ? (
+                    <CaretRight size={14} className="text-th-dimmed flex-shrink-0" />
+                  ) : (
+                    <CaretDown size={14} className="text-th-dimmed flex-shrink-0" />
+                  )}
+                  <span className="text-meta font-semibold text-th-dimmed uppercase tracking-wider truncate">
+                    Planning Context
+                  </span>
+                </span>
                 {data?.planning_context_updated_at && (
-                  <span className="text-meta text-th-dimmed">updated</span>
+                  <span className="text-meta text-th-dimmed flex-shrink-0">updated</span>
                 )}
-              </div>
-              {planningContext.trim() ? (
-                <div className={PROSE_CLASSES}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{planningContext}</ReactMarkdown>
+              </button>
+              {!planningContextCollapsed && (
+                <div className="mt-2">
+                  {planningContext.trim() ? (
+                    <div className={PROSE_CLASSES}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{planningContext}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-th-muted leading-relaxed">
+                      The working planning context will appear here as the room discussion develops.
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <p className="text-xs text-th-muted leading-relaxed">
-                  The working planning context will appear here as the room discussion develops.
-                </p>
               )}
             </section>
 
