@@ -14,6 +14,7 @@ import type {
   EphemeralOpts,
   ModelEntry,
   ToolStreamEvent,
+  AgentToolPolicy,
 } from "../types";
 
 const CODEX_MODELS: ModelEntry[] = [
@@ -367,8 +368,13 @@ function isGitRepo(dir?: string): boolean {
   }
 }
 
-function buildExecArgs(model?: string, cwd?: string): string[] {
-  const args = ["exec", "--json", "--full-auto"];
+function buildExecArgs(model?: string, cwd?: string, toolPolicy: AgentToolPolicy = "full_access"): string[] {
+  const args = ["exec", "--json"];
+  if (toolPolicy === "full_access") {
+    args.push("--full-auto");
+  } else {
+    args.push("--sandbox", "read-only");
+  }
   // Override reasoning effort to avoid inheriting invalid user config values
   args.push("-c", "model_reasoning_effort=high");
   if (!isGitRepo(cwd)) {
@@ -494,7 +500,7 @@ export class CodexCliProvider implements AgentProvider {
   }
 
   async ephemeralQuery(prompt: string, opts?: EphemeralOpts): Promise<string> {
-    const args = buildExecArgs(opts?.model, opts?.cwd);
+    const args = buildExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy === "full_access" ? "full_access" : "read_only_codebase");
 
     const { child, errorPromise } = spawnCodex(args, opts?.cwd, opts?.abortController, prompt);
 
@@ -539,7 +545,7 @@ export class CodexCliProvider implements AgentProvider {
   }
 
   async *toolEnabledStream(prompt: string, opts?: EphemeralOpts): AsyncGenerator<ToolStreamEvent> {
-    const args = buildExecArgs(opts?.model, opts?.cwd);
+    const args = buildExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy);
 
     const { child, errorPromise } = spawnCodex(args, opts?.cwd, opts?.abortController, prompt);
 

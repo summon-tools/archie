@@ -1,30 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
+import { CONVERSATION_STATUSES, handleRoomRouteError, readJsonBody, requireConversationAccess, requireEnumValue } from "@/lib/server/room-route-utils";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; conversationId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId, conversationId } = await params;
-
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const conversation = dal.getConversation(Number(conversationId));
-    if (!conversation || conversation.app_id !== app.id) {
-      return NextResponse.json({ detail: "Conversation not found" }, { status: 404 });
-    }
+    const { conversation } = await requireConversationAccess(request, appId, conversationId);
 
     return NextResponse.json(conversation);
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -34,32 +23,21 @@ export async function PUT(
   { params }: { params: Promise<{ appId: string; conversationId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId, conversationId } = await params;
+    const { conversation } = await requireConversationAccess(request, appId, conversationId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const conversation = dal.getConversation(Number(conversationId));
-    if (!conversation || conversation.app_id !== app.id) {
-      return NextResponse.json({ detail: "Conversation not found" }, { status: 404 });
-    }
-
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const fields: Record<string, unknown> = {};
     if (body.title !== undefined) fields.title = body.title;
-    if (body.status !== undefined) fields.status = body.status;
+    if (body.status !== undefined) fields.status = requireEnumValue(body.status, CONVERSATION_STATUSES, "status");
 
-    dal.updateConversation(Number(conversationId), fields);
+    dal.updateConversation(conversation.id, fields);
 
-    const updated = dal.getConversation(Number(conversationId));
+    const updated = dal.getConversation(conversation.id);
     return NextResponse.json(updated);
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -69,26 +47,15 @@ export async function DELETE(
   { params }: { params: Promise<{ appId: string; conversationId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId, conversationId } = await params;
+    const { conversation } = await requireConversationAccess(request, appId, conversationId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const conversation = dal.getConversation(Number(conversationId));
-    if (!conversation || conversation.app_id !== app.id) {
-      return NextResponse.json({ detail: "Conversation not found" }, { status: 404 });
-    }
-
-    dal.deleteConversation(Number(conversationId));
+    dal.deleteConversation(conversation.id);
 
     return NextResponse.json({ message: "Conversation deleted" });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

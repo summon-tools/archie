@@ -44,7 +44,7 @@ export function useConversation({
   const [inputText, setInputText] = useState("");
   const [messagesLoaded, setMessagesLoaded] = useState(false);
 
-  const autoSentRef = useRef(false);
+  const autoSentRef = useRef<string | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   // True while an optimistic message is pending (between append and loadMessages)
   const optimisticPendingRef = useRef(false);
@@ -318,26 +318,35 @@ export function useConversation({
     [appId, workItem.id, selectedModel, selectedProvider, onItemUpdate, setWorkItem, loadMessages, reloadPreview, debouncedReloadPreview]
   );
 
-  // Auto-send first message when work item is new and has no assistant response yet
-  const hasAssistantResponse = messages.some(m => m.role === "assistant");
-  const hasUserMessage = messages.some(m => m.role === "user");
+  // Auto-send a server-seeded user message when it has not received an assistant response yet.
+  const latestUserIndex = messages.reduce((latest, message, index) => (
+    message.role === "user" ? index : latest
+  ), -1);
+  const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
+  const hasAssistantAfterLatestUser = latestUserIndex >= 0
+    ? messages.slice(latestUserIndex + 1).some((message) => message.role === "assistant")
+    : false;
   useEffect(() => {
-    if (autoSentRef.current) return;
     if (!messagesLoaded) return;
-    if (hasAssistantResponse) return;
-    if (workItem.claude_status) return;
-    if (!workItem.description) return;
+    if (optimisticPendingRef.current) return;
+    if (hasAssistantAfterLatestUser) return;
+    if (activeClaudeStatus === "running" || activeClaudeStatus === "waiting_approval") return;
+    if (activeClaudeStatus === "failed" || activeClaudeStatus === "stopped") return;
     if (sending) return;
+    if (workItem.origin_type === "room_plan") return;
     // Wait for worktree to be ready before sending
     if (workItem.worktree_status === "preparing") return;
 
-    autoSentRef.current = true;
-
     // If a user message already exists (e.g. saved during import), use it as the trigger
     // with retry=true to skip saving a duplicate. Otherwise use the work item description.
-    const content = hasUserMessage
-      ? messages.find(m => m.role === "user")!.content
-      : workItem.description;
+    const content = latestUserMessage?.content || workItem.description;
+    if (!content) return;
+
+    const autoSendKey = latestUserMessage
+      ? `message:${latestUserMessage.id}`
+      : `description:${workItem.id}`;
+    if (autoSentRef.current === autoSendKey) return;
+    autoSentRef.current = autoSendKey;
 
     (async () => {
       setSending(true);
@@ -355,11 +364,13 @@ export function useConversation({
     })();
   }, [
     messagesLoaded,
-    hasAssistantResponse,
-    hasUserMessage,
-    workItem.claude_status,
+    latestUserMessage,
+    hasAssistantAfterLatestUser,
+    activeClaudeStatus,
     workItem.description,
+    workItem.origin_type,
     workItem.worktree_status,
+    workItem.id,
     sending,
     consumeStream,
     loadMessages,

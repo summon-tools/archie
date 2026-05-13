@@ -232,10 +232,11 @@ export async function streamConversationMessage(
 
   // Get or create agent session
   const session = dal.getSessionForConversation(conversationId);
-  const sessionId = session?.external_session_id || undefined;
 
   // Resolve provider
   const resolvedProviderId = providerId || session?.provider_id || "claude";
+  const isProviderSwitch = Boolean(session && providerId && session.provider_id !== resolvedProviderId);
+  const sessionId = isProviderSwitch ? undefined : session?.external_session_id || undefined;
   const provider = getProvider(resolvedProviderId);
 
   // Resolve worktree for task conversations
@@ -278,6 +279,18 @@ export async function streamConversationMessage(
   }
 
   const effectiveCwd = env?.worktree_dir || directory || undefined;
+  if (effectiveCwd) {
+    try {
+      const { capturePlanStepBaseCommitForConversation } = await import("./plan-execution");
+      capturePlanStepBaseCommitForConversation({
+        appId: conversation.app_id,
+        conversationId,
+        directory: effectiveCwd,
+      });
+    } catch {
+      // Plan execution can still continue without a scoped base commit.
+    }
+  }
 
   // Build prompt
   let prompt: string;
@@ -341,7 +354,11 @@ export async function streamConversationMessage(
   }
 
   // Update session status and provider
-  dal.upsertSessionForConversation(conversationId, { status: "running", provider_id: resolvedProviderId });
+  dal.upsertSessionForConversation(conversationId, {
+    status: "running",
+    provider_id: resolvedProviderId,
+    ...(isProviderSwitch ? { external_session_id: null } : {}),
+  });
   emitConversationEvent(conversationId, { type: "status", status: "running" });
 
   // Create a run record with budget
@@ -450,6 +467,31 @@ export async function streamConversationMessage(
                   runUpdate.failure_category = "budget_exceeded";
                 }
                 dal.updateRun(run.id, runUpdate);
+
+                try {
+                  const {
+                    scheduleAutomatedPlanStepGates,
+                    startPlanStepGatesForCompletedConversation,
+                  } = await import("./plan-execution");
+                  const gateResult = startPlanStepGatesForCompletedConversation({
+                    appId: conversation.app_id,
+                    conversationId,
+                  });
+                  if (gateResult) {
+                    const planRoom = dal.getRoom(gateResult.plan.room_id);
+                    if (planRoom) {
+                      scheduleAutomatedPlanStepGates({
+                        appId: conversation.app_id,
+                        roomId: planRoom.id,
+                        stepId: gateResult.step.id,
+                      });
+                    }
+                  }
+                } catch {
+                  // Plan execution advancement is best-effort here. The
+                  // conversation result is already persisted and should still
+                  // complete even if the plan linkage is stale.
+                }
 
                 safeEnqueue(`event: status\ndata: ${JSON.stringify({ status: "completed" })}\n\n`);
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
+import { handleRoomRouteError, requireAppAccess } from "@/lib/server/room-route-utils";
 
 /**
  * GET /api/apps/{appId}/conversations — list all conversations for an app (for sidebar)
@@ -11,20 +11,14 @@ export async function GET(
   { params }: { params: Promise<{ appId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId } = await params;
-
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
+    const { app } = await requireAppAccess(request, appId);
 
     const conversations = dal.getConversationsForApp(app.id);
     return NextResponse.json(conversations);
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

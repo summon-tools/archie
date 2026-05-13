@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { getDb } from "@/lib/server/db";
 import { getAuthUser, requireAdmin, AuthError, ForbiddenError } from "@/lib/server/auth";
+import { filterAppsForUser } from "@/lib/server/room-route-utils";
 import { getProjectsDir } from "@/lib/server/config";
 import * as dal from "@/lib/server/dal";
 import { createAppSchema } from "@/lib/schemas/api";
@@ -66,8 +67,9 @@ Initialize a git repository and make an initial commit.`;
 }
 
 export async function GET(request: NextRequest) {
+  let user: Awaited<ReturnType<typeof getAuthUser>>;
   try {
-    await getAuthUser(request);
+    user = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
@@ -76,7 +78,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const apps = dal.getApps();
+    const apps = filterAppsForUser(user, dal.getApps());
     const results = apps.map((app) => dal.buildAppResponse(app));
     return NextResponse.json({ apps: results });
   } catch (e: any) {

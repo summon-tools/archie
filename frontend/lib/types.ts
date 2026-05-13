@@ -35,6 +35,22 @@ export const TTS_VOICES = [
 
 export const DEFAULT_TTS_VOICE = "en-US-AndrewNeural";
 
+export interface AgentModelOption {
+  id: string;
+  label: string;
+  provider: string;
+}
+
+export interface HomeAgentConfig {
+  key: string;
+  name: string;
+  role: string;
+  prompt: string;
+  defaultProvider: "claude" | "codex";
+  defaultModel: string;
+  isCustomized: boolean;
+}
+
 export interface DemoPersona {
   name: string;
   email?: string;
@@ -118,6 +134,9 @@ export interface WorkItem {
   created_by: number | null;
   created_by_name: string | null;
   created_by_color: string | null;
+  origin_type: string;
+  origin_automation_key: string | null;
+  origin_run_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -224,6 +243,111 @@ export interface ChatMessage {
 export interface ChatStatus {
   status: "running" | "idle" | null;
   pid: number | null;
+}
+
+// ── Home Rooms / Plans ─────────────────────────────────────────────
+
+export type HomeRoomStatus = "open" | "archived";
+export type RoomMessageRole = "user" | "agent" | "system";
+export type RoomMessageKind = "message" | "decision" | "plan_update" | "execution_event" | "error";
+export type PlanStatus = "draft" | "ready" | "executing" | "completed" | "blocked" | "cancelled";
+export type PlanExecutionState = "idle" | "running" | "paused" | "completed";
+export type PlanStepRiskLevel = "low" | "medium" | "high";
+export type PlanStepStatus = "pending" | "implementing" | "reviewing" | "fixing" | "validating" | "committing" | "completed" | "blocked" | "failed" | "skipped";
+
+export interface HomeRoom {
+  id: number;
+  app_id: number;
+  title: string;
+  purpose: string;
+  planning_context_md: string;
+  planning_context_updated_at: string | null;
+  status: HomeRoomStatus;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomMessage {
+  id: number;
+  room_id: number;
+  author_user_id: number | null;
+  agent_key: string | null;
+  role: RoomMessageRole;
+  kind: RoomMessageKind;
+  body_md: string;
+  payload_json: string | null;
+  created_at: string;
+}
+
+export interface Plan {
+  id: number;
+  room_id: number;
+  title: string;
+  summary_md: string;
+  status: PlanStatus;
+  execution_state: PlanExecutionState;
+  execution_started_at: string | null;
+  execution_paused_at: string | null;
+  execution_paused_ms: number;
+  execution_elapsed_ms: number;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanStep {
+  id: number;
+  plan_id: number;
+  position: number;
+  title: string;
+  objective_md: string;
+  implementation_prompt_md: string;
+  acceptance_criteria_md: string;
+  risk_level: PlanStepRiskLevel;
+  requires_architecture_review: number;
+  requires_security_review: number;
+  status: PlanStepStatus;
+  linked_work_item_id: number | null;
+  linked_conversation_id: number | null;
+  fix_attempts: number;
+  base_commit_sha: string | null;
+  commit_sha: string | null;
+  result_summary_md: string;
+  created_at: string;
+  updated_at: string;
+  events?: PlanStepEvent[];
+}
+
+export interface PlanStepEvent {
+  id: number;
+  plan_step_id: number;
+  phase: string;
+  agent_key: string | null;
+  status: string;
+  summary_md: string;
+  payload_json: string | null;
+  created_at: string;
+}
+
+export interface RoomPlanResponse {
+  plan: Plan | null;
+  steps: PlanStep[];
+  planning_context_md: string;
+  planning_context_updated_at: string | null;
+}
+
+export interface PlanExecutionResponse {
+  plan: Plan;
+  step: PlanStep;
+  conversation: Conversation;
+  work_item: Task;
+}
+
+export interface PlanStepGateResponse {
+  plan: Plan;
+  step: PlanStep;
+  events: PlanStepEvent[];
 }
 
 // ── Notification (RFC 23) ──────────────────────────────────────────

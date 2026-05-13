@@ -91,7 +91,7 @@ export default function ConversationMessages({
               key={msg.id}
               role={msg.role as "user" | "assistant" | "system"}
               content={displayContent}
-              isMarkdown={msg.role === "assistant"}
+              isMarkdown={msg.role !== "system"}
               messageType={msg.message_type}
               senderName={msg.role === "user" ? msg.created_by_name : undefined}
               senderColor={msg.role === "user" ? msg.created_by_color : undefined}

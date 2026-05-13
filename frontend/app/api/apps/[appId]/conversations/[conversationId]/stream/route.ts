@@ -1,27 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
-import * as dal from "@/lib/server/dal";
 import { streamConversationMessage } from "@/lib/server/conversation";
+import { handleRoomRouteError, readJsonBody, requireConversationAccess } from "@/lib/server/room-route-utils";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; conversationId: string }> }
 ) {
   try {
-    const authUser = await getAuthUser(request);
     const { appId, conversationId } = await params;
+    const access = await requireConversationAccess(request, appId, conversationId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const conversation = dal.getConversation(Number(conversationId));
-    if (!conversation || conversation.app_id !== app.id) {
-      return NextResponse.json({ detail: "Conversation not found" }, { status: 404 });
-    }
-
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const { content, model, provider, retry } = body;
 
     if (!content || typeof content !== "string") {
@@ -32,14 +21,14 @@ export async function POST(
     }
 
     const stream = await streamConversationMessage(
-      Number(conversationId),
+      access.conversation.id,
       content,
-      app.name,
-      app.directory,
-      model || undefined,
-      authUser.id,
+      access.app.name,
+      access.app.directory,
+      typeof model === "string" ? model : undefined,
+      access.user.id,
       !!retry,
-      provider || undefined
+      typeof provider === "string" ? provider : undefined
     );
 
     return new Response(stream, {
@@ -50,9 +39,8 @@ export async function POST(
       },
     });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     if (e instanceof Error && e.message.includes("already running")) {
       return NextResponse.json({ detail: e.message }, { status: 409 });
     }

@@ -6,6 +6,8 @@ import { SpinnerGap } from "@phosphor-icons/react";
 
 import { PROSE_CLASSES } from "@/lib/prose";
 
+const USER_PROSE_CLASSES = PROSE_CLASSES.replace("text-th-secondary", "text-th-primary");
+
 /**
  * During streaming, some models (GPT) send each thinking line separated by
  * double newlines, which markdown renders as separate paragraphs with too
@@ -77,7 +79,13 @@ export default function MessageBubble({
     return (
       <div className="flex justify-end animate-fadeIn">
         <div className="max-w-[80%] bg-th-muted text-th-primary rounded-2xl rounded-tr-sm px-4 py-2.5 overflow-hidden">
-          <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ overflowWrap: "anywhere" }}>{content}</p>
+          {isMarkdown ? (
+            <div className={USER_PROSE_CLASSES} style={{ overflowWrap: "anywhere" }}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            </div>
+          ) : (
+            <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ overflowWrap: "anywhere" }}>{content}</p>
+          )}
         </div>
       </div>
     );

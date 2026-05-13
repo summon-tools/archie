@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 import { createTempGitRepo, type TempGitRepo } from "../helpers/temp-git";
 
 // Import the module under test — worktrees.ts uses child_process (not SQLite)
@@ -54,6 +55,24 @@ describe("createWorktree", () => {
     expect(result2.message).toContain("already exists");
     // Clean up
     removeWorktree(repo.dir, result1.worktree_dir, result1.branch_name);
+  });
+
+  it("prunes stale git worktree metadata before reusing a task directory", () => {
+    const repo = makeRepo();
+    const stale = createWorktree(repo.dir, 4, "Old task");
+    expect(stale.success).toBe(true);
+
+    fs.rmSync(stale.worktree_dir, { recursive: true, force: true });
+    const staleList = execSync("git worktree list --porcelain", { cwd: repo.dir, encoding: "utf-8" });
+    expect(staleList).toContain(stale.worktree_dir);
+
+    const fresh = createWorktree(repo.dir, 4, "New task");
+    expect(fresh.success).toBe(true);
+    expect(fresh.worktree_dir).toBe(stale.worktree_dir);
+    expect(fresh.branch_name).toBe("task/4-new-task");
+    expect(fs.existsSync(fresh.worktree_dir)).toBe(true);
+
+    removeWorktree(repo.dir, fresh.worktree_dir, fresh.branch_name);
   });
 
   it("slugifies branch name correctly", () => {

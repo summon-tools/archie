@@ -1,29 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import {
   removeWorktree,
   stopPreview,
   runGitSafe,
 } from "@/lib/server/worktrees";
+import { handleRoomRouteError, requireWorkItemAccess } from "@/lib/server/room-route-utils";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
   try {
-    const user = await getAuthUser(request);
     const { appId, itemId } = await params;
-
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const wi = dal.getWorkItem(Number(itemId));
-    if (!wi || wi.app_id !== Number(appId)) {
-      return NextResponse.json({ detail: "Work item not found" }, { status: 404 });
-    }
+    const { app, workItem: wi, user } = await requireWorkItemAccess(request, appId, itemId);
 
     const env = dal.getWorkItemEnv(wi.id);
 
@@ -73,9 +63,8 @@ export async function POST(
     const updated = dal.getWorkItem(wi.id)!;
     return NextResponse.json(updated);
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

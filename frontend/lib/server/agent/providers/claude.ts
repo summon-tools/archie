@@ -14,6 +14,7 @@ import type {
   EphemeralOpts,
   ModelEntry,
   ToolStreamEvent,
+  AgentToolPolicy,
 } from "../types";
 
 // Ensure subprocess has enough output token budget
@@ -26,6 +27,21 @@ const CLAUDE_MODELS: ModelEntry[] = [
   { id: "claude-opus-4-7", label: "Opus 4.7", provider: "claude" },
   { id: "claude-opus-4-6", label: "Opus 4.6", provider: "claude" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", provider: "claude" },
+];
+
+const CLAUDE_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "LS"] as const;
+const CLAUDE_BLOCKED_PLANNING_TOOLS = [
+  "Bash",
+  "BashOutput",
+  "KillBash",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "Task",
+  "TodoWrite",
+  "WebFetch",
+  "WebSearch",
 ];
 
 // Cached SDK query function
@@ -57,6 +73,24 @@ function buildSdkOptions(cwd?: string, sessionId?: string): Options {
   }
   opts.settingSources = [];
   return opts;
+}
+
+function applyToolPolicy(options: Options, policy: AgentToolPolicy = "full_access"): Options {
+  if (policy === "full_access") return options;
+
+  delete (options as any).allowDangerouslySkipPermissions;
+  options.permissionMode = policy === "no_tools" ? "plan" : "acceptEdits";
+
+  if (policy === "no_tools") {
+    options.tools = [];
+    options.allowedTools = [];
+    return options;
+  }
+
+  options.tools = [...CLAUDE_READ_ONLY_TOOLS];
+  options.allowedTools = [...CLAUDE_READ_ONLY_TOOLS];
+  options.disallowedTools = [...CLAUDE_BLOCKED_PLANNING_TOOLS];
+  return options;
 }
 
 function extractResultInfo(result: SDKResultSuccess | SDKResultError): AgentResult {
@@ -194,11 +228,13 @@ export class ClaudeProvider implements AgentProvider {
           tools: [],
           persistSession: false,
           settingSources: [],
-          ...getPermissionOptions(),
+          permissionMode: "plan",
           maxTurns: opts?.maxTurns ?? 1,
         };
+        applyToolPolicy(options, opts?.toolPolicy === "read_only_codebase" ? "no_tools" : opts?.toolPolicy || "no_tools");
         if (opts?.model) options.model = opts.model;
         if (opts?.abortController) options.abortController = opts.abortController;
+        if (opts?.cwd) options.cwd = opts.cwd;
 
         const q = sdkQuery({ prompt, options });
         let resultText = "";
@@ -244,7 +280,9 @@ export class ClaudeProvider implements AgentProvider {
       settingSources: [],
       ...getPermissionOptions(),
       maxTurns: opts?.maxTurns ?? Infinity,
+      includePartialMessages: true,
     };
+    applyToolPolicy(options, opts?.toolPolicy);
     if (opts?.model) options.model = opts.model;
     if (opts?.abortController) options.abortController = opts.abortController;
     if (opts?.cwd) options.cwd = opts.cwd;
@@ -253,9 +291,42 @@ export class ClaudeProvider implements AgentProvider {
     let resultText = "";
     let lastAssistantText = "";
     let gotResult = false;
+    let sawPartialText = false;
+    const activeTools = new Map<number, { name: string; inputChunks: string[] }>();
 
     try {
       for await (const msg of q) {
+        if (msg.type === "stream_event") {
+          const event = (msg as any).event;
+          if (event?.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
+            sawPartialText = true;
+            yield { type: "text", detail: event.delta.text };
+          }
+          if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
+            const index = event.index as number;
+            const tool = event.content_block.name || "unknown";
+            activeTools.set(index, { name: tool, inputChunks: [] });
+            yield { type: "tool_use", tool, detail: tool };
+          }
+          if (event?.type === "content_block_delta" && event.delta?.type === "input_json_delta") {
+            const entry = activeTools.get(event.index as number);
+            if (entry) entry.inputChunks.push(event.delta.partial_json || "");
+          }
+          if (event?.type === "content_block_stop") {
+            const index = event.index as number;
+            const entry = activeTools.get(index);
+            if (entry) {
+              let detail = entry.name;
+              try {
+                const input = JSON.parse(entry.inputChunks.join("")) as Record<string, unknown>;
+                detail = JSON.stringify(input).slice(0, 120);
+              } catch {}
+              yield { type: "tool_result", tool: entry.name, detail };
+              activeTools.delete(index);
+            }
+          }
+        }
+
         if (msg.type === "assistant" && (msg as any).message?.content) {
           for (const block of (msg as any).message.content) {
             if (block.type === "tool_use") {
@@ -279,7 +350,7 @@ export class ClaudeProvider implements AgentProvider {
                 detail = JSON.stringify(block.input).slice(0, 120);
               }
               yield { type: "tool_use", tool, detail };
-            } else if (block.type === "text" && block.text) {
+            } else if (!sawPartialText && block.type === "text" && block.text) {
               lastAssistantText = block.text;
               const snippet = String(block.text).slice(0, 200);
               yield { type: "text", detail: snippet };

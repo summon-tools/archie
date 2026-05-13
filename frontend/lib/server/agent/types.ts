@@ -61,7 +61,10 @@ export interface EphemeralOpts {
   maxTurns?: number;
   cwd?: string;
   abortController?: AbortController;
+  toolPolicy?: AgentToolPolicy;
 }
+
+export type AgentToolPolicy = "full_access" | "read_only_codebase" | "no_tools";
 
 export interface ModelEntry {
   id: string;

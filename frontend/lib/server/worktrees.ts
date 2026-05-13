@@ -301,6 +301,10 @@ export function createWorktree(
   const appBasename = path.basename(appDir.replace(/\/+$/, ""));
   const worktreeDir = path.join(path.dirname(appDir), `${appBasename}-task-${taskId}`);
 
+  // A previous task may have removed its directory without removing Git's
+  // worktree metadata. Prune first so a stale record cannot block this task ID.
+  runGitSafe(appDir, ["worktree", "prune"], 15000);
+
   if (fs.existsSync(worktreeDir)) {
     return { success: false, message: `Worktree directory already exists: ${worktreeDir}`, branch_name: branchName, worktree_dir: worktreeDir };
   }

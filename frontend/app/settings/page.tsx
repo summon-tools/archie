@@ -3,14 +3,22 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import { GitSettings } from "@/lib/types";
-import { getMe, getGitSettings, updateGitSettings, generateSSHKey, getSettings, getUsers, updateUserRole, deleteUser, restoreUser, createInvitation, getInvitations, revokeInvitation, getModelConfig, updateModelConfig } from "@/lib/api";
-import type { UserInfo, InvitationInfo, ModelConfig } from "@/lib/api";
-import { CLAUDE_MODELS } from "@/lib/models";
-import { GitBranch, CheckCircle, Users, Gear, Heartbeat, Warning, XCircle } from "@phosphor-icons/react";
+import type { GitSettings, HomeAgentConfig } from "@/lib/types";
+import { getMe, getGitSettings, updateGitSettings, generateSSHKey, getSettings, getUsers, updateUserRole, deleteUser, restoreUser, createInvitation, getInvitations, revokeInvitation, getModelConfig, updateModelConfig, getHomeAgents } from "@/lib/api";
+import type { UserInfo, InvitationInfo } from "@/lib/api";
+import { GitBranch, CheckCircle, Users, Gear, Heartbeat, Warning, XCircle, Robot, PencilSimple } from "@phosphor-icons/react";
 import { useToast } from "@/components/Toast";
 
-type Section = "git" | "team" | "models" | "system";
+const SETTINGS_SECTIONS = ["git", "team", "models", "agents", "system"] as const;
+type Section = (typeof SETTINGS_SECTIONS)[number];
+
+function isSettingsSection(value: string | null): value is Section {
+  return !!value && SETTINGS_SECTIONS.includes(value as Section);
+}
+
+function settingsSectionHref(section: Section) {
+  return section === "git" ? "/settings" : `/settings?section=${section}`;
+}
 
 function GhStatusDisplay() {
   const [ghStatus, setGhStatus] = useState<{
@@ -122,6 +130,84 @@ function ModelCategoryPicker({
   );
 }
 
+function AgentSettingsSection({
+  agents,
+  loading,
+  onEditAgent,
+}: {
+  agents: HomeAgentConfig[];
+  loading: boolean;
+  onEditAgent: (agentKey: string) => void;
+}) {
+  return (
+    <div className="bg-th-surface rounded-2xl border border-th p-6 backdrop-blur-xl">
+      {loading ? (
+        <div className="animate-pulse space-y-3">
+          <div className="h-10 bg-th-muted rounded" />
+          <div className="h-56 bg-th-muted rounded" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-th-primary mb-1">Agents</h2>
+            <p className="text-sm text-th-dimmed">
+              Configure the default descriptions, markdown prompts, and models used by planning rooms and execution gates.
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-th">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-th bg-th-subtle text-left text-xs text-th-dimmed">
+                  <th className="px-3 py-2 font-medium">Agent</th>
+                  <th className="px-3 py-2 font-medium">Model</th>
+                  <th className="px-3 py-2 font-medium text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map((agent) => (
+                  <tr key={agent.key} className="border-b border-th last:border-0 hover:bg-th-subtle transition-colors">
+                    <td className="px-3 py-2.5">
+                      <button
+                        onClick={() => onEditAgent(agent.key)}
+                        className="flex min-w-0 items-center gap-2 text-left"
+                      >
+                        <Robot size={15} weight="bold" className="text-th-muted" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-th-primary">{agent.name}</span>
+                            {agent.isCustomized && (
+                              <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-meta font-medium text-brand-400">
+                                customized
+                              </span>
+                            )}
+                          </div>
+                          <div className="max-w-xl truncate text-xs text-th-dimmed">{agent.role}</div>
+                        </div>
+                      </button>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="font-mono text-xs text-th-muted">{agent.defaultModel}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button
+                        onClick={() => onEditAgent(agent.key)}
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-th-secondary hover:bg-th-muted hover:text-th-primary transition-colors"
+                      >
+                        <PencilSimple size={12} weight="bold" />
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const toast = useToast();
@@ -157,6 +243,9 @@ export default function SettingsPage() {
   const [availableModels, setAvailableModels] = useState<{ id: string; label: string; provider: string }[]>([]);
   const [savingModels, setSavingModels] = useState(false);
   const [loadingModels, setLoadingModels] = useState(true);
+  const [agents, setAgents] = useState<HomeAgentConfig[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(true);
+  const [agentErrors, setAgentErrors] = useState<Record<string, string>>({});
   const [systemReadiness, setSystemReadiness] = useState<{
     tools: { name: string; status: string; version?: string; required: boolean; install_hint: string }[];
     providers: { id: string; label: string; available: boolean; error?: string }[];
@@ -202,6 +291,19 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const loadAgents = useCallback(async () => {
+    setLoadingAgents(true);
+    try {
+      const data = await getHomeAgents();
+      setAgents(data.agents);
+      setAgentErrors({});
+    } catch (error) {
+      setAgentErrors({ _global: error instanceof Error ? error.message : "Failed to load agents" });
+    } finally {
+      setLoadingAgents(false);
+    }
+  }, []);
+
   const loadSystem = useCallback(async () => {
     setLoadingSystem(true);
     try {
@@ -241,9 +343,20 @@ export default function SettingsPage() {
         loadSettings();
         loadTeam();
         loadModels();
+        loadAgents();
       }
     }).catch(() => {});
-  }, [router, loadSettings, loadTeam, loadModels]);
+  }, [router, loadSettings, loadTeam, loadModels, loadAgents]);
+
+  useEffect(() => {
+    const syncSectionFromUrl = () => {
+      const section = new URLSearchParams(window.location.search).get("section");
+      setActiveSection(isSettingsSection(section) ? section : "git");
+    };
+    syncSectionFromUrl();
+    window.addEventListener("popstate", syncSectionFromUrl);
+    return () => window.removeEventListener("popstate", syncSectionFromUrl);
+  }, []);
 
   const showMessage = (type: "success" | "error", text: string) => {
     toast[type](text);
@@ -444,6 +557,11 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSelectSection = (section: Section) => {
+    setActiveSection(section);
+    router.replace(settingsSectionHref(section), { scroll: false });
+  };
+
   const navItems: { key: Section; label: string; icon: React.ReactNode }[] = [
     {
       key: "git",
@@ -459,6 +577,11 @@ export default function SettingsPage() {
       key: "models",
       label: "Models",
       icon: <Gear size={20} />,
+    },
+    {
+      key: "agents",
+      label: "Agents",
+      icon: <Robot size={20} />,
     },
     {
       key: "system",
@@ -485,7 +608,7 @@ export default function SettingsPage() {
     <>
       <Header />
 
-      <main className="max-w-5xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-6 py-8">
 
         <div className="flex gap-8">
           {/* Sidebar */}
@@ -494,7 +617,7 @@ export default function SettingsPage() {
               {navItems.map((item) => (
                 <li key={item.key}>
                   <button
-                    onClick={() => setActiveSection(item.key)}
+                    onClick={() => handleSelectSection(item.key)}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                       activeSection === item.key
                         ? "bg-btn-secondary text-btn-secondary"
@@ -651,6 +774,21 @@ export default function SettingsPage() {
                     </div>
                   )}
                 </div>
+              </>
+            )}
+
+            {activeSection === "agents" && (
+              <>
+                {agentErrors._global && (
+                  <div className="rounded-lg border border-st-red bg-th-surface p-3 text-sm text-st-red">
+                    {agentErrors._global}
+                  </div>
+                )}
+                <AgentSettingsSection
+                  agents={agents}
+                  loading={loadingAgents}
+                  onEditAgent={(agentKey) => router.push(`/settings/agents/${agentKey}`)}
+                />
               </>
             )}
 
