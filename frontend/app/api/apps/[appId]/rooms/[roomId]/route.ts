@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
-import { handleRoomRouteError, readJsonBody, requireRoomAccess } from "@/lib/server/room-route-utils";
+import { handleRoomRouteError, readJsonBody, requireEnumValue, requireRoomAccess, ROOM_STATUSES } from "@/lib/server/room-route-utils";
 
 export async function GET(
   request: NextRequest,
@@ -30,7 +30,7 @@ export async function PATCH(
     const fields: Record<string, unknown> = {};
     if (body.title !== undefined) fields.title = String(body.title).trim();
     if (body.purpose !== undefined) fields.purpose = String(body.purpose);
-    if (body.status !== undefined) fields.status = body.status;
+    if (body.status !== undefined) fields.status = requireEnumValue(body.status, ROOM_STATUSES, "status");
 
     dal.updateRoom(room.id, fields);
     return NextResponse.json(dal.getRoom(room.id));

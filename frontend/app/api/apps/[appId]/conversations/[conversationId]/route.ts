@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
-import { handleRoomRouteError, readJsonBody, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { CONVERSATION_STATUSES, handleRoomRouteError, readJsonBody, requireConversationAccess, requireEnumValue } from "@/lib/server/room-route-utils";
 
 export async function GET(
   request: NextRequest,
@@ -29,7 +29,7 @@ export async function PUT(
     const body = await readJsonBody(request);
     const fields: Record<string, unknown> = {};
     if (body.title !== undefined) fields.title = body.title;
-    if (body.status !== undefined) fields.status = body.status;
+    if (body.status !== undefined) fields.status = requireEnumValue(body.status, CONVERSATION_STATUSES, "status");
 
     dal.updateConversation(conversation.id, fields);
 

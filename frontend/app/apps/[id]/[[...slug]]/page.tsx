@@ -57,6 +57,9 @@ export default function AppPage() {
   const [activeView, setActiveView] = useState<string | null>(isRoomsPage ? "room" : isSettingsPage ? "settings" : isSpecPage ? "spec" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isNotificationsPage ? "notifications" : null);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
+  const replacePath = useCallback((path: string) => {
+    router.replace(path);
+  }, [router]);
 
   // Handle "Start Conversation" from inbox task proposals
   const handleStartConversation = useCallback((message: string) => {
@@ -65,8 +68,8 @@ export default function AppPage() {
     setSelectedItem(null);
     setShowNewItem(true);
     setActiveView(null);
-    window.history.replaceState(null, "", `/apps/${appId}`);
-  }, [appId]);
+    replacePath(`/apps/${appId}`);
+  }, [appId, replacePath]);
 
   // Sidebar collapse state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -103,7 +106,7 @@ export default function AppPage() {
     } finally {
       setLoading(false);
     }
-  }, [appId]);
+  }, [appId, replacePath]);
 
   useEffect(() => {
     loadData();
@@ -150,7 +153,7 @@ export default function AppPage() {
     setSelectedRoomId(null);
     setShowNewItem(false);
     setActiveView(null);
-    window.history.replaceState(null, "", `/apps/${appId}/conversation/${itemId}`);
+    replacePath(`/apps/${appId}/conversation/${itemId}`);
   };
 
   const handleSelectRoom = useCallback((roomId: number) => {
@@ -159,8 +162,8 @@ export default function AppPage() {
     setSelectedItem(null);
     setShowNewItem(false);
     setActiveView("room");
-    window.history.replaceState(null, "", `/apps/${appId}/rooms/${roomId}`);
-  }, [appId]);
+    replacePath(`/apps/${appId}/rooms/${roomId}`);
+  }, [appId, replacePath]);
 
   const handleNewRoom = useCallback(async () => {
     try {
@@ -171,15 +174,18 @@ export default function AppPage() {
       setRooms((prev) => [room, ...prev]);
       handleSelectRoom(room.id);
     } catch (err) {
-      console.error("Failed to create room:", err);
+      setError(err instanceof Error ? err.message : "Failed to create room");
     }
   }, [appId, rooms.length, handleSelectRoom]);
 
   const handleCloseRoom = useCallback(async (roomId: number) => {
     try {
       const closedRoom = await updateRoom(appId, roomId, { status: "archived" });
-      const nextRoomId = rooms.find((room) => room.status === "open" && room.id !== roomId)?.id ?? null;
-      setRooms((currentRooms) => currentRooms.map((room) => (room.id === roomId ? closedRoom : room)));
+      let nextRoomId: number | null = null;
+      setRooms((currentRooms) => {
+        nextRoomId = currentRooms.find((room) => room.status === "open" && room.id !== roomId)?.id ?? null;
+        return currentRooms.map((room) => (room.id === roomId ? closedRoom : room));
+      });
 
       if (selectedRoomId === roomId) {
         if (nextRoomId) {
@@ -190,13 +196,13 @@ export default function AppPage() {
           setSelectedItem(null);
           setShowNewItem(false);
           setActiveView("room");
-          window.history.replaceState(null, "", `/apps/${appId}/rooms`);
+          replacePath(`/apps/${appId}/rooms`);
         }
       }
     } catch (err) {
-      console.error("Failed to close room:", err);
+      setError(err instanceof Error ? err.message : "Failed to close room");
     }
-  }, [appId, handleSelectRoom, rooms, selectedRoomId]);
+  }, [appId, handleSelectRoom, replacePath, selectedRoomId]);
 
   // Handle new item
   const handleNewItem = () => {
@@ -205,7 +211,7 @@ export default function AppPage() {
     setSelectedItem(null);
     setShowNewItem(true);
     setActiveView(null);
-    window.history.replaceState(null, "", `/apps/${appId}`);
+    replacePath(`/apps/${appId}`);
   };
 
   // Handle view change from sidebar (settings, profile)
@@ -216,33 +222,33 @@ export default function AppPage() {
       setSelectedItem(null);
       setShowNewItem(false);
       if (selectedRoomId) {
-        window.history.replaceState(null, "", `/apps/${appId}/rooms/${selectedRoomId}`);
+        replacePath(`/apps/${appId}/rooms/${selectedRoomId}`);
       } else {
         const firstOpenRoom = rooms.find((room) => room.status === "open");
         if (firstOpenRoom) {
           handleSelectRoom(firstOpenRoom.id);
           return;
         }
-        window.history.replaceState(null, "", `/apps/${appId}/rooms`);
+        replacePath(`/apps/${appId}/rooms`);
       }
     } else if (view === "settings") {
-      window.history.replaceState(null, "", `/apps/${appId}/settings`);
+      replacePath(`/apps/${appId}/settings`);
     } else if (view === "spec") {
-      window.history.replaceState(null, "", `/apps/${appId}/spec`);
+      replacePath(`/apps/${appId}/spec`);
     } else if (view === "codebase-index") {
-      window.history.replaceState(null, "", `/apps/${appId}/codebase-index`);
+      replacePath(`/apps/${appId}/codebase-index`);
     } else if (view === "skills") {
-      window.history.replaceState(null, "", `/apps/${appId}/skills`);
+      replacePath(`/apps/${appId}/skills`);
     } else if (view === "inbox") {
-      window.history.replaceState(null, "", `/apps/${appId}/inbox`);
+      replacePath(`/apps/${appId}/inbox`);
     } else if (view === "notifications") {
-      window.history.replaceState(null, "", `/apps/${appId}/notifications`);
+      replacePath(`/apps/${appId}/notifications`);
     } else if (view === null) {
       // Go back to current item or new item
       if (selectedItemId) {
-        window.history.replaceState(null, "", `/apps/${appId}/conversation/${selectedItemId}`);
+        replacePath(`/apps/${appId}/conversation/${selectedItemId}`);
       } else {
-        window.history.replaceState(null, "", `/apps/${appId}`);
+        replacePath(`/apps/${appId}`);
       }
     }
   };
@@ -261,7 +267,7 @@ export default function AppPage() {
         setSelectedItem(null);
         setShowNewItem(true);
         setActiveView(null);
-        window.history.replaceState(null, "", `/apps/${appId}`);
+        replacePath(`/apps/${appId}`);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -290,11 +296,11 @@ export default function AppPage() {
       setSelectedItemId(next.id);
       setShowNewItem(false);
       setActiveView(null);
-      window.history.replaceState(null, "", `/apps/${appId}/conversation/${next.id}`);
+      replacePath(`/apps/${appId}/conversation/${next.id}`);
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [workItems, selectedItemId, appId]);
+  }, [workItems, selectedItemId, appId, replacePath]);
 
   // Handle item created
   const handleItemCreated = (item: Task) => {
@@ -328,7 +334,7 @@ export default function AppPage() {
     setShowNewItem(true);
     setActiveView(null);
     loadData();
-    window.history.replaceState(null, "", `/apps/${appId}`);
+    replacePath(`/apps/${appId}`);
   };
 
   const selectedRoom = selectedRoomId
@@ -495,7 +501,7 @@ export default function AppPage() {
                   setSelectedItemId(wi.id);
                   setActiveView(null);
                   setShowNewItem(false);
-                  window.history.replaceState(null, "", `/apps/${appId}/conversation/${wi.id}`);
+                  replacePath(`/apps/${appId}/conversation/${wi.id}`);
                 }
               } catch {}
             }}

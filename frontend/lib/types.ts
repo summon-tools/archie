@@ -48,8 +48,6 @@ export interface HomeAgentConfig {
   prompt: string;
   defaultProvider: "claude" | "codex";
   defaultModel: string;
-  planning: boolean;
-  execution: boolean;
   isCustomized: boolean;
 }
 

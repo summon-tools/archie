@@ -167,7 +167,7 @@ describe("rooms DAL", () => {
 
     const event = dal.createPlanStepEvent({
       plan_step_id: step1.id,
-      phase: "reviewing",
+      phase: "code_review",
       agent_key: "reviewer",
       status: "completed",
       summary_md: "Looks good.",
@@ -216,7 +216,7 @@ describe("rooms DAL", () => {
     });
     const plan = dal.createPlan({ room_id: room.id, title: "Plan" });
     const step = dal.createPlanStep({ plan_id: plan.id, title: "Step" });
-    dal.createPlanStepEvent({ plan_step_id: step.id, phase: "reviewing", status: "completed" });
+    dal.createPlanStepEvent({ plan_step_id: step.id, phase: "code_review", status: "completed" });
 
     db.prepare("DELETE FROM home_rooms WHERE id = ?").run(room.id);
 

@@ -20,6 +20,7 @@ afterEach(() => {
   vi.doUnmock("@/lib/server/room-agents");
   vi.doUnmock("@/lib/server/agent");
   vi.doUnmock("@/lib/server/conversation");
+  vi.doUnmock("@/lib/server/plan-execution");
   ctx.cleanup();
 });
 
@@ -74,6 +75,29 @@ function mockIdleImplementationConversation() {
     streamConversationMessage,
   }));
   return streamConversationMessage;
+}
+
+async function readSse(response: Response): Promise<Array<{ event: string; data: any }>> {
+  const reader = response.body!.getReader();
+  const chunks: string[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(new TextDecoder().decode(value));
+  }
+
+  return chunks.join("")
+    .split("\n\n")
+    .filter((chunk) => chunk.trim())
+    .map((chunk) => {
+      let event = "";
+      let data = "";
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice(7);
+        if (line.startsWith("data: ")) data += line.slice(6);
+      }
+      return { event, data: JSON.parse(data) };
+    });
 }
 
 async function attachCompletedImplementation(stepId: number, appId: number) {
@@ -149,6 +173,21 @@ describe("rooms API", () => {
     );
 
     expect(response.status).toBe(403);
+  });
+
+  it("filters app lists for members and hides null-owner apps", async () => {
+    const ownedApp = seedApp(db, { name: "Owned App" });
+    const adminOnlyApp = seedApp(db, { name: "Admin Only App" });
+    const { token, user } = await createMemberToken("Owner Member");
+    db.prepare("UPDATE apps SET project_owner_user_id = ? WHERE id = ?").run(user.id, ownedApp.id);
+    db.prepare("UPDATE apps SET project_owner_user_id = NULL WHERE id = ?").run(adminOnlyApp.id);
+    const { GET } = await import("@/app/api/apps/route");
+
+    const response = await GET(makeRequest("http://localhost:8080/api/apps", { token }));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.apps.map((app: any) => app.id)).toEqual([ownedApp.id]);
   });
 
   it("requires app ownership or admin role for conversation and work item APIs", async () => {
@@ -233,6 +272,50 @@ describe("rooms API", () => {
     });
   });
 
+  it("rejects invalid mutable statuses on room, conversation, and work item routes", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const workItemsDal = await import("@/lib/server/dal/work-items");
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Room" });
+    const conversation = seedConversation(db, app.id, { kind: "task", title: "Task" });
+    const workItem = workItemsDal.createWorkItem({
+      app_id: app.id,
+      primary_conversation_id: conversation.id,
+      title: "Task",
+    });
+
+    const roomRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/route");
+    const conversationRoutes = await import("@/app/api/apps/[appId]/conversations/[conversationId]/route");
+    const workItemRoutes = await import("@/app/api/apps/[appId]/work-items/[itemId]/route");
+
+    const roomResponse = await roomRoutes.PATCH(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}`, {
+        token,
+        body: { status: "completed" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+    const conversationResponse = await conversationRoutes.PUT(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/conversations/${conversation.id}`, {
+        token,
+        body: { status: "executing" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), conversationId: String(conversation.id) }) },
+    );
+    const workItemResponse = await workItemRoutes.PUT(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/work-items/${workItem.id}`, {
+        token,
+        body: { status: "archived" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), itemId: String(workItem.id) }) },
+    );
+
+    expect(roomResponse.status).toBe(400);
+    expect(conversationResponse.status).toBe(400);
+    expect(workItemResponse.status).toBe(400);
+  });
+
   it("creates and lists room messages", async () => {
     const app = seedApp(db);
     const token = await createAuthToken();
@@ -284,6 +367,86 @@ describe("rooms API", () => {
         body_md: "Mock coordinator reply.",
       });
     });
+  });
+
+  it("streams room agent text, activity, persisted messages, and plan updates", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    const createRoomAgentReplyStream = vi.fn(async ({ room, userMessage, callbacks }: any) => {
+      callbacks.onText("Hello ");
+      callbacks.onActivity({ kind: "status", message: "Reading code" });
+      const plan = dal.createPlan({ room_id: room.id, title: "Draft plan" });
+      callbacks.onPlanUpdated({ plan_id: plan.id, step_count: 0 });
+      callbacks.onText("room");
+      return dal.createRoomMessage({
+        room_id: room.id,
+        role: "agent",
+        agent_key: JSON.parse(userMessage.payload_json).target_agent_key,
+        body_md: "Hello room",
+        payload_json: JSON.stringify({ provider_id: "claude", model_id: "claude-opus-4-7" }),
+      });
+    });
+    vi.doMock("@/lib/server/room-agents", () => ({ createRoomAgentReplyStream }));
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/messages/stream/route");
+
+    const response = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/messages/stream`, {
+        token,
+        body: { content: "Ask architect", target_agent_key: "architect" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(response.status).toBe(200);
+    const events = await readSse(response as Response);
+    expect(events.map((event) => event.event)).toEqual(expect.arrayContaining([
+      "message",
+      "text",
+      "activity",
+      "plan_updated",
+      "status",
+      "done",
+    ]));
+    expect(events.filter((event) => event.event === "text").map((event) => event.data.text).join("")).toBe("Hello room");
+    expect(events.find((event) => event.event === "activity")?.data).toMatchObject({ kind: "status", message: "Reading code" });
+    expect(events.find((event) => event.event === "plan_updated")?.data).toMatchObject({ step_count: 0 });
+    expect(createRoomAgentReplyStream).toHaveBeenCalledOnce();
+
+    const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ? ORDER BY id ASC").all(room.id) as any[];
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ role: "user", body_md: "Ask architect" });
+    expect(messages[0].payload_json).toBe(JSON.stringify({ target_agent_key: "architect" }));
+    expect(messages[1]).toMatchObject({ role: "agent", agent_key: "architect", body_md: "Hello room" });
+  });
+
+  it("persists an error message when a streamed room agent fails", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Room" });
+    vi.doMock("@/lib/server/room-agents", () => ({
+      createRoomAgentReplyStream: vi.fn(async () => {
+        throw new Error("provider unavailable");
+      }),
+    }));
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/messages/stream/route");
+
+    const response = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/messages/stream`, {
+        token,
+        body: { content: "Please respond." },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(response.status).toBe(200);
+    const events = await readSse(response as Response);
+    expect(events.some((event) => event.event === "error" && event.data.detail === "provider unavailable")).toBe(true);
+    const messages = db.prepare("SELECT role, kind, body_md FROM room_messages WHERE room_id = ? ORDER BY id ASC").all(room.id) as any[];
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toMatchObject({ role: "agent", kind: "error" });
   });
 
   it("returns the user message before the coordinator reply completes", async () => {
@@ -847,6 +1010,38 @@ describe("rooms API", () => {
     });
   });
 
+  it("fails plan generation when both initial JSON and repair output are invalid", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Bad Plan Room" });
+    const userMessage = dal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Generate a draft plan.",
+    });
+    const toolEnabledStream = vi.fn(async function* () {
+      yield { type: "result", detail: "Completed", resultText: "not json" };
+    });
+    const ephemeralQuery = vi.fn(async () => "still not json");
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream, ephemeralQuery })),
+    }));
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
+
+    const reply = await createRoomAgentReply({ app: appRow, room, userMessage });
+
+    expect(reply).toMatchObject({
+      role: "agent",
+      kind: "error",
+      agent_key: "coordinator",
+    });
+    expect(dal.getPlansByRoom(room.id)).toHaveLength(0);
+    const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;
+    expect(run.status).toBe("failed");
+    expect(run.error_text).toContain("Plan generator did not return JSON");
+  });
+
   it("parses fenced plan JSON when step prompts contain markdown code fences", async () => {
     const app = seedApp(db);
     const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
@@ -1145,6 +1340,33 @@ describe("rooms API", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({ detail: "Request body must be valid JSON" });
+  });
+
+  it("rejects execute-next when the plan is draft or has no pending steps", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const draftRoom = dal.createRoom({ app_id: app.id, title: "Draft Room" });
+    const draftPlan = dal.createPlan({ room_id: draftRoom.id, title: "Draft Plan", status: "draft" });
+    dal.createPlanStep({ plan_id: draftPlan.id, title: "Pending but not ready" });
+    const doneRoom = dal.createRoom({ app_id: app.id, title: "Done Room" });
+    const donePlan = dal.createPlan({ room_id: doneRoom.id, title: "Done Plan", status: "ready" });
+    dal.createPlanStep({ plan_id: donePlan.id, title: "Already done", status: "completed" });
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/execute-next/route");
+
+    const draftResponse = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${draftRoom.id}/plan/execute-next`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(draftRoom.id) }) },
+    );
+    const noPendingResponse = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${doneRoom.id}/plan/execute-next`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(doneRoom.id) }) },
+    );
+
+    expect(draftResponse.status).toBe(409);
+    await expect(draftResponse.json()).resolves.toMatchObject({ code: "plan_not_ready" });
+    expect(noPendingResponse.status).toBe(409);
+    await expect(noPendingResponse.json()).resolves.toMatchObject({ code: "no_pending_step" });
   });
 
   it("launches the next pending plan step as a scoped execution conversation", async () => {
@@ -1858,6 +2080,40 @@ describe("rooms API", () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it("schedules automated gate execution through the gates/run route", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Gate Route Room" });
+    const plan = roomsDal.createPlan({ room_id: room.id, title: "Gate Route Plan", status: "executing" });
+    const step = roomsDal.createPlanStep({
+      plan_id: plan.id,
+      title: "Review route scheduling",
+      status: "reviewing",
+    });
+    const scheduleAutomatedPlanStepGates = vi.fn();
+    vi.doMock("@/lib/server/plan-execution", () => ({
+      PlanExecutionError: class PlanExecutionError extends Error {},
+      getPlanExecutionElapsedMs: () => 0,
+      scheduleAutomatedPlanStepGates,
+    }));
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/run/route");
+
+    const response = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/run`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ status: "scheduled" });
+    expect(scheduleAutomatedPlanStepGates).toHaveBeenCalledWith({
+      appId: app.id,
+      roomId: room.id,
+      stepId: step.id,
+      delayMs: 0,
+    });
   });
 
   it("scopes gate review prompts to the current step base commit", async () => {

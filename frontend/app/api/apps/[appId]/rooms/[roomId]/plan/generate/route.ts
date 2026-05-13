@@ -1,27 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import * as dal from "@/lib/server/dal";
 import { resolveHomeAgent } from "@/lib/server/home-agent-configs";
 import { generateRoomPlanFromDiscussion, RoomPlanGenerationError } from "@/lib/server/room-plan-generator";
-import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
-import { handleRoomRouteError, requireRoomAccess } from "@/lib/server/room-route-utils";
-
-function serializePlan(roomId: number) {
-  const room = dal.getRoom(roomId);
-  const plan = dal.getPlansByRoom(roomId)[0] || null;
-  const steps = plan ? dal.getPlanSteps(plan.id).map((step) => ({
-    ...step,
-    events: dal.getPlanStepEvents(step.id),
-  })) : [];
-  return {
-    plan: plan ? {
-      ...plan,
-      execution_elapsed_ms: getPlanExecutionElapsedMs(plan),
-    } : null,
-    steps,
-    planning_context_md: room?.planning_context_md || "",
-    planning_context_updated_at: room?.planning_context_updated_at || null,
-  };
-}
+import { handleRoomRouteError, requireRoomAccess, serializeRoomPlan } from "@/lib/server/room-route-utils";
 
 export async function POST(
   request: NextRequest,
@@ -37,7 +17,7 @@ export async function POST(
       agent: resolveHomeAgent("coordinator"),
     });
 
-    return NextResponse.json(serializePlan(room.id), { status: 201 });
+    return NextResponse.json(serializeRoomPlan(room.id), { status: 201 });
   } catch (e) {
     const errorResponse = handleRoomRouteError(e);
     if (errorResponse) return errorResponse;

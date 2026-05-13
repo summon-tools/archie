@@ -30,7 +30,12 @@ function buildUpdate(
   setParts.push("updated_at = datetime('now')");
   values.push(id);
 
-  getDb().prepare(`UPDATE ${quoteIdentifier(table)} SET ${setParts.join(", ")} WHERE ${quoteIdentifier(idColumn)} = ?`).run(...values);
+  const result = getDb()
+    .prepare(`UPDATE ${quoteIdentifier(table)} SET ${setParts.join(", ")} WHERE ${quoteIdentifier(idColumn)} = ?`)
+    .run(...values);
+  if (result.changes === 0) {
+    throw new Error(`${table} row not found: ${id}`);
+  }
 }
 
 function quoteIdentifier(identifier: string): string {
@@ -101,20 +106,25 @@ export function createRoomMessage(data: {
   payload_json?: string | null;
 }): RoomMessageRow {
   const db = getDb();
-  const result = db.prepare(
-    `INSERT INTO room_messages (room_id, author_user_id, agent_key, role, kind, body_md, payload_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    data.room_id,
-    data.author_user_id ?? null,
-    data.agent_key ?? null,
-    data.role,
-    data.kind || "message",
-    data.body_md,
-    data.payload_json ?? null,
-  );
-  db.prepare("UPDATE home_rooms SET updated_at = datetime('now') WHERE id = ?").run(data.room_id);
-  return db.prepare("SELECT * FROM room_messages WHERE id = ?").get(result.lastInsertRowid) as RoomMessageRow;
+  return db.transaction(() => {
+    const result = db.prepare(
+      `INSERT INTO room_messages (room_id, author_user_id, agent_key, role, kind, body_md, payload_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      data.room_id,
+      data.author_user_id ?? null,
+      data.agent_key ?? null,
+      data.role,
+      data.kind || "message",
+      data.body_md,
+      data.payload_json ?? null,
+    );
+    const update = db.prepare("UPDATE home_rooms SET updated_at = datetime('now') WHERE id = ?").run(data.room_id);
+    if (update.changes === 0) {
+      throw new Error(`home_rooms row not found: ${data.room_id}`);
+    }
+    return db.prepare("SELECT * FROM room_messages WHERE id = ?").get(result.lastInsertRowid) as RoomMessageRow;
+  })();
 }
 
 export function getRoomMessages(roomId: number, limit = 200): RoomMessageRow[] {
@@ -254,28 +264,30 @@ export function createPlanStep(data: {
   status?: PlanStepStatus;
 }): PlanStepRow {
   const db = getDb();
-  const position = data.position ?? ((db.prepare(
-    "SELECT COALESCE(MAX(position), -1) as max_position FROM plan_steps WHERE plan_id = ?"
-  ).get(data.plan_id) as { max_position: number }).max_position + 1);
+  return db.transaction(() => {
+    const position = data.position ?? ((db.prepare(
+      "SELECT COALESCE(MAX(position), -1) as max_position FROM plan_steps WHERE plan_id = ?"
+    ).get(data.plan_id) as { max_position: number }).max_position + 1);
 
-  const result = db.prepare(
-    `INSERT INTO plan_steps
-      (plan_id, position, title, objective_md, implementation_prompt_md, acceptance_criteria_md, risk_level,
-       requires_architecture_review, requires_security_review, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    data.plan_id,
-    position,
-    data.title,
-    data.objective_md || "",
-    data.implementation_prompt_md || "",
-    data.acceptance_criteria_md || "",
-    data.risk_level || "medium",
-    data.requires_architecture_review ? 1 : 0,
-    data.requires_security_review ? 1 : 0,
-    data.status || "pending",
-  );
-  return getPlanStep(Number(result.lastInsertRowid))!;
+    const result = db.prepare(
+      `INSERT INTO plan_steps
+        (plan_id, position, title, objective_md, implementation_prompt_md, acceptance_criteria_md, risk_level,
+         requires_architecture_review, requires_security_review, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      data.plan_id,
+      position,
+      data.title,
+      data.objective_md || "",
+      data.implementation_prompt_md || "",
+      data.acceptance_criteria_md || "",
+      data.risk_level || "medium",
+      data.requires_architecture_review ? 1 : 0,
+      data.requires_security_review ? 1 : 0,
+      data.status || "pending",
+    );
+    return db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(result.lastInsertRowid) as PlanStepRow;
+  })();
 }
 
 export function deletePlanSteps(planId: number): void {
@@ -351,14 +363,7 @@ export function updatePlanStepEvent(
   eventId: number,
   fields: Partial<Pick<PlanStepEventRow, "status" | "summary_md" | "payload_json">>,
 ): void {
-  const keys = Object.keys(fields).filter((key) => fields[key as keyof typeof fields] !== undefined);
-  if (keys.length === 0) return;
-
-  const setParts = keys.map((key) => `${key} = ?`);
-  const values: unknown[] = keys.map((key) => fields[key as keyof typeof fields]);
-  values.push(eventId);
-
-  getDb().prepare(`UPDATE plan_step_events SET ${setParts.join(", ")} WHERE id = ?`).run(...values);
+  buildUpdate("plan_step_events", "id", eventId, fields);
 }
 
 export function getPlanStepEvents(stepId: number): PlanStepEventRow[] {

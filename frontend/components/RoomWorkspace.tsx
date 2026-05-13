@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatsCircle, CheckCircle, Flag, PauseCircle, PencilSimple, PlayCircle, Sparkle, Timer, X } from "@phosphor-icons/react";
-import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, sendRoomMessage, updatePlanStep, updateRoomPlan } from "@/lib/api";
+import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, streamRoomMessage, updatePlanStep, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS, type HomeAgentDefinition } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
 import RoomChatInput from "@/components/RoomChatInput";
+import ToolActivity from "@/components/ToolActivity";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
+import {
+  applyActivityToFeed,
+  type StreamActivityChip,
+  type StreamActivityEvent,
+} from "@/lib/toolSummary";
 
 function parseDbTimestampMs(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -64,14 +70,14 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   const [messageError, setMessageError] = useState<string | null>(null);
   const [pendingMessages, setPendingMessages] = useState<RoomMessage[]>([]);
   const [selectedAgentKey, setSelectedAgentKey] = useState<string | null>(null);
-  const [awaitingReplyAfterId, setAwaitingReplyAfterId] = useState<number | null>(null);
-  const [awaitingReplyStartedAt, setAwaitingReplyStartedAt] = useState<number | null>(null);
-  const [awaitingReplyAgentKey, setAwaitingReplyAgentKey] = useState<string | null>(null);
+  const [streamContent, setStreamContent] = useState("");
+  const [toolActivities, setToolActivities] = useState<StreamActivityChip[]>([]);
+  const [thinkingAgentKey, setThinkingAgentKey] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { data: messagesData, mutate: mutateMessages } = useSWR<{ messages: RoomMessage[] }>(
     room ? `/api/apps/${appId}/rooms/${room.id}/messages` : null,
     fetcher,
-    { refreshInterval: awaitingReplyAfterId ? 1500 : 0 },
   );
   const { data: agentsData } = useSWR<{ agents: HomeAgentConfig[] }>(
     room ? "/api/settings/agents" : null,
@@ -87,6 +93,10 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     ));
     return [...chatMessages, ...pending];
   }, [messages, pendingMessages, room?.id]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: "end" });
+  }, [visibleMessages.length, streamContent, toolActivities.length, sendingMessage]);
 
   const handleSendRoomMessage = async () => {
     if (!room || !messageDraft.trim() || sendingMessage) return;
@@ -106,46 +116,72 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     setSendingMessage(true);
     setMessageError(null);
     setMessageDraft("");
+    setStreamContent("");
+    setToolActivities([]);
+    setThinkingAgentKey(targetAgentKey || "coordinator");
     setPendingMessages((prev) => [...prev, optimisticMessage]);
     try {
-      const message = await sendRoomMessage(appId, room.id, content, targetAgentKey);
-      setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
-      setSelectedAgentKey(null);
-      setAwaitingReplyAfterId(message.id);
-      setAwaitingReplyStartedAt(Date.now());
-      setAwaitingReplyAgentKey(targetAgentKey || "coordinator");
+      const response = await streamRoomMessage(appId, room.id, content, targetAgentKey);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+      let shouldRefreshPlan = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const event of events) {
+          if (!event.trim()) continue;
+          let eventType = "";
+          let dataStr = "";
+          for (const line of event.split("\n")) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              dataStr += line.slice(6);
+            }
+          }
+          if (!dataStr) continue;
+
+          const parsed = JSON.parse(dataStr);
+          if (eventType === "text" && parsed.text) {
+            accumulated += parsed.text;
+            setStreamContent(accumulated);
+          } else if (eventType === "activity" && parsed.kind) {
+            setToolActivities((prev) => applyActivityToFeed(prev, parsed as StreamActivityEvent));
+          } else if (eventType === "plan_updated") {
+            shouldRefreshPlan = true;
+            void mutateGlobal(`/api/apps/${appId}/rooms/${room.id}/plan`);
+          } else if (eventType === "error") {
+            setMessageError(parsed.detail || parsed.error || "Room agent failed");
+          }
+        }
+      }
+
       await mutateMessages();
+      if (shouldRefreshPlan) {
+        await mutateGlobal(`/api/apps/${appId}/rooms/${room.id}/plan`);
+      }
+      setSelectedAgentKey(null);
     } catch (err) {
-      setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
       setMessageDraft(content);
       setMessageError(err instanceof Error ? err.message : "Failed to send message");
-      setAwaitingReplyAgentKey(null);
     } finally {
+      setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
       setSendingMessage(false);
+      setThinkingAgentKey(null);
+      setStreamContent("");
+      setToolActivities([]);
     }
   };
-
-  useEffect(() => {
-    if (!awaitingReplyAfterId) return;
-    const hasReply = messages.some((message) => message.id > awaitingReplyAfterId && message.role === "agent");
-    if (hasReply) {
-      setAwaitingReplyAfterId(null);
-      setAwaitingReplyStartedAt(null);
-      setAwaitingReplyAgentKey(null);
-      if (room) {
-        void mutateGlobal(`/api/apps/${appId}/rooms/${room.id}/plan`);
-      }
-      return;
-    }
-
-    if (awaitingReplyStartedAt && Date.now() - awaitingReplyStartedAt > 90000) {
-      setAwaitingReplyAfterId(null);
-      setAwaitingReplyStartedAt(null);
-      const agentName = getAgentName(awaitingReplyAgentKey, agents);
-      setAwaitingReplyAgentKey(null);
-      setMessageError(`${agentName} is taking longer than expected. Your message was saved; refresh the room or send another message to retry.`);
-    }
-  }, [agents, appId, awaitingReplyAfterId, awaitingReplyAgentKey, awaitingReplyStartedAt, messages, mutateGlobal, room]);
 
   return (
     <div className="flex-1 min-h-0 bg-th-main flex" ref={containerRef}>
@@ -160,14 +196,16 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             draft={messageDraft}
             setDraft={setMessageDraft}
             sending={sendingMessage}
-            thinking={Boolean(awaitingReplyAfterId)}
             error={messageError}
+            streamContent={streamContent}
+            toolActivities={toolActivities}
             selectedAgentKey={selectedAgentKey}
             setSelectedAgentKey={setSelectedAgentKey}
-            thinkingAgentKey={awaitingReplyAgentKey}
+            thinkingAgentKey={thinkingAgentKey}
             agents={agents}
             onSend={handleSendRoomMessage}
             onCloseRoom={() => onCloseRoom(room.id)}
+            chatEndRef={chatEndRef}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center p-8">
@@ -224,28 +262,32 @@ function RoomShell({
   draft,
   setDraft,
   sending,
-  thinking,
   error,
+  streamContent,
+  toolActivities,
   selectedAgentKey,
   setSelectedAgentKey,
   thinkingAgentKey,
   agents,
   onSend,
   onCloseRoom,
+  chatEndRef,
 }: {
   room: HomeRoom;
   messages: RoomMessage[];
   draft: string;
   setDraft: (value: string) => void;
   sending: boolean;
-  thinking: boolean;
   error: string | null;
+  streamContent: string;
+  toolActivities: StreamActivityChip[];
   selectedAgentKey: string | null;
   setSelectedAgentKey: (agentKey: string | null) => void;
   thinkingAgentKey: string | null;
   agents: HomeAgentDefinition[];
   onSend: () => void;
   onCloseRoom: () => void;
+  chatEndRef: RefObject<HTMLDivElement | null>;
 }) {
   const statusAgentName = getAgentName(thinkingAgentKey || selectedAgentKey, agents);
   const isClosed = room.status !== "open";
@@ -277,13 +319,22 @@ function RoomShell({
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-4" aria-live="polite">
               {messages.map((message) => (
                 <RoomMessageBubble key={message.id} message={message} agents={agents} />
               ))}
             </div>
           )}
 
+          {(streamContent || sending || toolActivities.length > 0) && (
+            <RoomStreamingBubble
+              content={streamContent}
+              agentName={statusAgentName}
+              toolActivities={toolActivities}
+            />
+          )}
+
+          <div ref={chatEndRef} />
         </div>
       </div>
 
@@ -309,7 +360,7 @@ function RoomShell({
             onSelectAgent={setSelectedAgentKey}
             disabled={sending}
             isLoading={sending}
-            statusText={sending || thinking ? `${statusAgentName} is thinking...` : undefined}
+            statusText={sending ? `${statusAgentName} is thinking...` : undefined}
           />
         )}
       </div>
@@ -370,7 +421,48 @@ function CloseRoomButton({ onCloseRoom }: { onCloseRoom: () => void }) {
   );
 }
 
-function RoomMessageBubble({ message, agents }: { message: RoomMessage; agents: HomeAgentDefinition[] }) {
+function RoomStreamingBubble({
+  content,
+  agentName,
+  toolActivities,
+}: {
+  content: string;
+  agentName: string;
+  toolActivities: StreamActivityChip[];
+}) {
+  return (
+    <div className="flex justify-start animate-fadeIn" aria-live="polite">
+      <div className="max-w-[78%] rounded-xl border border-th bg-th-panel px-3 py-2 text-th-primary">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="text-meta font-semibold text-th-dimmed">{agentName}</span>
+          <span className="text-meta text-th-dimmed">thinking</span>
+        </div>
+        {toolActivities.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {toolActivities.map((activity, index) => (
+              <ToolActivity
+                key={`${activity.id}-${index}`}
+                kind={activity.kind}
+                tool={activity.tool}
+                summary={activity.summary}
+                active={activity.active}
+              />
+            ))}
+          </div>
+        )}
+        {content ? (
+          <div className={PROSE_CLASSES}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          </div>
+        ) : (
+          <p className="text-sm text-th-muted">Working...</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const RoomMessageBubble = memo(function RoomMessageBubble({ message, agents }: { message: RoomMessage; agents: HomeAgentDefinition[] }) {
   const isUser = message.role === "user";
   const label = isUser ? "You" : message.agent_key ? formatAgentLabel(message.agent_key) : "Archie";
   const taggedAgent = isUser ? getTaggedAgentName(message, agents) : null;
@@ -407,7 +499,7 @@ function RoomMessageBubble({ message, agents }: { message: RoomMessage; agents: 
       </div>
     </div>
   );
-}
+});
 
 function isExecutionLogMessage(message: RoomMessage): boolean {
   return message.role === "system" && (message.kind === "execution_event" || message.kind === "error");
@@ -949,7 +1041,7 @@ function statusBadgeClass(status: string): string {
 const COMPACT_PROSE_CLASSES =
   "prose prose-sm max-w-none break-words text-th-secondary text-xs [&_p]:my-0.5 [&_p]:leading-relaxed [&_ul]:my-0.5 [&_ol]:my-0.5 [&_li]:my-0.5 [&_code]:bg-th-muted [&_code]:text-code-inline [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[11px]";
 
-function PlanStepCard({
+const PlanStepCard = memo(function PlanStepCard({
   step,
   busy,
   editable,
@@ -1148,7 +1240,7 @@ function PlanStepCard({
       </div>
     </div>
   );
-}
+});
 
 function ReviewToggle({
   label,

@@ -280,6 +280,7 @@ export class ClaudeProvider implements AgentProvider {
       settingSources: [],
       ...getPermissionOptions(),
       maxTurns: opts?.maxTurns ?? Infinity,
+      includePartialMessages: true,
     };
     applyToolPolicy(options, opts?.toolPolicy);
     if (opts?.model) options.model = opts.model;
@@ -290,9 +291,42 @@ export class ClaudeProvider implements AgentProvider {
     let resultText = "";
     let lastAssistantText = "";
     let gotResult = false;
+    let sawPartialText = false;
+    const activeTools = new Map<number, { name: string; inputChunks: string[] }>();
 
     try {
       for await (const msg of q) {
+        if (msg.type === "stream_event") {
+          const event = (msg as any).event;
+          if (event?.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
+            sawPartialText = true;
+            yield { type: "text", detail: event.delta.text };
+          }
+          if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
+            const index = event.index as number;
+            const tool = event.content_block.name || "unknown";
+            activeTools.set(index, { name: tool, inputChunks: [] });
+            yield { type: "tool_use", tool, detail: tool };
+          }
+          if (event?.type === "content_block_delta" && event.delta?.type === "input_json_delta") {
+            const entry = activeTools.get(event.index as number);
+            if (entry) entry.inputChunks.push(event.delta.partial_json || "");
+          }
+          if (event?.type === "content_block_stop") {
+            const index = event.index as number;
+            const entry = activeTools.get(index);
+            if (entry) {
+              let detail = entry.name;
+              try {
+                const input = JSON.parse(entry.inputChunks.join("")) as Record<string, unknown>;
+                detail = JSON.stringify(input).slice(0, 120);
+              } catch {}
+              yield { type: "tool_result", tool: entry.name, detail };
+              activeTools.delete(index);
+            }
+          }
+        }
+
         if (msg.type === "assistant" && (msg as any).message?.content) {
           for (const block of (msg as any).message.content) {
             if (block.type === "tool_use") {
@@ -316,7 +350,7 @@ export class ClaudeProvider implements AgentProvider {
                 detail = JSON.stringify(block.input).slice(0, 120);
               }
               yield { type: "tool_use", tool, detail };
-            } else if (block.type === "text" && block.text) {
+            } else if (!sawPartialText && block.type === "text" && block.text) {
               lastAssistantText = block.text;
               const snippet = String(block.text).slice(0, 200);
               yield { type: "text", detail: snippet };

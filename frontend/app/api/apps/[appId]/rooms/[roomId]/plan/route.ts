@@ -1,27 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
 import * as dal from "@/lib/server/dal";
-import { handleRoomRouteError, readJsonBody, RouteInputError, requireRoomAccess } from "@/lib/server/room-route-utils";
+import { handleRoomRouteError, readJsonBody, RouteInputError, requireRoomAccess, serializeRoomPlan } from "@/lib/server/room-route-utils";
 
 const CLIENT_EDITABLE_PLAN_STATUSES = new Set(["draft", "ready"]);
-
-function serializePlan(roomId: number) {
-  const room = dal.getRoom(roomId);
-  const plan = dal.getPlansByRoom(roomId)[0] || null;
-  const steps = plan ? dal.getPlanSteps(plan.id).map((step) => ({
-    ...step,
-    events: dal.getPlanStepEvents(step.id),
-  })) : [];
-  return {
-    plan: plan ? {
-      ...plan,
-      execution_elapsed_ms: getPlanExecutionElapsedMs(plan),
-    } : null,
-    steps,
-    planning_context_md: room?.planning_context_md || "",
-    planning_context_updated_at: room?.planning_context_updated_at || null,
-  };
-}
 
 export async function GET(
   request: NextRequest,
@@ -31,7 +12,7 @@ export async function GET(
     const { appId, roomId } = await params;
     const { room } = await requireRoomAccess(request, appId, roomId);
 
-    return NextResponse.json(serializePlan(room.id));
+    return NextResponse.json(serializeRoomPlan(room.id));
   } catch (e) {
     const errorResponse = handleRoomRouteError(e);
     if (errorResponse) return errorResponse;
@@ -67,7 +48,7 @@ export async function POST(
       status: status as "draft" | "ready",
     });
 
-    return NextResponse.json(serializePlan(room.id), { status: 201 });
+    return NextResponse.json(serializeRoomPlan(room.id), { status: 201 });
   } catch (e) {
     const errorResponse = handleRoomRouteError(e);
     if (errorResponse) return errorResponse;
@@ -116,7 +97,7 @@ export async function PATCH(
     }
 
     dal.updatePlan(plan.id, fields);
-    return NextResponse.json(serializePlan(room.id));
+    return NextResponse.json(serializeRoomPlan(room.id));
   } catch (e) {
     const errorResponse = handleRoomRouteError(e);
     if (errorResponse) return errorResponse;

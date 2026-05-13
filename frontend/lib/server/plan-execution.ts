@@ -18,6 +18,9 @@ const MAX_GATE_AGENT_PROMPT_CHARS = 6000;
 const MAX_GATE_DIFF_CONTEXT_CHARS = 30_000;
 const MAX_GATE_UNTRACKED_DIFF_CHARS = 10_000;
 const MAX_GATE_UNTRACKED_FILES = 20;
+const MAX_AUTOMATED_GATE_ITERATIONS = 12;
+const MAX_AUTOMATED_GATE_RUNTIME_MS = 15 * 60 * 1000;
+const MAX_STORED_TOOL_EVENTS = 120;
 
 type GateDefinition = {
   phase: string;
@@ -37,6 +40,10 @@ type AutomatedGateResult = {
   step: PlanStepRow;
   events: PlanStepEventRow[];
 };
+
+function truncateStoredToolEvents(events: ToolStreamEvent[]): ToolStreamEvent[] {
+  return events.slice(-MAX_STORED_TOOL_EVENTS);
+}
 
 export class PlanExecutionError extends Error {
   constructor(
@@ -999,7 +1006,7 @@ async function runAgentGate({
     const decision = parseGateDecision(resultText, `${agent.name} gate completed.`);
     dal.updateRoomAgentRun(run.id, {
       status: "completed",
-      result_json: JSON.stringify({ decision, events }),
+      result_json: JSON.stringify({ decision, events: truncateStoredToolEvents(events) }),
     });
     return decision;
   } catch (error) {
@@ -1007,7 +1014,7 @@ async function runAgentGate({
     dal.updateRoomAgentRun(run.id, {
       status: "failed",
       error_text: message,
-      result_json: JSON.stringify({ events, raw_result: resultText }),
+      result_json: JSON.stringify({ events: truncateStoredToolEvents(events), raw_result: resultText }),
     });
     return {
       status: "failed",
@@ -1529,7 +1536,29 @@ export async function runAutomatedPlanStepGates({
   activeGateRuns.add(stepId);
 
   try {
+    const startedAt = Date.now();
+    let iterations = 0;
     while (true) {
+      iterations += 1;
+      if (iterations > MAX_AUTOMATED_GATE_ITERATIONS || Date.now() - startedAt > MAX_AUTOMATED_GATE_RUNTIME_MS) {
+        const staleStep = dal.getPlanStep(stepId);
+        const stalePlan = staleStep ? dal.getPlan(staleStep.plan_id) : null;
+        if (staleStep && stalePlan) {
+          markPlanStepFailed({
+            room: dal.getRoom(roomId)!,
+            plan: stalePlan,
+            step: staleStep,
+            message: "Automated gate loop exceeded its runtime budget.",
+          });
+          return {
+            plan: dal.getPlan(stalePlan.id)!,
+            step: dal.getPlanStep(staleStep.id)!,
+            events: dal.getPlanStepEvents(staleStep.id),
+          };
+        }
+        return null;
+      }
+
       const { app, room, plan, step } = getStepContext(appId, roomId, stepId);
       if (!isPlanRunning(plan)) {
         return { plan, step, events: dal.getPlanStepEvents(step.id) };

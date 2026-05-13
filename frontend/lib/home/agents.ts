@@ -7,8 +7,6 @@ export interface HomeAgentDefinition {
   prompt: string;
   defaultProvider: "claude" | "codex";
   defaultModel: string;
-  planning: boolean;
-  execution: boolean;
 }
 
 export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
@@ -24,8 +22,6 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
     ].join("\n"),
     defaultProvider: "claude",
     defaultModel: "claude-sonnet-4-6",
-    planning: true,
-    execution: true,
   },
   {
     key: "architect",
@@ -39,8 +35,6 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
     ].join("\n"),
     defaultProvider: "claude",
     defaultModel: "claude-opus-4-7",
-    planning: true,
-    execution: true,
   },
   {
     key: "implementer",
@@ -54,8 +48,6 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
     ].join("\n"),
     defaultProvider: "codex",
     defaultModel: "gpt-5.5",
-    planning: true,
-    execution: true,
   },
   {
     key: "reviewer",
@@ -69,8 +61,6 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
     ].join("\n"),
     defaultProvider: "claude",
     defaultModel: "claude-sonnet-4-6",
-    planning: true,
-    execution: true,
   },
   {
     key: "qa",
@@ -84,8 +74,6 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
     ].join("\n"),
     defaultProvider: "claude",
     defaultModel: "claude-sonnet-4-6",
-    planning: true,
-    execution: true,
   },
   {
     key: "security",
@@ -99,8 +87,6 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
     ].join("\n"),
     defaultProvider: "claude",
     defaultModel: "claude-opus-4-7",
-    planning: true,
-    execution: true,
   },
 ];
 

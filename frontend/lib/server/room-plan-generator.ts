@@ -28,6 +28,10 @@ export interface GeneratedRoomPlanResult {
   events: ToolStreamEvent[];
 }
 
+export interface RoomPlanGenerationCallbacks {
+  onToolEvent?: (event: ToolStreamEvent) => void;
+}
+
 export class RoomPlanGenerationError extends Error {
   constructor(
     public readonly code: string,
@@ -42,6 +46,7 @@ export class RoomPlanGenerationError extends Error {
 const MAX_PLAN_CONTEXT_MESSAGES = 16;
 const MAX_CONTEXT_CHARS = 5000;
 const MAX_MESSAGE_CHARS = 1600;
+const MAX_STORED_TOOL_EVENTS = 120;
 
 function truncateText(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
@@ -50,6 +55,10 @@ function truncateText(value: string, maxChars: number): string {
 
 function contextBlock(tag: string, value: string, maxChars = MAX_MESSAGE_CHARS): string {
   return `<${tag}>\n${truncateText(value, maxChars)}\n</${tag}>`;
+}
+
+function truncateStoredToolEvents(events: ToolStreamEvent[]): ToolStreamEvent[] {
+  return events.slice(-MAX_STORED_TOOL_EVENTS);
 }
 
 export function shouldGenerateRoomPlan(message: string): boolean {
@@ -148,11 +157,13 @@ async function runPlanGenerator({
   prompt,
   model,
   cwd,
+  callbacks,
 }: {
   provider: AgentProvider;
   prompt: string;
   model: string;
   cwd: string;
+  callbacks?: RoomPlanGenerationCallbacks;
 }): Promise<{ text: string; events: ToolStreamEvent[] }> {
   const events: ToolStreamEvent[] = [];
   let text = "";
@@ -164,6 +175,7 @@ async function runPlanGenerator({
     toolPolicy: "read_only_codebase",
   })) {
     events.push(event);
+    callbacks?.onToolEvent?.(event);
     if (event.type === "result" && event.resultText) {
       text = event.resultText;
     }
@@ -433,11 +445,13 @@ export async function generateRoomPlanFromDiscussion({
   room,
   userMessage,
   agent = resolveHomeAgent("coordinator"),
+  callbacks,
 }: {
   app: AppRow;
   room: HomeRoomRow;
   userMessage?: RoomMessageRow | null;
   agent?: HomeAgentDefinition;
+  callbacks?: RoomPlanGenerationCallbacks;
 }): Promise<GeneratedRoomPlanResult> {
   assertRoomCanGeneratePlan(room);
   const prompt = buildPlanGenerationPrompt({ app, room, userMessage, agent });
@@ -462,6 +476,7 @@ export async function generateRoomPlanFromDiscussion({
       prompt,
       model: agent.defaultModel,
       cwd: app.directory,
+      callbacks,
     });
     generatorText = result.text;
     events = result.events;
@@ -488,7 +503,7 @@ export async function generateRoomPlanFromDiscussion({
       result_json: JSON.stringify({
         text: result.text,
         repaired_text: repairedText,
-        events: result.events,
+        events: truncateStoredToolEvents(result.events),
         plan_id: persisted.plan.id,
         step_count: persisted.steps.length,
       }),
@@ -501,7 +516,7 @@ export async function generateRoomPlanFromDiscussion({
       result_json: JSON.stringify({
         text: generatorText,
         repaired_text: repairedText,
-        events,
+        events: truncateStoredToolEvents(events),
       }),
       error_text: error instanceof Error ? error.message : "Unknown plan generation error",
     });

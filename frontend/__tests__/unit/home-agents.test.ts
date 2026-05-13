@@ -13,10 +13,8 @@ describe("default room agents", () => {
     ]);
   });
 
-  it("includes planning and execution participation for every default agent", () => {
+  it("includes model and prompt defaults for every default agent", () => {
     for (const agent of DEFAULT_HOME_AGENTS) {
-      expect(agent.planning).toBe(true);
-      expect(agent.execution).toBe(true);
       expect(agent.defaultModel).toBeTruthy();
       expect(agent.prompt).toBeTruthy();
     }

@@ -257,6 +257,23 @@ export async function sendRoomMessage(appId: number, roomId: number, content: st
   });
 }
 
+export async function streamRoomMessage(appId: number, roomId: number, content: string, targetAgentKey?: string | null): Promise<Response> {
+  const res = await fetch(`${BASE}/apps/${appId}/rooms/${roomId}/messages/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, target_agent_key: targetAgentKey || undefined }),
+  });
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Not authenticated");
+  }
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  return res;
+}
+
 export async function getRoomPlan(appId: number, roomId: number): Promise<RoomPlanResponse> {
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan`);
 }

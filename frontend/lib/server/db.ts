@@ -397,9 +397,9 @@ function initDb(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS plan_step_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       plan_step_id INTEGER NOT NULL,
-      phase TEXT NOT NULL,
+      phase TEXT NOT NULL CHECK(phase IN ('implementation', 'architecture_review', 'code_review', 'security_review', 'qa_validation', 'commit')),
       agent_key TEXT DEFAULT NULL,
-      status TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('started', 'pending', 'running', 'completed', 'failed', 'skipped')),
       summary_md TEXT DEFAULT '',
       payload_json TEXT DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now')),
@@ -434,6 +434,18 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "plan_step_events", "updated_at", "TEXT DEFAULT (datetime('now'))");
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_plan_steps_linked_conversation_id ON plan_steps(linked_conversation_id);
+
+    UPDATE plan_step_events
+    SET phase = 'code_review'
+    WHERE phase NOT IN ('implementation', 'architecture_review', 'code_review', 'security_review', 'qa_validation', 'commit');
+
+    UPDATE plan_step_events
+    SET status = CASE
+      WHEN status IN ('passed', 'done') THEN 'completed'
+      WHEN status IN ('error', 'blocked') THEN 'failed'
+      ELSE 'pending'
+    END
+    WHERE status NOT IN ('started', 'pending', 'running', 'completed', 'failed', 'skipped');
 
     UPDATE plans
     SET execution_state = 'idle'

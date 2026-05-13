@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, ForbiddenError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import type { AppRow, ConversationRow, HomeRoomRow, PlanRow, PlanStepRow, WorkItemRow } from "@/lib/server/types";
+import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
+import type {
+  AppRow,
+  ConversationRow,
+  ConversationStatus,
+  HomeRoomRow,
+  HomeRoomStatus,
+  PlanRow,
+  PlanStepRow,
+  WorkItemRow,
+  WorkItemStatus,
+} from "@/lib/server/types";
 
 export class RouteInputError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -44,10 +55,52 @@ export function handleRoomRouteError(error: unknown): NextResponse | null {
   return null;
 }
 
+export const ROOM_STATUSES = new Set<HomeRoomStatus>(["open", "archived"]);
+export const CONVERSATION_STATUSES = new Set<ConversationStatus>(["open", "closed", "archived"]);
+export const WORK_ITEM_STATUSES = new Set<WorkItemStatus>(["proposed", "in_progress", "done"]);
+
+export function requireEnumValue<T extends string>(
+  value: unknown,
+  allowed: Set<T>,
+  fieldName: string,
+): T {
+  if (typeof value !== "string" || !allowed.has(value as T)) {
+    throw new RouteInputError(`${fieldName} is invalid`);
+  }
+  return value as T;
+}
+
+export function canAccessApp(user: { id: number; role: string }, app: AppRow): boolean {
+  if (user.role === "admin") return true;
+  if (app.project_owner_user_id === user.id) return true;
+  return false;
+}
+
 function assertCanAccessApp(user: { id: number; role: string }, app: AppRow): void {
-  if (user.role === "admin") return;
-  if (app.project_owner_user_id === user.id) return;
+  if (canAccessApp(user, app)) return;
   throw new ForbiddenError("App access required");
+}
+
+export function filterAppsForUser<T extends AppRow>(user: { id: number; role: string }, apps: T[]): T[] {
+  return apps.filter((app) => canAccessApp(user, app));
+}
+
+export function serializeRoomPlan(roomId: number) {
+  const room = dal.getRoom(roomId);
+  const plan = dal.getPlansByRoom(roomId)[0] || null;
+  const steps = plan ? dal.getPlanSteps(plan.id).map((step) => ({
+    ...step,
+    events: dal.getPlanStepEvents(step.id),
+  })) : [];
+  return {
+    plan: plan ? {
+      ...plan,
+      execution_elapsed_ms: getPlanExecutionElapsedMs(plan),
+    } : null,
+    steps,
+    planning_context_md: room?.planning_context_md || "",
+    planning_context_updated_at: room?.planning_context_updated_at || null,
+  };
 }
 
 export async function requireAppAccess(

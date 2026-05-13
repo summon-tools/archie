@@ -1,6 +1,7 @@
 import { isHomeAgentKey, type HomeAgentDefinition } from "@/lib/home/agents";
 import { getProvider, type AgentProvider, type ToolStreamEvent } from "@/lib/server/agent";
 import { resolveHomeAgent, resolveHomeAgents } from "@/lib/server/home-agent-configs";
+import type { StreamActivityEvent } from "@/lib/toolSummary";
 import * as dal from "./dal";
 import { refreshRoomPlanningContext } from "./room-planning-context";
 import { generateRoomPlanFromDiscussion, shouldGenerateRoomPlan } from "./room-plan-generator";
@@ -9,6 +10,14 @@ import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
 const MAX_ROOM_CONTEXT_MESSAGES = 16;
 const MAX_CONTEXT_CHARS = 5000;
 const MAX_MESSAGE_CHARS = 1600;
+const MAX_STORED_TOOL_EVENTS = 120;
+
+export interface RoomAgentReplyCallbacks {
+  onText?: (text: string) => void;
+  onActivity?: (activity: StreamActivityEvent) => void;
+  onStatus?: (message: string) => void;
+  onPlanUpdated?: (payload: { plan_id: number; step_count: number }) => void;
+}
 
 function truncateText(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
@@ -108,19 +117,56 @@ function getReplyAgent(message: RoomMessageRow): HomeAgentDefinition {
   return getTaggedAgent(message) || resolveHomeAgent("coordinator");
 }
 
+function truncateStoredToolEvents(events: ToolStreamEvent[]): ToolStreamEvent[] {
+  return events.slice(-MAX_STORED_TOOL_EVENTS);
+}
+
+function toolEventActivity(event: ToolStreamEvent, index: number): StreamActivityEvent | null {
+  if (event.type === "tool_use") {
+    return {
+      kind: "status",
+      key: `room-tool-${index}`,
+      message: event.tool ? `${event.tool}: ${event.detail}` : event.detail,
+    };
+  }
+  if (event.type === "tool_result") {
+    return {
+      kind: "status",
+      key: `room-tool-result-${index}`,
+      message: event.tool ? `${event.tool} completed: ${event.detail}` : event.detail,
+    };
+  }
+  if (event.type === "error") {
+    return {
+      kind: "status",
+      key: `room-tool-error-${index}`,
+      message: event.detail,
+    };
+  }
+  return null;
+}
+
+function emitToolEventActivity(callbacks: RoomAgentReplyCallbacks | undefined, event: ToolStreamEvent, index: number): void {
+  const activity = toolEventActivity(event, index);
+  if (activity) callbacks?.onActivity?.(activity);
+}
+
 async function runPlanningAgentQuery({
   provider,
   prompt,
   model,
   cwd,
+  callbacks,
 }: {
   provider: AgentProvider;
   prompt: string;
   model: string;
   cwd: string;
+  callbacks?: RoomAgentReplyCallbacks;
 }): Promise<{ text: string; events: ToolStreamEvent[] }> {
   const events: ToolStreamEvent[] = [];
   let text = "";
+  let streamedText = "";
 
   for await (const event of provider.toolEnabledStream(prompt, {
     model,
@@ -129,8 +175,21 @@ async function runPlanningAgentQuery({
     toolPolicy: "read_only_codebase",
   })) {
     events.push(event);
+    emitToolEventActivity(callbacks, event, events.length);
+    if (event.type === "text" && event.detail) {
+      streamedText += event.detail;
+      callbacks?.onText?.(event.detail);
+    }
     if (event.type === "result" && event.resultText) {
       text = event.resultText;
+      if (callbacks?.onText && text.trim()) {
+        const delta = text.startsWith(streamedText)
+          ? text.slice(streamedText.length)
+          : streamedText.trim()
+            ? ""
+            : text;
+        if (delta) callbacks.onText(delta);
+      }
     }
     if (event.type === "error") {
       throw new Error(event.detail);
@@ -140,20 +199,36 @@ async function runPlanningAgentQuery({
   return { text, events };
 }
 
-export async function createRoomAgentReply({
+async function runRoomAgentReply({
   app,
   room,
   userMessage,
+  callbacks,
 }: {
   app: AppRow;
   room: HomeRoomRow;
   userMessage: RoomMessageRow;
+  callbacks?: RoomAgentReplyCallbacks;
 }): Promise<RoomMessageRow> {
   const agent = getReplyAgent(userMessage);
   if (shouldGenerateRoomPlan(userMessage.body_md)) {
     try {
-      const generated = await generateRoomPlanFromDiscussion({ app, room, userMessage, agent });
+      callbacks?.onStatus?.(`${agent.name} is generating a structured plan...`);
+      const generated = await generateRoomPlanFromDiscussion({
+        app,
+        room,
+        userMessage,
+        agent,
+        callbacks: {
+          onToolEvent: (event) => {
+            if (event.type !== "text" && event.type !== "result") {
+              emitToolEventActivity(callbacks, event, 0);
+            }
+          },
+        },
+      });
       const body = `I created a draft plan with ${generated.steps.length} step${generated.steps.length === 1 ? "" : "s"}. Review it in the Plan panel.`;
+      callbacks?.onPlanUpdated?.({ plan_id: generated.plan.id, step_count: generated.steps.length });
 
       return dal.createRoomMessage({
         room_id: room.id,
@@ -204,6 +279,7 @@ export async function createRoomAgentReply({
       prompt,
       model: agent.defaultModel,
       cwd: app.directory,
+      callbacks,
     });
     const text = result.text.trim();
 
@@ -211,7 +287,7 @@ export async function createRoomAgentReply({
 
     dal.updateRoomAgentRun(run.id, {
       status: "completed",
-      result_json: JSON.stringify({ text: replyText, events: result.events }),
+      result_json: JSON.stringify({ text: replyText, events: truncateStoredToolEvents(result.events) }),
     });
 
     await refreshRoomPlanningContext({
@@ -251,4 +327,30 @@ export async function createRoomAgentReply({
       payload_json: JSON.stringify({ run_id: run.id, error: errorText }),
     });
   }
+}
+
+export async function createRoomAgentReply({
+  app,
+  room,
+  userMessage,
+}: {
+  app: AppRow;
+  room: HomeRoomRow;
+  userMessage: RoomMessageRow;
+}): Promise<RoomMessageRow> {
+  return runRoomAgentReply({ app, room, userMessage });
+}
+
+export async function createRoomAgentReplyStream({
+  app,
+  room,
+  userMessage,
+  callbacks,
+}: {
+  app: AppRow;
+  room: HomeRoomRow;
+  userMessage: RoomMessageRow;
+  callbacks: RoomAgentReplyCallbacks;
+}): Promise<RoomMessageRow> {
+  return runRoomAgentReply({ app, room, userMessage, callbacks });
 }

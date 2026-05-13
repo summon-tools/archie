@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { removeWorktree, stopPreview } from "@/lib/server/worktrees";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
-import { handleRoomRouteError, readJsonBody, requireWorkItemAccess } from "@/lib/server/room-route-utils";
+import { handleRoomRouteError, readJsonBody, requireEnumValue, requireWorkItemAccess, WORK_ITEM_STATUSES } from "@/lib/server/room-route-utils";
 
 export async function GET(
   request: NextRequest,
@@ -33,7 +33,7 @@ export async function PUT(
     if (body.title !== undefined) fields.title = body.title;
     if (body.description !== undefined) fields.summary = body.description;
     if (body.summary !== undefined) fields.summary = body.summary;
-    if (body.status !== undefined) fields.status = body.status;
+    if (body.status !== undefined) fields.status = requireEnumValue(body.status, WORK_ITEM_STATUSES, "status");
 
     dal.updateWorkItem(workItem.id, fields);
 
