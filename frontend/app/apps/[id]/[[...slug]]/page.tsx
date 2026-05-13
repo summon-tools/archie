@@ -204,6 +204,20 @@ export default function AppPage() {
     }
   }, [appId, handleSelectRoom, replacePath, selectedRoomId]);
 
+  const handleRenameRoom = useCallback(async (roomId: number, title: string) => {
+    try {
+      const updatedRoom = await updateRoom(appId, roomId, { title });
+      setRooms((currentRooms) => currentRooms.map((room) => (
+        room.id === roomId ? updatedRoom : room
+      )));
+      setError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to rename room";
+      setError(message);
+      throw new Error(message);
+    }
+  }, [appId]);
+
   // Handle new item
   const handleNewItem = () => {
     setSelectedItemId(null);
@@ -451,6 +465,7 @@ export default function AppPage() {
           onOpenConversation={handleSelectItem}
           onWorkItemCreated={handleItemCreated}
           onCloseRoom={handleCloseRoom}
+          onRenameRoom={handleRenameRoom}
         />
       );
     }

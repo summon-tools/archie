@@ -4,7 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "reac
 import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatsCircle, CheckCircle, Flag, PauseCircle, PencilSimple, PlayCircle, Sparkle, Timer, X } from "@phosphor-icons/react";
+import { ChatsCircle, CheckCircle, DotsThree, Flag, PauseCircle, Pencil, PencilSimple, PlayCircle, Sparkle, Timer } from "@phosphor-icons/react";
 import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, streamRoomMessage, updatePlanStep, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
@@ -55,9 +55,10 @@ interface RoomWorkspaceProps {
   onOpenConversation: (itemId: number) => void;
   onWorkItemCreated: (item: Task) => void;
   onCloseRoom: (roomId: number) => void;
+  onRenameRoom: (roomId: number, title: string) => Promise<void>;
 }
 
-export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated, onCloseRoom }: RoomWorkspaceProps) {
+export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated, onCloseRoom, onRenameRoom }: RoomWorkspaceProps) {
   const { mutate: mutateGlobal } = useSWRConfig();
   const { leftWidth, isDragging, containerRef, dragHandleProps } = useResizablePanel({
     storageKey: "archie-room-plan-ratio",
@@ -205,6 +206,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             agents={agents}
             onSend={handleSendRoomMessage}
             onCloseRoom={() => onCloseRoom(room.id)}
+            onRenameRoom={(title) => onRenameRoom(room.id, title)}
             chatEndRef={chatEndRef}
           />
         ) : (
@@ -271,6 +273,7 @@ function RoomShell({
   agents,
   onSend,
   onCloseRoom,
+  onRenameRoom,
   chatEndRef,
 }: {
   room: HomeRoom;
@@ -287,6 +290,7 @@ function RoomShell({
   agents: HomeAgentDefinition[];
   onSend: () => void;
   onCloseRoom: () => void;
+  onRenameRoom: (title: string) => Promise<void>;
   chatEndRef: RefObject<HTMLDivElement | null>;
 }) {
   const statusAgentName = getAgentName(thinkingAgentKey || selectedAgentKey, agents);
@@ -295,15 +299,8 @@ function RoomShell({
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <header className="h-10 px-6 border-b border-th flex items-center justify-between gap-3">
-        <h2 className="min-w-0 truncate text-sm font-semibold text-th-primary">{room.title}</h2>
-        <div className="flex items-center gap-2">
-          <span className="flex-shrink-0 text-meta font-medium text-th-muted bg-th-muted rounded-full px-2 py-1">
-            {isClosed ? "closed" : room.status}
-          </span>
-          {!isClosed && (
-            <CloseRoomButton onCloseRoom={onCloseRoom} />
-          )}
-        </div>
+        <RoomTitleDropdown title={room.title} onRename={onRenameRoom} />
+        {!isClosed && <CloseRoomButton onCloseRoom={onCloseRoom} />}
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -368,6 +365,142 @@ function RoomShell({
   );
 }
 
+function RoomTitleDropdown({
+  title,
+  onRename,
+}: {
+  title: string;
+  onRename: (newTitle: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(title);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+        setRenaming(false);
+        setError(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (renaming && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [renaming]);
+
+  useEffect(() => {
+    if (!renaming) setRenameValue(title);
+  }, [renaming, title]);
+
+  const handleRenameSubmit = async () => {
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+    if (trimmed === title) {
+      setRenaming(false);
+      setOpen(false);
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      await onRename(trimmed);
+      setRenaming(false);
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rename room");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative flex min-w-0 items-center gap-1" ref={ref}>
+      <button
+        onClick={() => {
+          setOpen((value) => !value);
+          setError(null);
+        }}
+        aria-expanded={open}
+        aria-haspopup="true"
+        className="flex min-w-0 items-center gap-1 group"
+      >
+        <span className="min-w-0 max-w-[220px] truncate text-sm font-semibold text-th-primary" title={title}>
+          {title}
+        </span>
+        <DotsThree size={16} weight="bold" className="flex-shrink-0 text-th-muted" />
+      </button>
+
+      {open && !renaming && (
+        <div className="absolute left-0 top-full mt-1 w-48 bg-th-elevated border border-th rounded-xl shadow-xl overflow-hidden z-50">
+          <button
+            onClick={() => {
+              setRenaming(true);
+              setRenameValue(title);
+              setError(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-th-muted transition-colors text-left"
+          >
+            <Pencil size={15} weight="bold" className="text-th-muted flex-shrink-0" />
+            <span className="text-th-primary text-xs">Rename</span>
+          </button>
+        </div>
+      )}
+
+      {open && renaming && (
+        <div className="absolute left-0 top-full mt-1 w-56 bg-th-elevated border border-th rounded-xl shadow-xl overflow-hidden z-50 p-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void handleRenameSubmit();
+              if (event.key === "Escape") {
+                setRenaming(false);
+                setOpen(false);
+              }
+            }}
+            className="w-full px-2.5 py-1.5 bg-th-subtle border border-th rounded-lg text-sm text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+          />
+          {error && <p className="mt-2 text-xs text-st-red">{error}</p>}
+          <div className="flex justify-end gap-1.5 mt-2">
+            <button
+              onClick={() => {
+                setRenaming(false);
+                setOpen(false);
+              }}
+              disabled={saving}
+              className="px-2.5 py-1 text-xs text-th-muted hover:text-th-primary transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => void handleRenameSubmit()}
+              disabled={saving || !renameValue.trim()}
+              className="px-2.5 py-1 text-xs font-medium bg-btn-primary text-btn-primary rounded-lg hover:bg-btn-primary-hover transition-colors disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CloseRoomButton({ onCloseRoom }: { onCloseRoom: () => void }) {
   const [confirmingClose, setConfirmingClose] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -387,12 +520,12 @@ function CloseRoomButton({ onCloseRoom }: { onCloseRoom: () => void }) {
     <div className="relative flex-shrink-0" ref={ref}>
       <button
         onClick={() => setConfirmingClose(true)}
-        className="p-1.5 rounded-lg text-th-muted hover:text-st-red hover:bg-th-muted transition-colors"
+        className="rounded-lg px-2.5 py-1 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-muted transition-colors"
         title="Close room"
         aria-label="Close room"
         aria-expanded={confirmingClose}
       >
-        <X size={14} weight="bold" />
+        Close room
       </button>
 
       {confirmingClose && (
@@ -565,8 +698,8 @@ function PlanPanel({
   const executionRunning = plan?.status === "executing" && plan.execution_state !== "paused";
   const executionElapsedMs = plan ? planElapsedMs(plan, now) : 0;
   const executionLogEntries = useMemo(() => (
-    buildExecutionLogEntries(messages, plan?.execution_started_at || null)
-  ), [messages, plan?.execution_started_at]);
+    buildExecutionLogEntries(messages, steps, plan?.execution_started_at || null)
+  ), [messages, steps, plan?.execution_started_at]);
 
   useEffect(() => {
     setAutoGateRunKey(null);
@@ -888,6 +1021,7 @@ type ExecutionLogEntry = {
   id: string;
   body: string;
   kind: RoomMessage["kind"];
+  agentLabel: string;
   createdAt: string;
   createdAtMs: number;
   durationSincePreviousMs: number;
@@ -930,13 +1064,79 @@ function PlanningContextPanel({ planningContext, updated }: { planningContext: s
   );
 }
 
-function buildExecutionLogEntries(messages: RoomMessage[], executionStartedAt: string | null): ExecutionLogEntry[] {
+const EXECUTION_AGENT_LABELS: Record<string, string> = {
+  coordinator: "Coordinator",
+  architect: "Architect",
+  implementer: "Implementer",
+  reviewer: "Reviewer",
+  qa: "QA",
+  security: "Security",
+};
+
+const PHASE_AGENT_LABELS: Record<string, string> = {
+  implementation: "Implementer",
+  architecture_review: "Architect",
+  code_review: "Reviewer",
+  security_review: "Security",
+  qa_validation: "QA",
+  commit: "Coordinator",
+};
+
+function formatExecutionAgentLabel(agentKey: string | null | undefined): string {
+  if (!agentKey) return "Coordinator";
+  return EXECUTION_AGENT_LABELS[agentKey] || formatAgentLabel(agentKey);
+}
+
+function parseMessagePayload(message: RoomMessage): Record<string, unknown> | null {
+  if (!message.payload_json) return null;
+
+  try {
+    const parsed = JSON.parse(message.payload_json) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function numericPayloadValue(payload: Record<string, unknown> | null, key: string): number | null {
+  if (!payload) return null;
+  const value = payload[key];
+  const numericValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function eventAgentLabel(event: NonNullable<PlanStep["events"]>[number]): string {
+  if (event.phase === "implementation") return PHASE_AGENT_LABELS.implementation;
+  if (event.agent_key) return formatExecutionAgentLabel(event.agent_key);
+  return PHASE_AGENT_LABELS[event.phase] || "Coordinator";
+}
+
+function resolveExecutionLogAgent(message: RoomMessage, steps: PlanStep[]): string {
+  const payload = parseMessagePayload(message);
+  const gateEventId = numericPayloadValue(payload, "gate_event_id");
+  if (gateEventId !== null) {
+    for (const step of steps) {
+      const event = step.events?.find((candidate) => candidate.id === gateEventId);
+      if (event) return eventAgentLabel(event);
+    }
+  }
+
+  const body = message.body_md.toLowerCase();
+  if (body.includes("implementation") || body.includes("queued step")) return "Implementer";
+  if (message.agent_key) return formatExecutionAgentLabel(message.agent_key);
+  return "Coordinator";
+}
+
+function buildExecutionLogEntries(messages: RoomMessage[], steps: PlanStep[], executionStartedAt: string | null): ExecutionLogEntry[] {
   const entries = messages
     .filter(isExecutionLogMessage)
     .map((message) => ({
       id: `message:${message.id}`,
       body: message.body_md,
       kind: message.kind,
+      agentLabel: resolveExecutionLogAgent(message, steps),
       createdAt: message.created_at,
       createdAtMs: parseDbTimestampMs(message.created_at) || 0,
       durationSincePreviousMs: 0,
@@ -973,26 +1173,41 @@ function ExecutionLogPanel({ entries }: { entries: ExecutionLogEntry[] }) {
   }
 
   return (
-    <section className="space-y-3">
-      {entries.map((entry) => (
+    <section className="space-y-0">
+      {entries.map((entry, index) => (
         <article
           key={entry.id}
-          className={`rounded-lg border p-3 ${
-            entry.kind === "error"
-              ? "border-st-red bg-th-main"
-              : "border-th bg-th-main"
-          }`}
+          className="grid grid-cols-[4.75rem_1rem_minmax(0,1fr)] gap-2 pb-4 last:pb-0"
         >
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <time className="text-meta font-medium text-th-secondary">
+          <div className="pt-1 text-right">
+            <time className="block text-meta font-medium text-th-secondary">
               {formatLogTimestamp(entry.createdAt)}
             </time>
-            <span className="text-meta text-th-dimmed">
+            <span className="mt-0.5 block text-meta text-th-dimmed">
               +{formatDuration(entry.durationSincePreviousMs)}
             </span>
           </div>
-          <div className={PROSE_CLASSES}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.body}</ReactMarkdown>
+
+          <div className="relative flex justify-center">
+            <span
+              aria-hidden
+              className={`absolute top-0 w-px bg-th-strong ${
+                index === entries.length - 1 ? "bottom-[calc(100%-0.75rem)]" : "bottom-[-1rem]"
+              }`}
+            />
+            <span
+              aria-hidden
+              className="relative mt-1.5 h-3 w-3 rounded-full border-2 border-[#555] bg-[#555]"
+            />
+          </div>
+
+          <div className="min-w-0 pt-0.5">
+            <span className="mb-1.5 inline-flex rounded-full bg-st-green px-2 py-0.5 text-meta font-medium text-st-green">
+              {entry.agentLabel}
+            </span>
+            <div className={COMPACT_PROSE_CLASSES}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.body}</ReactMarkdown>
+            </div>
           </div>
         </article>
       ))}

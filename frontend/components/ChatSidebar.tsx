@@ -723,12 +723,8 @@ function RoomEntry({
       } ${isClosed ? "opacity-50" : ""}`}
     >
       <div className="flex items-center gap-2 pl-2">
-        <UsersThree size={15} className="text-th-muted flex-shrink-0" />
         <button onClick={onSelect} className="min-w-0 flex-1 text-left" title={room.title}>
           <p className="text-sm text-th-primary truncate">{room.title}</p>
-          {room.purpose && (
-            <p className="mt-0.5 text-xs text-th-muted truncate">{room.purpose}</p>
-          )}
         </button>
         {onClose && !isClosed && (
           <div className="relative flex-shrink-0" ref={closeRef}>
@@ -742,7 +738,7 @@ function RoomEntry({
               aria-label="Close room"
               aria-expanded={confirmingClose}
             >
-              <X size={14} weight="bold" />
+              <CheckCircle size={14} weight="bold" />
             </button>
             {confirmingClose && (
               <div
