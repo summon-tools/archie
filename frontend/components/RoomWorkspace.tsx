@@ -1327,7 +1327,7 @@ const PlanStepCard = memo(function PlanStepCard({
   };
 
   return (
-    <div className="rounded-lg border border-th bg-th-main p-3">
+    <div className="rounded-lg border border-th bg-th-elevated p-3">
       <div className="flex items-start gap-2">
         <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-th bg-th-muted text-meta font-semibold text-st-green">
           {step.position + 1}
@@ -1355,7 +1355,7 @@ const PlanStepCard = memo(function PlanStepCard({
                 <input
                   value={draft.title}
                   onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
-                  className="w-full rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                  className="w-full rounded-lg border border-th bg-th-elevated px-2 py-1.5 text-xs text-th-primary placeholder-th shadow-none outline-none [color-scheme:dark] focus:border-th-strong focus:ring-2 focus:ring-th"
                 />
               </label>
               <label className="block space-y-1">
@@ -1364,7 +1364,7 @@ const PlanStepCard = memo(function PlanStepCard({
                   value={draft.objective_md}
                   onChange={(event) => setDraft((prev) => ({ ...prev, objective_md: event.target.value }))}
                   rows={4}
-                  className="w-full resize-y rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs leading-relaxed text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                  className="w-full resize-y rounded-lg border border-th bg-th-elevated px-2 py-1.5 text-xs leading-relaxed text-th-primary placeholder-th shadow-none outline-none [color-scheme:dark] focus:border-th-strong focus:ring-2 focus:ring-th"
                 />
               </label>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -1373,7 +1373,7 @@ const PlanStepCard = memo(function PlanStepCard({
                   <select
                     value={draft.risk_level}
                     onChange={(event) => setDraft((prev) => ({ ...prev, risk_level: event.target.value as PlanStep["risk_level"] }))}
-                    className="w-full rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                    className="w-full rounded-lg border border-th bg-th-elevated px-2 py-1.5 text-xs text-th-primary shadow-none outline-none [color-scheme:dark] focus:border-th-strong focus:ring-2 focus:ring-th"
                   >
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -1487,13 +1487,13 @@ function ReviewToggle({
   onChange?: (checked: boolean) => void;
 }) {
   return (
-    <label className={`flex items-center gap-1.5 rounded-lg border border-th bg-th-main px-2 py-1 text-meta text-th-secondary ${disabled ? "opacity-60" : ""}`}>
+    <label className={`flex items-center gap-1.5 rounded-lg border border-th bg-th-elevated px-2 py-1 text-meta text-th-secondary ${disabled ? "opacity-60" : "hover:bg-th-muted"}`}>
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange?.(event.target.checked)}
-        className="h-3 w-3 accent-brand-500"
+        className="h-3 w-3 rounded border-th bg-th-overlay accent-brand-500 [color-scheme:dark]"
       />
       <span className="truncate">{label}</span>
     </label>

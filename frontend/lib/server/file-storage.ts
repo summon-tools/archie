@@ -335,6 +335,6 @@ export function formatAttachmentContext(files: Array<{ file: AppFileRow; context
       `  readable_path: ${contextPath || "unavailable"}`,
     ].join("\n")),
     "",
-    "Inspect attached files directly when their details matter. Do not claim visual or file details unless you actually inspect the file.",
+    "Attached files are available as context. Use them only when relevant to the current request or plan step; do not inspect every file by default. Do not claim visual or file details unless you actually inspect the file.",
   ].join("\n");
 }
