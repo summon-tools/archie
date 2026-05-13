@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import { createTestContext, getTestDb, type TestContext } from "../helpers/test-db";
-import { seedApp, seedUser } from "../helpers/seed";
+import { seedApp, seedConversation, seedMessage, seedUser } from "../helpers/seed";
 import { createTempGitRepo } from "../helpers/temp-git";
 import type Database from "better-sqlite3";
 
@@ -63,6 +63,53 @@ async function createMemberToken(name = "Member User") {
   return { token: await createToken(user.id, name, "member"), user };
 }
 
+function mockIdleImplementationConversation() {
+  const streamConversationMessage = vi.fn(async () => new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close();
+    },
+  }));
+  vi.doMock("@/lib/server/conversation", () => ({
+    isConversationRunning: () => false,
+    streamConversationMessage,
+  }));
+  return streamConversationMessage;
+}
+
+async function attachCompletedImplementation(stepId: number, appId: number) {
+  const roomsDal = await import("@/lib/server/dal/rooms");
+  const workItemsDal = await import("@/lib/server/dal/work-items");
+  const sessionsDal = await import("@/lib/server/dal/sessions");
+  const conversation = seedConversation(db, appId, { kind: "task", title: "Plan execution" });
+  const workItem = workItemsDal.createWorkItem({
+    app_id: appId,
+    primary_conversation_id: conversation.id,
+    title: "Plan execution",
+    origin_type: "room_plan",
+  });
+  seedMessage(db, conversation.id, {
+    role: "user",
+    body_md: "Implement this plan step.",
+    seq: 1,
+  });
+  seedMessage(db, conversation.id, {
+    role: "assistant",
+    body_md: "Implementation complete.",
+    seq: 2,
+  });
+  sessionsDal.upsertSessionForConversation(conversation.id, {
+    provider_id: "codex",
+    status: "completed",
+    last_model_id: "gpt-5.5",
+  });
+  roomsDal.updatePlanStep(stepId, {
+    linked_conversation_id: conversation.id,
+    linked_work_item_id: workItem.id,
+  });
+
+  return { conversation, workItem };
+}
+
 describe("rooms API", () => {
   it("requires authentication", async () => {
     const app = seedApp(db);
@@ -102,6 +149,29 @@ describe("rooms API", () => {
     );
 
     expect(response.status).toBe(403);
+  });
+
+  it("requires app ownership or admin role for conversation and work item APIs", async () => {
+    const app = seedApp(db);
+    const owner = seedUser(db, { username: "owned-app-user", name: "Owner", role: "member" });
+    db.prepare("UPDATE apps SET project_owner_user_id = ? WHERE id = ?").run(owner.id, app.id);
+    const conversation = seedConversation(db, app.id, { kind: "task", title: "Private task" });
+    const { token } = await createMemberToken("Other Member");
+
+    const conversationRoutes = await import("@/app/api/apps/[appId]/conversations/[conversationId]/messages/route");
+    const workItemRoutes = await import("@/app/api/apps/[appId]/work-items/route");
+
+    const messagesResponse = await conversationRoutes.GET(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/conversations/${conversation.id}/messages`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), conversationId: String(conversation.id) }) },
+    );
+    const workItemsResponse = await workItemRoutes.GET(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/work-items`, { token }),
+      { params: Promise.resolve({ appId: String(app.id) }) },
+    );
+
+    expect(messagesResponse.status).toBe(403);
+    expect(workItemsResponse.status).toBe(403);
   });
 
   it("creates rooms and lists them for an app", async () => {
@@ -410,6 +480,115 @@ describe("rooms API", () => {
     });
   });
 
+  it("uses global agent description, prompt, and model overrides", async () => {
+    const app = seedApp(db);
+    const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
+    const roomsDal = await import("@/lib/server/dal/rooms");
+    const agentConfigDal = await import("@/lib/server/dal/agent-configs");
+    const room = roomsDal.createRoom({ app_id: app.id, title: "Room" });
+    agentConfigDal.upsertHomeAgentConfig("architect", {
+      role: "Custom architecture reviewer for this workspace.",
+      prompt: "Always check route shape before giving architecture advice.",
+      provider_id: "codex",
+      model_id: "gpt-5.5",
+    });
+    const userMessage = roomsDal.createRoomMessage({
+      room_id: room.id,
+      role: "user",
+      body_md: "Review the architecture.",
+      payload_json: JSON.stringify({ target_agent_key: "architect" }),
+    });
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result",
+        detail: "Completed",
+        resultText: "Custom Architect perspective.",
+      };
+    });
+    const getProvider = vi.fn(() => ({ toolEnabledStream }));
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider,
+      getAllModels: vi.fn(() => [
+        { id: "claude-opus-4-7", label: "Opus 4.7", provider: "claude" },
+        { id: "gpt-5.5", label: "GPT-5.5", provider: "codex" },
+      ]),
+    }));
+    const { createRoomAgentReply } = await import("@/lib/server/room-agents");
+
+    await createRoomAgentReply({
+      app: appRow,
+      room,
+      userMessage,
+    });
+
+    expect(getProvider).toHaveBeenCalledWith("codex");
+    expect(toolEnabledStream).toHaveBeenCalledWith(
+      expect.stringContaining("Custom architecture reviewer for this workspace."),
+      expect.objectContaining({ model: "gpt-5.5" }),
+    );
+    const [prompt] = toolEnabledStream.mock.calls[0] as unknown as [string];
+    expect(prompt).toContain("Always check route shape before giving architecture advice.");
+
+    const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;
+    expect(run).toMatchObject({
+      agent_key: "architect",
+      provider_id: "codex",
+      model_id: "gpt-5.5",
+    });
+  });
+
+  it("lets admins update global agent settings", async () => {
+    const token = await createAuthToken();
+    const routes = await import("@/app/api/settings/agents/route");
+
+    const putResponse = await routes.PUT(
+      makeRequest("http://localhost:8080/api/settings/agents", {
+        token,
+        body: {
+          agent_key: "reviewer",
+          role: "Workspace-specific reviewer.",
+          prompt: "Prioritize regression risk across rooms.",
+          model_id: "gpt-5.5",
+        },
+      }),
+    );
+
+    expect(putResponse.status).toBe(200);
+    const putBody = await putResponse.json();
+    const reviewer = putBody.agents.find((agent: any) => agent.key === "reviewer");
+    expect(reviewer).toMatchObject({
+      role: "Workspace-specific reviewer.",
+      prompt: "Prioritize regression risk across rooms.",
+      defaultProvider: "codex",
+      defaultModel: "gpt-5.5",
+      isCustomized: true,
+    });
+
+    const getResponse = await routes.GET(
+      makeRequest("http://localhost:8080/api/settings/agents", { token }),
+    );
+    const getBody = await getResponse.json();
+    expect(getBody.availableModels.some((model: any) => model.id === "gpt-5.5")).toBe(true);
+    expect(getBody.agents.find((agent: any) => agent.key === "reviewer")).toMatchObject({
+      defaultModel: "gpt-5.5",
+      isCustomized: true,
+    });
+  });
+
+  it("hides full agent prompts from non-admin users", async () => {
+    const { token } = await createMemberToken("Settings Member");
+    const routes = await import("@/app/api/settings/agents/route");
+
+    const response = await routes.GET(
+      makeRequest("http://localhost:8080/api/settings/agents", { token }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.agents).toHaveLength(6);
+    expect(body.agents.every((agent: any) => agent.prompt === "")).toBe(true);
+  });
+
   it("lets tagged agents review the planning context before a structured plan exists", async () => {
     const app = seedApp(db);
     const appRow = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as any;
@@ -498,7 +677,6 @@ describe("rooms API", () => {
           risk_level: "medium",
           requires_architecture_review: true,
           requires_security_review: false,
-          requires_browser_validation: false,
         },
         {
           title: "Refresh the plan panel",
@@ -508,7 +686,6 @@ describe("rooms API", () => {
           risk_level: "low",
           requires_architecture_review: false,
           requires_security_review: false,
-          requires_browser_validation: true,
         },
       ],
     };
@@ -562,13 +739,11 @@ describe("rooms API", () => {
       risk_level: "medium",
       requires_architecture_review: 1,
       requires_security_review: 0,
-      requires_browser_validation: 0,
     });
     expect(steps[1]).toMatchObject({
       position: 1,
       title: "Refresh the plan panel",
       risk_level: "low",
-      requires_browser_validation: 1,
     });
 
     const run = db.prepare("SELECT * FROM room_agent_runs WHERE room_id = ?").get(room.id) as any;
@@ -618,7 +793,6 @@ describe("rooms API", () => {
           risk_level: "medium",
           requires_architecture_review: true,
           requires_security_review: false,
-          requires_browser_validation: false,
         },
         {
           title: "Add blog pages",
@@ -628,7 +802,6 @@ describe("rooms API", () => {
           risk_level: "low",
           requires_architecture_review: false,
           requires_security_review: false,
-          requires_browser_validation: true,
         },
       ],
     }));
@@ -696,7 +869,6 @@ describe("rooms API", () => {
           risk_level: "medium",
           requires_architecture_review: true,
           requires_security_review: false,
-          requires_browser_validation: false,
         },
         {
           title: "Render pages",
@@ -706,7 +878,6 @@ describe("rooms API", () => {
           risk_level: "low",
           requires_architecture_review: false,
           requires_security_review: false,
-          requires_browser_validation: true,
         },
       ],
     };
@@ -764,7 +935,6 @@ describe("rooms API", () => {
               risk_level: "high",
               requires_architecture_review: true,
               requires_security_review: true,
-              requires_browser_validation: false,
             },
           ],
         }),
@@ -794,7 +964,6 @@ describe("rooms API", () => {
       risk_level: "high",
       requires_architecture_review: 1,
       requires_security_review: 1,
-      requires_browser_validation: 0,
       events: [],
     });
     expect(toolEnabledStream).toHaveBeenCalledWith(
@@ -806,6 +975,35 @@ describe("rooms API", () => {
         toolPolicy: "read_only_codebase",
       }),
     );
+  });
+
+  it("does not spend model tokens when generating over a locked room plan", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Locked Plan Room" });
+    dal.createPlan({ room_id: room.id, title: "Locked Plan", status: "executing" });
+    const toolEnabledStream = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        detail: "Completed",
+        resultText: JSON.stringify({ title: "Should not run", summary_md: "", steps: [] }),
+      };
+    });
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => ({ toolEnabledStream })),
+    }));
+    const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/generate/route");
+
+    const response = await routes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/generate`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "plan_locked" });
+    expect(toolEnabledStream).not.toHaveBeenCalled();
+    expect(dal.getPlansByRoom(room.id)).toHaveLength(1);
   });
 
   it("creates and updates room plans and steps", async () => {
@@ -883,6 +1081,40 @@ describe("rooms API", () => {
     expect(patchedBody.plan.status).toBe("ready");
     expect(patchedBody.steps).toHaveLength(1);
 
+    dal.updatePlan(planBody.plan.id, { status: "executing", execution_state: "paused" });
+    const pendingStepExecutionPatch = await stepDetailRoutes.PATCH(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}`, {
+        token,
+        body: { objective_md: "Create storage and keep scope narrow", requires_security_review: false },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+
+    expect(pendingStepExecutionPatch.status).toBe(409);
+    await expect(pendingStepExecutionPatch.json()).resolves.toMatchObject({
+      detail: "Plan steps cannot be edited after execution starts",
+    });
+
+    const rejectedNewStepDuringExecution = await stepRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps`, {
+        token,
+        body: { title: "Too late" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
+    );
+    expect(rejectedNewStepDuringExecution.status).toBe(409);
+
+    dal.updatePlanStep(step.id, { status: "completed" });
+    const completedStepExecutionPatch = await stepDetailRoutes.PATCH(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}`, {
+        token,
+        body: { title: "Too late" },
+      }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+
+    expect(completedStepExecutionPatch.status).toBe(409);
+
     const rejectedPlanStatePatch = await planRoutes.PATCH(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan`, {
         token,
@@ -890,7 +1122,10 @@ describe("rooms API", () => {
       }),
       { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
     );
-    expect(rejectedPlanStatePatch.status).toBe(400);
+    expect(rejectedPlanStatePatch.status).toBe(409);
+    await expect(rejectedPlanStatePatch.json()).resolves.toMatchObject({
+      detail: "Plan cannot be edited after execution starts",
+    });
   });
 
   it("returns a 400 response for malformed room plan JSON", async () => {
@@ -936,6 +1171,7 @@ describe("rooms API", () => {
       title: "Second step sentinel",
       objective_md: "This later step must not be sent to the first task.",
     });
+    const streamConversationMessage = mockIdleImplementationConversation();
     const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/execute-next/route");
 
     const response = await routes.POST(
@@ -965,6 +1201,9 @@ describe("rooms API", () => {
 
     const roomMessage = db.prepare("SELECT * FROM room_messages WHERE room_id = ? AND kind = 'execution_event'").get(room.id) as any;
     expect(roomMessage.body_md).toContain("Started implementation");
+    await vi.waitFor(() => {
+      expect(streamConversationMessage).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("reuses the same execution conversation for later plan steps", async () => {
@@ -989,6 +1228,7 @@ describe("rooms API", () => {
       objective_md: "Do the second scoped piece.",
       implementation_prompt_md: "Continue in the same task branch for the second scoped piece.",
     });
+    const streamConversationMessage = mockIdleImplementationConversation();
     const routes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/execute-next/route");
 
     const firstResponse = await routes.POST(
@@ -1029,6 +1269,9 @@ describe("rooms API", () => {
       work_item_id: firstBody.work_item.id,
       conversation_id: firstBody.conversation.id,
       reused_execution_conversation: true,
+    });
+    await vi.waitFor(() => {
+      expect(streamConversationMessage).toHaveBeenCalled();
     });
   });
 
@@ -1081,6 +1324,49 @@ describe("rooms API", () => {
       true,
       "codex",
     );
+  });
+
+  it("blocks the plan when the implementation conversation fails", async () => {
+    const app = seedApp(db);
+    const dal = await import("@/lib/server/dal/rooms");
+    const sessionsDal = await import("@/lib/server/dal/sessions");
+    const room = dal.createRoom({ app_id: app.id, title: "Implementation Failure Room" });
+    const plan = dal.createPlan({
+      room_id: room.id,
+      title: "Implementation Failure Plan",
+      status: "executing",
+    });
+    dal.updatePlan(plan.id, { execution_state: "running" });
+    const step = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Failing implementation step",
+      status: "implementing",
+    });
+    const { conversation } = await attachCompletedImplementation(step.id, app.id);
+    sessionsDal.upsertSessionForConversation(conversation.id, {
+      provider_id: "codex",
+      status: "failed",
+      last_model_id: "gpt-5.5",
+    });
+    const { schedulePlanStepImplementation } = await import("@/lib/server/plan-execution");
+
+    schedulePlanStepImplementation({
+      appId: app.id,
+      roomId: room.id,
+      stepId: step.id,
+      delayMs: 0,
+    });
+
+    await vi.waitFor(() => {
+      expect(dal.getPlanStep(step.id)).toMatchObject({
+        status: "failed",
+        result_summary_md: expect.stringContaining("implementation conversation ended with status failed"),
+      });
+      expect(dal.getPlan(plan.id)).toMatchObject({
+        status: "blocked",
+        execution_state: "idle",
+      });
+    });
   });
 
   it("sends automated gate fix prompts through the configured Implementer model", async () => {
@@ -1342,27 +1628,29 @@ describe("rooms API", () => {
     });
   });
 
-  it("orchestrates review, security, qa, browser, and commit gates deterministically", async () => {
+  it("orchestrates review, security, qa, and commit gates deterministically", async () => {
     const app = seedApp(db);
     const token = await createAuthToken();
     const dal = await import("@/lib/server/dal/rooms");
     const room = dal.createRoom({ app_id: app.id, title: "Gate Room" });
-    const plan = dal.createPlan({ room_id: room.id, title: "Gate Plan", status: "ready" });
+    const plan = dal.createPlan({ room_id: room.id, title: "Gate Plan", status: "executing" });
     const step = dal.createPlanStep({
       plan_id: plan.id,
       title: "Gate controlled step",
+      status: "implementing",
       requires_architecture_review: true,
       requires_security_review: true,
-      requires_browser_validation: true,
     });
-    const executeRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/execute-next/route");
+    await attachCompletedImplementation(step.id, app.id);
+    dal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "implementation",
+      agent_key: "coordinator",
+      status: "started",
+      summary_md: "Started implementation",
+    });
     const startRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/start/route");
     const advanceRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/advance/route");
-
-    await executeRoutes.POST(
-      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/execute-next`, { token }),
-      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
-    );
 
     const started = await startRoutes.POST(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/start`, { token }),
@@ -1376,11 +1664,10 @@ describe("rooms API", () => {
       "code_review",
       "security_review",
       "qa_validation",
-      "browser_validation",
       "commit",
     ]);
 
-    for (const phase of ["architecture_review", "code_review", "security_review", "qa_validation", "browser_validation", "commit"]) {
+    for (const phase of ["architecture_review", "code_review", "security_review", "qa_validation", "commit"]) {
       const response = await advanceRoutes.POST(
         makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/advance`, {
           token,
@@ -1399,7 +1686,7 @@ describe("rooms API", () => {
     expect(completedStep.status).toBe("completed");
     expect(completedStep.commit_sha).toBe("abc123");
     expect(dal.getPlan(plan.id)!.status).toBe("completed");
-    expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "completed")).toHaveLength(7);
+    expect(dal.getPlanStepEvents(step.id).filter((event) => event.status === "completed")).toHaveLength(6);
   });
 
   it("rejects unknown manual gate statuses instead of passing them", async () => {
@@ -1433,6 +1720,29 @@ describe("rooms API", () => {
     expect(response.status).toBe(400);
     expect(dal.getPlanStepEvents(step.id).find((event) => event.id === gate.id)?.status).toBe("pending");
     expect(dal.getPlanStep(step.id)!.status).toBe("reviewing");
+  });
+
+  it("does not start gates until the implementation conversation completes", async () => {
+    const app = seedApp(db);
+    const token = await createAuthToken();
+    const dal = await import("@/lib/server/dal/rooms");
+    const room = dal.createRoom({ app_id: app.id, title: "Incomplete Implementation Room" });
+    const plan = dal.createPlan({ room_id: room.id, title: "Incomplete Implementation Plan", status: "executing" });
+    const step = dal.createPlanStep({
+      plan_id: plan.id,
+      title: "Incomplete implementation step",
+      status: "implementing",
+    });
+    const startRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/start/route");
+
+    const response = await startRoutes.POST(
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/rooms/${room.id}/plan/steps/${step.id}/gates/start`, { token }),
+      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id), stepId: String(step.id) }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "implementation_not_complete" });
+    expect(dal.getPlanStepEvents(step.id)).toHaveLength(0);
   });
 
   it("runs automated gate agents and commits the completed step", async () => {
@@ -1550,6 +1860,66 @@ describe("rooms API", () => {
     }
   });
 
+  it("scopes gate review prompts to the current step base commit", async () => {
+    const repo = createTempGitRepo("archie-plan-scoped-diff-");
+    try {
+      fs.writeFileSync(path.join(repo.dir, "previous.txt"), "previous step\n");
+      execSync("git add .", { cwd: repo.dir, stdio: "ignore" });
+      execSync('git commit -m "previous step"', { cwd: repo.dir, stdio: "ignore" });
+      const baseCommit = execSync("git rev-parse HEAD", { cwd: repo.dir, encoding: "utf-8" }).trim();
+      fs.writeFileSync(path.join(repo.dir, "current.txt"), "current step\n");
+
+      const app = seedApp(db, { directory: repo.dir });
+      const roomsDal = await import("@/lib/server/dal/rooms");
+      const room = roomsDal.createRoom({ app_id: app.id, title: "Scoped Diff Room" });
+      const plan = roomsDal.createPlan({ room_id: room.id, title: "Scoped Diff Plan", status: "executing" });
+      const step = roomsDal.createPlanStep({
+        plan_id: plan.id,
+        title: "Review only current delta",
+        status: "reviewing",
+      });
+      roomsDal.updatePlanStep(step.id, { base_commit_sha: baseCommit });
+      roomsDal.createPlanStepEvent({
+        plan_step_id: step.id,
+        phase: "code_review",
+        agent_key: "reviewer",
+        status: "pending",
+        summary_md: "Code review",
+      });
+
+      const toolEnabledStream = vi.fn(async function* () {
+        yield {
+          type: "result" as const,
+          detail: "done",
+          resultText: JSON.stringify({
+            status: "passed",
+            summary_md: "Current delta passed.",
+            feedback_md: "No blocking issues.",
+          }),
+        };
+      });
+      vi.doMock("@/lib/server/agent", () => ({
+        getProvider: vi.fn(() => ({ toolEnabledStream })),
+      }));
+
+      const { runAutomatedPlanStepGates } = await import("@/lib/server/plan-execution");
+      await runAutomatedPlanStepGates({
+        appId: app.id,
+        roomId: room.id,
+        stepId: step.id,
+      });
+
+      const [prompt] = toolEnabledStream.mock.calls[0] as unknown as [string];
+      expect(prompt).toContain(`Current step base commit: ${baseCommit}`);
+      expect(prompt).toContain("Review only the current step delta shown below");
+      expect(prompt).toContain("current.txt");
+      expect(prompt).toContain("+current step");
+      expect(prompt).not.toContain("previous.txt |");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("does not apply a stale gate result to a later pending gate", async () => {
     const app = seedApp(db);
     const roomsDal = await import("@/lib/server/dal/rooms");
@@ -1599,6 +1969,14 @@ describe("rooms API", () => {
       title: "Security sensitive step",
       status: "implementing",
       requires_security_review: true,
+    });
+    await attachCompletedImplementation(step.id, app.id);
+    dal.createPlanStepEvent({
+      plan_step_id: step.id,
+      phase: "implementation",
+      agent_key: "coordinator",
+      status: "started",
+      summary_md: "Started implementation",
     });
     const startRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/start/route");
     const advanceRoutes = await import("@/app/api/apps/[appId]/rooms/[roomId]/plan/steps/[stepId]/gates/advance/route");

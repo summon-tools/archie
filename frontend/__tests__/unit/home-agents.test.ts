@@ -18,6 +18,7 @@ describe("default room agents", () => {
       expect(agent.planning).toBe(true);
       expect(agent.execution).toBe(true);
       expect(agent.defaultModel).toBeTruthy();
+      expect(agent.prompt).toBeTruthy();
     }
   });
 

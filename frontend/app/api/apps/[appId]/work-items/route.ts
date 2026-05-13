@@ -1,31 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
+import { handleRoomRouteError, readJsonBody, requireAppAccess } from "@/lib/server/room-route-utils";
+import type { WorkItemKind } from "@/lib/server/types";
+
+function parseWorkItemKind(value: unknown): WorkItemKind {
+  return value === "setup" ? "setup" : "task";
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId } = await params;
+    const access = await requireAppAccess(request, appId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const items = dal.getWorkItemsByApp(Number(appId));
+    const items = dal.getWorkItemsByApp(access.app.id);
     const workItems = items.map((wi) => {
       try { return enrichWorkItem(wi); } catch { return { ...wi, description: wi.summary }; }
     });
 
     return NextResponse.json({ work_items: workItems });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -35,21 +34,16 @@ export async function POST(
   { params }: { params: Promise<{ appId: string }> }
 ) {
   try {
-    const authUser = await getAuthUser(request);
     const { appId } = await params;
+    const access = await requireAppAccess(request, appId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const message = body.message;
     if (!message || typeof message !== "string") {
       return NextResponse.json({ detail: "message is required" }, { status: 400 });
     }
 
-    const taskType = body.task_type || null;
+    const taskType = parseWorkItemKind(body.task_type);
 
     // Auto-generate title from message
     const title = message.length > 60
@@ -58,42 +52,40 @@ export async function POST(
 
     // Create conversation first
     const conversation = dal.createConversation({
-      app_id: Number(appId),
+      app_id: access.app.id,
       kind: "task",
       title,
-      created_by: authUser.id,
+      created_by: access.user.id,
     });
 
     // Create work item pointing to conversation
-    const kind = taskType && taskType !== "task" ? taskType : "task";
     const workItem = dal.createWorkItem({
-      app_id: Number(appId),
+      app_id: access.app.id,
       primary_conversation_id: conversation.id,
       title,
       summary: message,
-      kind,
-      created_by: authUser.id,
+      kind: taskType,
+      created_by: access.user.id,
     });
 
     // Add the initial user message to the conversation
     dal.createMessage({
       conversation_id: conversation.id,
       role: "user",
-      author_user_id: authUser.id,
+      author_user_id: access.user.id,
       body_md: message,
     });
 
     const enriched = enrichWorkItem({
       ...workItem,
-      created_by_name: authUser.name,
-      created_by_color: (authUser as any).color || null,
+      created_by_name: access.user.name,
+      created_by_color: (access.user as any).color || null,
     });
 
     return NextResponse.json(enriched, { status: 201 });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

@@ -87,6 +87,9 @@ export async function PATCH(
     if (!plan) {
       return NextResponse.json({ detail: "Plan not found" }, { status: 404 });
     }
+    if (!CLIENT_EDITABLE_PLAN_STATUSES.has(plan.status)) {
+      throw new RouteInputError("Plan cannot be edited after execution starts", 409);
+    }
 
     const body = await readJsonBody(request);
     const fields: Record<string, unknown> = {};

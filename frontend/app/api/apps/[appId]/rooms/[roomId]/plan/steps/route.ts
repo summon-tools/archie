@@ -27,6 +27,9 @@ export async function POST(
   try {
     const { appId, roomId } = await params;
     const { plan } = await requireRoomPlanAccess(request, appId, roomId);
+    if (plan.status !== "draft" && plan.status !== "ready") {
+      throw new RouteInputError("Plan steps cannot be added after execution starts", 409);
+    }
 
     const body = await readJsonBody(request);
     const title = typeof body.title === "string" ? body.title.trim() : "";
@@ -52,7 +55,6 @@ export async function POST(
       risk_level: riskLevel as "low" | "medium" | "high",
       requires_architecture_review: !!body.requires_architecture_review,
       requires_security_review: !!body.requires_security_review,
-      requires_browser_validation: !!body.requires_browser_validation,
     });
 
     return NextResponse.json(step, { status: 201 });

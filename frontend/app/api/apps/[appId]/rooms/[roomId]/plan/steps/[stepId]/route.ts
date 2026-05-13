@@ -10,7 +10,6 @@ const EDITABLE_STEP_FIELDS = new Set([
   "risk_level",
   "requires_architecture_review",
   "requires_security_review",
-  "requires_browser_validation",
 ]);
 const PLAN_STEP_RISK_LEVELS = new Set(["low", "medium", "high"]);
 
@@ -21,8 +20,8 @@ export async function PATCH(
   try {
     const { appId, roomId, stepId } = await params;
     const { plan, step } = await requirePlanStepAccess(request, appId, roomId, stepId);
-    if (plan.status === "executing" || plan.status === "completed" || plan.status === "blocked" || plan.status === "cancelled") {
-      throw new RouteInputError("Plan steps can only be edited before execution", 409);
+    if (plan.status !== "draft" && plan.status !== "ready") {
+      throw new RouteInputError("Plan steps cannot be edited after execution starts", 409);
     }
 
     const body = await readJsonBody(request);
@@ -43,7 +42,7 @@ export async function PATCH(
       }
       fields.risk_level = body.risk_level;
     }
-    for (const key of ["requires_architecture_review", "requires_security_review", "requires_browser_validation"] as const) {
+    for (const key of ["requires_architecture_review", "requires_security_review"] as const) {
       if (body[key] !== undefined) {
         if (typeof body[key] !== "boolean") {
           throw new RouteInputError(`${key} must be a boolean`);

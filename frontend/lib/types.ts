@@ -35,6 +35,24 @@ export const TTS_VOICES = [
 
 export const DEFAULT_TTS_VOICE = "en-US-AndrewNeural";
 
+export interface AgentModelOption {
+  id: string;
+  label: string;
+  provider: string;
+}
+
+export interface HomeAgentConfig {
+  key: string;
+  name: string;
+  role: string;
+  prompt: string;
+  defaultProvider: "claude" | "codex";
+  defaultModel: string;
+  planning: boolean;
+  execution: boolean;
+  isCustomized: boolean;
+}
+
 export interface DemoPersona {
   name: string;
   email?: string;
@@ -118,6 +136,9 @@ export interface WorkItem {
   created_by: number | null;
   created_by_name: string | null;
   created_by_color: string | null;
+  origin_type: string;
+  origin_automation_key: string | null;
+  origin_run_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -288,11 +309,11 @@ export interface PlanStep {
   risk_level: PlanStepRiskLevel;
   requires_architecture_review: number;
   requires_security_review: number;
-  requires_browser_validation: number;
   status: PlanStepStatus;
   linked_work_item_id: number | null;
   linked_conversation_id: number | null;
   fix_attempts: number;
+  base_commit_sha: string | null;
   commit_sha: string | null;
   result_summary_md: string;
   created_at: string;

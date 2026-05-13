@@ -251,7 +251,6 @@ export function createPlanStep(data: {
   risk_level?: PlanStepRiskLevel;
   requires_architecture_review?: boolean;
   requires_security_review?: boolean;
-  requires_browser_validation?: boolean;
   status?: PlanStepStatus;
 }): PlanStepRow {
   const db = getDb();
@@ -262,8 +261,8 @@ export function createPlanStep(data: {
   const result = db.prepare(
     `INSERT INTO plan_steps
       (plan_id, position, title, objective_md, implementation_prompt_md, acceptance_criteria_md, risk_level,
-       requires_architecture_review, requires_security_review, requires_browser_validation, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       requires_architecture_review, requires_security_review, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     data.plan_id,
     position,
@@ -274,7 +273,6 @@ export function createPlanStep(data: {
     data.risk_level || "medium",
     data.requires_architecture_review ? 1 : 0,
     data.requires_security_review ? 1 : 0,
-    data.requires_browser_validation ? 1 : 0,
     data.status || "pending",
   );
   return getPlanStep(Number(result.lastInsertRowid))!;
@@ -295,11 +293,11 @@ export function updatePlanStep(
     | "risk_level"
     | "requires_architecture_review"
     | "requires_security_review"
-    | "requires_browser_validation"
     | "status"
     | "linked_work_item_id"
     | "linked_conversation_id"
     | "fix_attempts"
+    | "base_commit_sha"
     | "commit_sha"
     | "result_summary_md"
   >>,
@@ -308,7 +306,6 @@ export function updatePlanStep(
   for (const key of [
     "requires_architecture_review",
     "requires_security_review",
-    "requires_browser_validation",
   ] as const) {
     if (typeof normalizedFields[key] === "boolean") {
       normalizedFields[key] = normalizedFields[key] ? 1 : 0;
@@ -337,6 +334,17 @@ export function createPlanStepEvent(data: {
     data.payload_json ?? null,
   );
   return getDb().prepare("SELECT * FROM plan_step_events WHERE id = ?").get(result.lastInsertRowid) as PlanStepEventRow;
+}
+
+export function claimPlanStepEvent(eventId: number): boolean {
+  const result = getDb().prepare(
+    `UPDATE plan_step_events
+     SET status = 'running',
+         updated_at = datetime('now')
+     WHERE id = ?
+       AND status = 'pending'`
+  ).run(eventId);
+  return result.changes === 1;
 }
 
 export function updatePlanStepEvent(

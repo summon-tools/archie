@@ -135,6 +135,15 @@ export interface AppToolConfigRow {
   config_json: string;
 }
 
+export interface HomeAgentConfigRow {
+  agent_key: string;
+  role: string;
+  prompt: string;
+  provider_id: string;
+  model_id: string;
+  updated_at: string;
+}
+
 export interface HomeRoomRow {
   id: number;
   app_id: number;
@@ -202,11 +211,11 @@ export interface PlanStepRow {
   risk_level: PlanStepRiskLevel;
   requires_architecture_review: number;
   requires_security_review: number;
-  requires_browser_validation: number;
   status: PlanStepStatus;
   linked_work_item_id: number | null;
   linked_conversation_id: number | null;
   fix_attempts: number;
+  base_commit_sha: string | null;
   commit_sha: string | null;
   result_summary_md: string;
   created_at: string;

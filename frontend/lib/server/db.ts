@@ -200,6 +200,16 @@ function initDb(db: Database.Database): void {
       FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS home_agent_configs (
+      agent_key TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      provider_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (agent_key)
+    );
+
     CREATE TABLE IF NOT EXISTS system_settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL DEFAULT '{}'
@@ -367,11 +377,11 @@ function initDb(db: Database.Database): void {
       risk_level TEXT NOT NULL DEFAULT 'medium' CHECK(risk_level IN ('low', 'medium', 'high')),
       requires_architecture_review INTEGER NOT NULL DEFAULT 0,
       requires_security_review INTEGER NOT NULL DEFAULT 0,
-      requires_browser_validation INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'implementing', 'reviewing', 'fixing', 'validating', 'committing', 'completed', 'blocked', 'failed', 'skipped')),
       linked_work_item_id INTEGER DEFAULT NULL,
       linked_conversation_id INTEGER DEFAULT NULL,
       fix_attempts INTEGER NOT NULL DEFAULT 0,
+      base_commit_sha TEXT DEFAULT NULL,
       commit_sha TEXT DEFAULT NULL,
       result_summary_md TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now')),
@@ -393,6 +403,7 @@ function initDb(db: Database.Database): void {
       summary_md TEXT DEFAULT '',
       payload_json TEXT DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (plan_step_id) REFERENCES plan_steps(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_plan_step_events_step_id ON plan_step_events(plan_step_id);
@@ -419,6 +430,8 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "plans", "execution_paused_at", "TEXT DEFAULT NULL");
   addColumnIfMissing(db, "plans", "execution_paused_ms", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "plan_steps", "fix_attempts", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "plan_steps", "base_commit_sha", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "plan_step_events", "updated_at", "TEXT DEFAULT (datetime('now'))");
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_plan_steps_linked_conversation_id ON plan_steps(linked_conversation_id);
 
@@ -435,6 +448,12 @@ function initDb(db: Database.Database): void {
     SET execution_state = 'completed',
         execution_paused_at = NULL
     WHERE status = 'completed' AND execution_state != 'completed';
+
+    UPDATE plan_step_events
+    SET status = 'pending',
+        updated_at = datetime('now')
+    WHERE status = 'running'
+      AND datetime(COALESCE(updated_at, created_at)) < datetime('now', '-30 minutes');
   `);
 
   // ── Clean stale agent sessions ────────────────────────────────

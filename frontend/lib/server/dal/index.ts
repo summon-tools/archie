@@ -8,3 +8,4 @@ export * from "./users";
 export * from "./notifications";
 export * from "./automation-configs";
 export * from "./rooms";
+export * from "./agent-configs";

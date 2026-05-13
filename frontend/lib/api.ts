@@ -1,4 +1,4 @@
-import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse } from "./types";
+import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption } from "./types";
 
 const BASE = "/api";
 
@@ -289,7 +289,12 @@ export async function createPlanStep(appId: number, roomId: number, body: Partia
   });
 }
 
-export async function updatePlanStep(appId: number, roomId: number, stepId: number, body: Partial<PlanStep>): Promise<PlanStep> {
+export type PlanStepUpdate = Partial<Omit<PlanStep, "requires_architecture_review" | "requires_security_review">> & {
+  requires_architecture_review?: boolean;
+  requires_security_review?: boolean;
+};
+
+export async function updatePlanStep(appId: number, roomId: number, stepId: number, body: PlanStepUpdate): Promise<PlanStep> {
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/plan/steps/${stepId}`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -625,6 +630,26 @@ export interface DashboardSettings {
 
 export async function getSettings(): Promise<DashboardSettings> {
   return fetchJSON<DashboardSettings>(`${BASE}/settings`);
+}
+
+// --- App agent config endpoints ---
+
+export interface HomeAgentsResponse {
+  agents: HomeAgentConfig[];
+  availableModels: AgentModelOption[];
+}
+
+export async function getHomeAgents(): Promise<HomeAgentsResponse> {
+  return fetchJSON<HomeAgentsResponse>(`${BASE}/settings/agents`);
+}
+
+export async function updateHomeAgent(
+  agent: { agent_key: string; role: string; prompt: string; model_id: string },
+): Promise<HomeAgentsResponse> {
+  return fetchJSON<HomeAgentsResponse>(`${BASE}/settings/agents`, {
+    method: "PUT",
+    body: JSON.stringify(agent),
+  });
 }
 
 // --- Model config endpoints ---

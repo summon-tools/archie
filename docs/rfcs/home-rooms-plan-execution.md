@@ -176,7 +176,6 @@ Responsibilities:
 
 - validates acceptance criteria
 - recommends or runs tests where allowed
-- verifies browser behavior when the step has UI impact
 - records validation notes
 
 ### Security
@@ -223,7 +222,6 @@ Reviewer, Architect, QA, and Security should default to read-only or validation-
 - read repo
 - inspect diff
 - inspect test output
-- inspect browser state where applicable
 - run approved validation commands if supported by policy
 - no direct file writes
 
@@ -269,7 +267,7 @@ reviewer:
   readRepo: true
   writeRepo: false
   shell: validation
-  browser: inspect
+  browser: none
   git: status
   network: false
 
@@ -277,7 +275,7 @@ security:
   readRepo: true
   writeRepo: false
   shell: validation
-  browser: inspect
+  browser: none
   git: status
   network: false
 
@@ -372,11 +370,11 @@ CREATE TABLE plan_steps (
     CHECK(risk_level IN ('low', 'medium', 'high')),
   requires_architecture_review INTEGER NOT NULL DEFAULT 0,
   requires_security_review INTEGER NOT NULL DEFAULT 0,
-  requires_browser_validation INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK(status IN ('pending', 'implementing', 'reviewing', 'fixing', 'validating', 'committing', 'completed', 'blocked', 'failed', 'skipped')),
   linked_work_item_id INTEGER DEFAULT NULL,
   linked_conversation_id INTEGER DEFAULT NULL,
+  base_commit_sha TEXT DEFAULT NULL,
   commit_sha TEXT DEFAULT NULL,
   result_summary_md TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now')),
@@ -460,7 +458,7 @@ reviewing -> validating
   If all required review agents approve or return non-blocking notes.
 
 validating -> committing
-  If tests/browser/acceptance validation passes.
+  If tests and acceptance validation pass.
 
 committing -> completed
   Commit succeeds and commit SHA is recorded.
@@ -530,8 +528,7 @@ Suggested schema:
   "findings": [],
   "validation": {
     "tests_reviewed": [],
-    "manual_checks": [],
-    "browser_checks": []
+    "manual_checks": []
   }
 }
 ```
@@ -596,7 +593,7 @@ Step 2 is in implementation.
 Reviewer requested changes around auth edge cases.
 I sent the fix request back to the implementation conversation.
 Security approved after the fix.
-QA passed browser validation.
+QA approved the step validation.
 Committed step 2 as abc123.
 Starting step 3.
 ```
@@ -890,4 +887,3 @@ Build Home and Rooms as a new layer above the existing conversation system.
 Do not alter the current task conversation path in V1. Use it as the worker lane for implementation. Let Rooms own planning, coordination, structured plans, and execution progress.
 
 The most important implementation principle is that the execution flow belongs to Archie code. Agents can provide intelligence inside each phase, but the backend owns the state machine, phase transitions, gates, persistence, and safety boundaries.
-

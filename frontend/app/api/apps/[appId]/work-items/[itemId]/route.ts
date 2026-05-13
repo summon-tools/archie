@@ -1,32 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { removeWorktree, stopPreview } from "@/lib/server/worktrees";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
+import { handleRoomRouteError, readJsonBody, requireWorkItemAccess } from "@/lib/server/room-route-utils";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId, itemId } = await params;
+    const { workItem } = await requireWorkItemAccess(request, appId, itemId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const wi = dal.getWorkItem(Number(itemId));
-    if (!wi || wi.app_id !== Number(appId)) {
-      return NextResponse.json({ detail: "Work item not found" }, { status: 404 });
-    }
-
-    return NextResponse.json(enrichWorkItem(wi));
+    return NextResponse.json(enrichWorkItem(workItem));
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -36,34 +25,23 @@ export async function PUT(
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId, itemId } = await params;
+    const { workItem } = await requireWorkItemAccess(request, appId, itemId);
 
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const wi = dal.getWorkItem(Number(itemId));
-    if (!wi || wi.app_id !== Number(appId)) {
-      return NextResponse.json({ detail: "Work item not found" }, { status: 404 });
-    }
-
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const fields: any = {};
     if (body.title !== undefined) fields.title = body.title;
     if (body.description !== undefined) fields.summary = body.description;
     if (body.summary !== undefined) fields.summary = body.summary;
     if (body.status !== undefined) fields.status = body.status;
 
-    dal.updateWorkItem(Number(itemId), fields);
+    dal.updateWorkItem(workItem.id, fields);
 
-    const updated = dal.getWorkItem(Number(itemId))!;
+    const updated = dal.getWorkItem(workItem.id)!;
     return NextResponse.json(enrichWorkItem(updated));
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }
@@ -73,18 +51,8 @@ export async function DELETE(
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
   try {
-    await getAuthUser(request);
     const { appId, itemId } = await params;
-
-    const app = dal.getApp(Number(appId));
-    if (!app) {
-      return NextResponse.json({ detail: "App not found" }, { status: 404 });
-    }
-
-    const wi = dal.getWorkItem(Number(itemId));
-    if (!wi || wi.app_id !== Number(appId)) {
-      return NextResponse.json({ detail: "Work item not found" }, { status: 404 });
-    }
+    const { app, workItem: wi } = await requireWorkItemAccess(request, appId, itemId);
 
     // Clean up env (worktree, preview) — best effort
     try {
@@ -109,9 +77,8 @@ export async function DELETE(
 
     return NextResponse.json({ message: "Work item deleted" });
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
 }

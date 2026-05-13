@@ -50,6 +50,11 @@ function buildContextSummaryPrompt({
 
   return [
     "Update the room planning context summary for an Archie planning room.",
+    `You are acting as the ${agent.name} agent.`,
+    `Agent description: ${agent.role}`,
+    "Agent instructions:",
+    contextBlock("agent_prompt", agent.prompt, MAX_CONTEXT_CHARS),
+    "",
     "This summary is not the structured execution plan. It captures the working plan being discussed before or alongside the structured plan.",
     "You may inspect the repository only if the latest exchange references code facts that are not already clear from the transcript.",
     "Do not edit files, install dependencies, change git state, or commit.",
@@ -180,7 +185,7 @@ export function updateRoomPlanningContextFromStructuredPlan({
     "- Review the structured steps and adjust scope, ordering, or acceptance criteria before marking the plan ready.",
     "",
     "## Risks and validation",
-    "- Use the per-step architecture, security, QA, and browser gates shown in the structured plan.",
+    "- Use the per-step architecture, security, and QA gates shown in the structured plan.",
   ].join("\n");
 
   dal.updateRoomPlanningContext(roomId, summary);

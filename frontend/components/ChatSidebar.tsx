@@ -700,6 +700,20 @@ function RoomEntry({
   onSelect: () => void;
   onClose?: () => void;
 }) {
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const closeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!confirmingClose) return;
+    const handleClick = (event: MouseEvent) => {
+      if (closeRef.current && !closeRef.current.contains(event.target as Node)) {
+        setConfirmingClose(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [confirmingClose]);
+
   return (
     <div
       className={`group w-full text-left px-4 py-2 transition-colors duration-150 ${
@@ -717,13 +731,45 @@ function RoomEntry({
           )}
         </button>
         {onClose && !isClosed && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onClose(); }}
-            className="flex-shrink-0 p-1.5 rounded text-th-muted opacity-0 group-hover:opacity-100 hover:text-st-red hover:bg-th-muted transition-all"
-            title="Close room"
-          >
-            <X size={14} weight="bold" />
-          </button>
+          <div className="relative flex-shrink-0" ref={closeRef}>
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                setConfirmingClose(true);
+              }}
+              className="p-1.5 rounded text-th-muted opacity-0 group-hover:opacity-100 hover:text-st-red hover:bg-th-muted transition-all"
+              title="Close room"
+              aria-label="Close room"
+              aria-expanded={confirmingClose}
+            >
+              <X size={14} weight="bold" />
+            </button>
+            {confirmingClose && (
+              <div
+                className="absolute right-0 top-full mt-1 w-52 bg-th-elevated border border-th rounded-xl shadow-xl overflow-hidden z-50 p-3"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <p className="text-xs text-th-muted mb-2.5">Close this room?</p>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setConfirmingClose(false)}
+                    className="flex-1 px-2.5 py-1 text-xs text-th-muted hover:text-th-primary transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      setConfirmingClose(false);
+                    }}
+                    className="flex-1 px-2.5 py-1 text-xs font-medium bg-st-red text-st-red-strong border border-st-red rounded-lg hover:bg-st-red-hover transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

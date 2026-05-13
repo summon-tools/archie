@@ -279,6 +279,18 @@ export async function streamConversationMessage(
   }
 
   const effectiveCwd = env?.worktree_dir || directory || undefined;
+  if (effectiveCwd) {
+    try {
+      const { capturePlanStepBaseCommitForConversation } = await import("./plan-execution");
+      capturePlanStepBaseCommitForConversation({
+        appId: conversation.app_id,
+        conversationId,
+        directory: effectiveCwd,
+      });
+    } catch {
+      // Plan execution can still continue without a scoped base commit.
+    }
+  }
 
   // Build prompt
   let prompt: string;

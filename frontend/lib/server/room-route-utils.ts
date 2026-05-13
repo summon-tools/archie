@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, ForbiddenError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import type { AppRow, HomeRoomRow, PlanRow, PlanStepRow } from "@/lib/server/types";
+import type { AppRow, ConversationRow, HomeRoomRow, PlanRow, PlanStepRow, WorkItemRow } from "@/lib/server/types";
 
 export class RouteInputError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -74,6 +74,34 @@ export async function requireRoomAccess(
     throw new RouteInputError("Room not found", 404);
   }
   return { user, app, room, appId, roomId };
+}
+
+export async function requireConversationAccess(
+  request: NextRequest,
+  appIdParam: string,
+  conversationIdParam: string,
+): Promise<{ user: Awaited<ReturnType<typeof getAuthUser>>; app: AppRow; conversation: ConversationRow; appId: number; conversationId: number }> {
+  const { user, app, appId } = await requireAppAccess(request, appIdParam);
+  const conversationId = parseRouteId(conversationIdParam, "conversationId");
+  const conversation = dal.getConversation(conversationId);
+  if (!conversation || conversation.app_id !== app.id) {
+    throw new RouteInputError("Conversation not found", 404);
+  }
+  return { user, app, conversation, appId, conversationId };
+}
+
+export async function requireWorkItemAccess(
+  request: NextRequest,
+  appIdParam: string,
+  itemIdParam: string,
+): Promise<{ user: Awaited<ReturnType<typeof getAuthUser>>; app: AppRow; workItem: WorkItemRow; appId: number; itemId: number }> {
+  const { user, app, appId } = await requireAppAccess(request, appIdParam);
+  const itemId = parseRouteId(itemIdParam, "itemId");
+  const workItem = dal.getWorkItem(itemId);
+  if (!workItem || workItem.app_id !== app.id) {
+    throw new RouteInputError("Work item not found", 404);
+  }
+  return { user, app, workItem, appId, itemId };
 }
 
 export async function requireRoomPlanAccess(

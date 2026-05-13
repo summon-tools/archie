@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { launchNextPlanStep, PlanExecutionError } from "@/lib/server/plan-execution";
+import { launchNextPlanStep, PlanExecutionError, schedulePlanStepImplementation } from "@/lib/server/plan-execution";
 import { handleRoomRouteError, requireRoomAccess } from "@/lib/server/room-route-utils";
 
 export async function POST(
@@ -13,6 +13,12 @@ export async function POST(
       appId: access.app.id,
       roomId: access.room.id,
       userId: access.user.id,
+    });
+    schedulePlanStepImplementation({
+      appId: access.app.id,
+      roomId: access.room.id,
+      stepId: result.step.id,
+      delayMs: 0,
     });
 
     return NextResponse.json({

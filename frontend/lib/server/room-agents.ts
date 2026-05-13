@@ -1,5 +1,6 @@
-import { DEFAULT_HOME_AGENTS, getHomeAgent, type HomeAgentDefinition } from "@/lib/home/agents";
+import { isHomeAgentKey, type HomeAgentDefinition } from "@/lib/home/agents";
 import { getProvider, type AgentProvider, type ToolStreamEvent } from "@/lib/server/agent";
+import { resolveHomeAgent, resolveHomeAgents } from "@/lib/server/home-agent-configs";
 import * as dal from "./dal";
 import { refreshRoomPlanningContext } from "./room-planning-context";
 import { generateRoomPlanFromDiscussion, shouldGenerateRoomPlan } from "./room-plan-generator";
@@ -34,10 +35,14 @@ function buildRoomAgentPrompt({
   const planningContext = room.planning_context_md?.trim();
   const recentMessages = dal.getRoomMessages(room.id, MAX_ROOM_CONTEXT_MESSAGES);
   const isCoordinator = agent.key === "coordinator";
+  const agentTeam = resolveHomeAgents();
 
   return [
     `You are the ${agent.name} agent inside an Archie planning room for software work.`,
     `Your role: ${agent.role}`,
+    "",
+    "Your agent instructions:",
+    contextBlock("agent_prompt", agent.prompt, MAX_CONTEXT_CHARS),
     "",
     "Your job:",
     isCoordinator
@@ -57,7 +62,7 @@ function buildRoomAgentPrompt({
     "- Keep replies concise and practical.",
     "",
     "Agent team:",
-    ...DEFAULT_HOME_AGENTS.map((agent) => `- ${agent.name}: ${agent.role}`),
+    ...agentTeam.map((agent) => `- ${agent.name}: ${agent.role}`),
     "",
     `App: ${app.name}`,
     `Room: ${room.title}`,
@@ -92,14 +97,15 @@ function getTaggedAgent(message: RoomMessageRow): HomeAgentDefinition | null {
   try {
     const payload = JSON.parse(message.payload_json) as { target_agent_key?: unknown };
     if (typeof payload.target_agent_key !== "string") return null;
-    return DEFAULT_HOME_AGENTS.find((agent) => agent.key === payload.target_agent_key) || null;
+    if (!isHomeAgentKey(payload.target_agent_key)) return null;
+    return resolveHomeAgent(payload.target_agent_key);
   } catch {
     return null;
   }
 }
 
 function getReplyAgent(message: RoomMessageRow): HomeAgentDefinition {
-  return getTaggedAgent(message) || getHomeAgent("coordinator");
+  return getTaggedAgent(message) || resolveHomeAgent("coordinator");
 }
 
 async function runPlanningAgentQuery({

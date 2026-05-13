@@ -178,9 +178,8 @@ export default function AppPage() {
   const handleCloseRoom = useCallback(async (roomId: number) => {
     try {
       const closedRoom = await updateRoom(appId, roomId, { status: "archived" });
-      const updatedRooms = rooms.map((room) => (room.id === roomId ? closedRoom : room));
-      const nextRoomId = updatedRooms.find((room) => room.status === "open" && room.id !== roomId)?.id ?? null;
-      setRooms(updatedRooms);
+      const nextRoomId = rooms.find((room) => room.status === "open" && room.id !== roomId)?.id ?? null;
+      setRooms((currentRooms) => currentRooms.map((room) => (room.id === roomId ? closedRoom : room)));
 
       if (selectedRoomId === roomId) {
         if (nextRoomId) {

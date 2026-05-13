@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
-import { getHomeAgent } from "@/lib/home/agents";
-import { generateRoomPlanFromDiscussion } from "@/lib/server/room-plan-generator";
+import { resolveHomeAgent } from "@/lib/server/home-agent-configs";
+import { generateRoomPlanFromDiscussion, RoomPlanGenerationError } from "@/lib/server/room-plan-generator";
 import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
 import { handleRoomRouteError, requireRoomAccess } from "@/lib/server/room-route-utils";
 
@@ -34,13 +34,16 @@ export async function POST(
     await generateRoomPlanFromDiscussion({
       app,
       room,
-      agent: getHomeAgent("coordinator"),
+      agent: resolveHomeAgent("coordinator"),
     });
 
     return NextResponse.json(serializePlan(room.id), { status: 201 });
   } catch (e) {
     const errorResponse = handleRoomRouteError(e);
     if (errorResponse) return errorResponse;
+    if (e instanceof RoomPlanGenerationError) {
+      return NextResponse.json({ detail: e.message, code: e.code }, { status: e.status });
+    }
     const detail = e instanceof Error && e.message.includes("Plan generator")
       ? "The model returned an unstructured plan response. Please try again."
       : e instanceof Error ? e.message : "Failed to generate plan";

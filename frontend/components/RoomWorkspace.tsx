@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CaretDown, CaretRight, ChatsCircle, CheckCircle, Flag, PauseCircle, PlayCircle, Sparkle, Timer, X } from "@phosphor-icons/react";
-import { advancePlanStepGate, executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, sendRoomMessage, startPlanStepGates, updateRoomPlan } from "@/lib/api";
+import { ChatsCircle, CheckCircle, Flag, PauseCircle, PencilSimple, PlayCircle, Sparkle, Timer, X } from "@phosphor-icons/react";
+import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, sendRoomMessage, updatePlanStep, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
-import type { HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
-import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
+import type { HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
+import { DEFAULT_HOME_AGENTS, type HomeAgentDefinition } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
 import RoomChatInput from "@/components/RoomChatInput";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -73,6 +73,11 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     fetcher,
     { refreshInterval: awaitingReplyAfterId ? 1500 : 0 },
   );
+  const { data: agentsData } = useSWR<{ agents: HomeAgentConfig[] }>(
+    room ? "/api/settings/agents" : null,
+    fetcher,
+  );
+  const agents = (agentsData?.agents || DEFAULT_HOME_AGENTS) as HomeAgentDefinition[];
   const messages = messagesData?.messages || [];
   const visibleMessages = useMemo(() => {
     const chatMessages = messages.filter((message) => !isExecutionLogMessage(message));
@@ -136,11 +141,11 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     if (awaitingReplyStartedAt && Date.now() - awaitingReplyStartedAt > 90000) {
       setAwaitingReplyAfterId(null);
       setAwaitingReplyStartedAt(null);
-      const agentName = getAgentName(awaitingReplyAgentKey);
+      const agentName = getAgentName(awaitingReplyAgentKey, agents);
       setAwaitingReplyAgentKey(null);
       setMessageError(`${agentName} is taking longer than expected. Your message was saved; refresh the room or send another message to retry.`);
     }
-  }, [appId, awaitingReplyAfterId, awaitingReplyAgentKey, awaitingReplyStartedAt, messages, mutateGlobal, room]);
+  }, [agents, appId, awaitingReplyAfterId, awaitingReplyAgentKey, awaitingReplyStartedAt, messages, mutateGlobal, room]);
 
   return (
     <div className="flex-1 min-h-0 bg-th-main flex" ref={containerRef}>
@@ -160,6 +165,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             selectedAgentKey={selectedAgentKey}
             setSelectedAgentKey={setSelectedAgentKey}
             thinkingAgentKey={awaitingReplyAgentKey}
+            agents={agents}
             onSend={handleSendRoomMessage}
             onCloseRoom={() => onCloseRoom(room.id)}
           />
@@ -223,6 +229,7 @@ function RoomShell({
   selectedAgentKey,
   setSelectedAgentKey,
   thinkingAgentKey,
+  agents,
   onSend,
   onCloseRoom,
 }: {
@@ -236,10 +243,11 @@ function RoomShell({
   selectedAgentKey: string | null;
   setSelectedAgentKey: (agentKey: string | null) => void;
   thinkingAgentKey: string | null;
+  agents: HomeAgentDefinition[];
   onSend: () => void;
   onCloseRoom: () => void;
 }) {
-  const statusAgentName = getAgentName(thinkingAgentKey || selectedAgentKey);
+  const statusAgentName = getAgentName(thinkingAgentKey || selectedAgentKey, agents);
   const isClosed = room.status !== "open";
 
   return (
@@ -251,14 +259,7 @@ function RoomShell({
             {isClosed ? "closed" : room.status}
           </span>
           {!isClosed && (
-            <button
-              onClick={onCloseRoom}
-              className="flex-shrink-0 p-1.5 rounded-lg text-th-muted hover:text-st-red hover:bg-th-muted transition-colors"
-              title="Close room"
-              aria-label="Close room"
-            >
-              <X size={14} weight="bold" />
-            </button>
+            <CloseRoomButton onCloseRoom={onCloseRoom} />
           )}
         </div>
       </header>
@@ -278,7 +279,7 @@ function RoomShell({
           ) : (
             <div className="space-y-4">
               {messages.map((message) => (
-                <RoomMessageBubble key={message.id} message={message} />
+                <RoomMessageBubble key={message.id} message={message} agents={agents} />
               ))}
             </div>
           )}
@@ -303,7 +304,7 @@ function RoomShell({
             value={draft}
             onChange={setDraft}
             onSubmit={onSend}
-            agents={DEFAULT_HOME_AGENTS}
+            agents={agents}
             selectedAgentKey={selectedAgentKey}
             onSelectAgent={setSelectedAgentKey}
             disabled={sending}
@@ -316,10 +317,63 @@ function RoomShell({
   );
 }
 
-function RoomMessageBubble({ message }: { message: RoomMessage }) {
+function CloseRoomButton({ onCloseRoom }: { onCloseRoom: () => void }) {
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!confirmingClose) return;
+    const handleClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setConfirmingClose(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [confirmingClose]);
+
+  return (
+    <div className="relative flex-shrink-0" ref={ref}>
+      <button
+        onClick={() => setConfirmingClose(true)}
+        className="p-1.5 rounded-lg text-th-muted hover:text-st-red hover:bg-th-muted transition-colors"
+        title="Close room"
+        aria-label="Close room"
+        aria-expanded={confirmingClose}
+      >
+        <X size={14} weight="bold" />
+      </button>
+
+      {confirmingClose && (
+        <div className="absolute right-0 top-full mt-1 w-52 bg-th-elevated border border-th rounded-xl shadow-xl overflow-hidden z-50 p-3">
+          <p className="text-xs text-th-muted mb-2.5">Close this room?</p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setConfirmingClose(false)}
+              className="flex-1 px-2.5 py-1 text-xs text-th-muted hover:text-th-primary transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                onCloseRoom();
+                setConfirmingClose(false);
+              }}
+              className="flex-1 px-2.5 py-1 text-xs font-medium bg-st-red text-st-red-strong border border-st-red rounded-lg hover:bg-st-red-hover transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoomMessageBubble({ message, agents }: { message: RoomMessage; agents: HomeAgentDefinition[] }) {
   const isUser = message.role === "user";
   const label = isUser ? "You" : message.agent_key ? formatAgentLabel(message.agent_key) : "Archie";
-  const taggedAgent = isUser ? getTaggedAgentName(message) : null;
+  const taggedAgent = isUser ? getTaggedAgentName(message, agents) : null;
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -359,21 +413,21 @@ function isExecutionLogMessage(message: RoomMessage): boolean {
   return message.role === "system" && (message.kind === "execution_event" || message.kind === "error");
 }
 
-function getTaggedAgentName(message: RoomMessage): string | null {
+function getTaggedAgentName(message: RoomMessage, agents: HomeAgentDefinition[]): string | null {
   if (!message.payload_json) return null;
   try {
     const payload = JSON.parse(message.payload_json) as { target_agent_key?: unknown };
     if (typeof payload.target_agent_key !== "string") return null;
-    const agent = DEFAULT_HOME_AGENTS.find((candidate) => candidate.key === payload.target_agent_key);
+    const agent = agents.find((candidate) => candidate.key === payload.target_agent_key);
     return agent?.name || null;
   } catch {
     return null;
   }
 }
 
-function getAgentName(agentKey: string | null): string {
+function getAgentName(agentKey: string | null, agents: HomeAgentDefinition[]): string {
   if (!agentKey) return "Coordinator";
-  return DEFAULT_HOME_AGENTS.find((agent) => agent.key === agentKey)?.name || "Coordinator";
+  return agents.find((agent) => agent.key === agentKey)?.name || "Coordinator";
 }
 
 function formatAgentLabel(agentKey: string): string {
@@ -403,9 +457,8 @@ function PlanPanel({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
   const [autoGateRunKey, setAutoGateRunKey] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"planning" | "execution">("planning");
+  const [activeTab, setActiveTab] = useState<"plan" | "context" | "execution">("plan");
   const [now, setNow] = useState(() => Date.now());
 
   const plan = data?.plan || null;
@@ -414,6 +467,7 @@ function PlanPanel({
   const activeStep = steps.find((step) => ["implementing", "reviewing", "fixing", "validating", "committing"].includes(step.status));
   const nextPendingStep = steps.find((step) => step.status === "pending");
   const lastCompletedStep = [...steps].reverse().find((step) => step.status === "completed");
+  const executionWorkItemId = activeStep?.linked_work_item_id || [...steps].reverse().find((step) => step.linked_work_item_id)?.linked_work_item_id || null;
   const roomClosed = room?.status !== "open";
   const executionPaused = plan?.execution_state === "paused";
   const executionRunning = plan?.status === "executing" && plan.execution_state !== "paused";
@@ -423,9 +477,8 @@ function PlanPanel({
   ), [messages, plan?.execution_started_at]);
 
   useEffect(() => {
-    setPlanningContextCollapsed(true);
     setAutoGateRunKey(null);
-    setActiveTab("planning");
+    setActiveTab("plan");
   }, [room?.id]);
 
   const currentGate = activeStep?.events?.find((event) => (
@@ -526,34 +579,6 @@ function PlanPanel({
     }
   };
 
-  const handleStartGates = async (step: PlanStep) => {
-    if (!room || roomClosed || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await startPlanStepGates(appId, room.id, step.id);
-      await mutate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start review gates");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleAdvanceGate = async (step: PlanStep, status: "passed" | "failed") => {
-    if (!room || roomClosed || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await advancePlanStepGate(appId, room.id, step.id, { status });
-      await mutate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to advance review gate");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleMarkReady = async () => {
     if (!room || !plan || roomClosed || busy) return;
     setBusy(true);
@@ -568,23 +593,48 @@ function PlanPanel({
     }
   };
 
+  const handleUpdateStep = async (step: PlanStep, fields: PlanStepEditableFields): Promise<boolean> => {
+    if (!room || roomClosed || busy) return false;
+    setBusy(true);
+    setError(null);
+    try {
+      await updatePlanStep(appId, room.id, step.id, fields);
+      await mutate();
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update plan step");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-0 h-full">
-      <header className="h-10 px-2 border-b border-th flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => setActiveTab("planning")}
-          className={tabClass(activeTab === "planning")}
-        >
-          Planning Context
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("execution")}
-          className={tabClass(activeTab === "execution")}
-        >
-          Execution Log
-        </button>
+      <header className="h-10 px-2 border-b border-th flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 items-center bg-th-muted rounded-lg p-0.5">
+          <button
+            type="button"
+            onClick={() => setActiveTab("plan")}
+            className={planPanelTabClass(activeTab === "plan")}
+          >
+            Plan
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("context")}
+            className={planPanelTabClass(activeTab === "context")}
+          >
+            Planning Context
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("execution")}
+            className={planPanelTabClass(activeTab === "execution")}
+          >
+            Execution Log
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
@@ -594,44 +644,13 @@ function PlanPanel({
           <p className="text-sm text-th-muted">Select a room to draft a structured plan.</p>
         ) : activeTab === "execution" ? (
           <ExecutionLogPanel entries={executionLogEntries} />
+        ) : activeTab === "context" ? (
+          <PlanningContextPanel
+            planningContext={planningContext}
+            updated={Boolean(data?.planning_context_updated_at)}
+          />
         ) : (
           <>
-            <section className="rounded-lg border border-th bg-th-main p-3">
-              <button
-                type="button"
-                onClick={() => setPlanningContextCollapsed((collapsed) => !collapsed)}
-                aria-expanded={!planningContextCollapsed}
-                className="w-full flex items-center justify-between gap-2 text-left"
-              >
-                <span className="inline-flex min-w-0 items-center gap-2">
-                  {planningContextCollapsed ? (
-                    <CaretRight size={14} className="text-th-dimmed flex-shrink-0" />
-                  ) : (
-                    <CaretDown size={14} className="text-th-dimmed flex-shrink-0" />
-                  )}
-                  <span className="text-meta font-semibold text-th-dimmed uppercase tracking-wider truncate">
-                    Planning Context
-                  </span>
-                </span>
-                {data?.planning_context_updated_at && (
-                  <span className="text-meta text-th-dimmed flex-shrink-0">updated</span>
-                )}
-              </button>
-              {!planningContextCollapsed && (
-                <div className="mt-2">
-                  {planningContext.trim() ? (
-                    <div className={PROSE_CLASSES}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{planningContext}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-th-muted leading-relaxed">
-                      The working planning context will appear here as the room discussion develops.
-                    </p>
-                  )}
-                </div>
-              )}
-            </section>
-
             {isLoading ? (
               <p className="text-sm text-th-muted">Loading plan...</p>
             ) : !plan ? (
@@ -700,12 +719,12 @@ function PlanPanel({
                       )
                     )}
                   </div>
-                  {activeStep?.linked_work_item_id ? (
+                  {executionWorkItemId && (activeStep || plan.status === "completed") ? (
                     <button
-                      onClick={() => onOpenConversation(activeStep.linked_work_item_id!)}
+                      onClick={() => onOpenConversation(executionWorkItemId)}
                       className="w-full rounded-lg border border-th px-3 py-2 text-sm font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle"
                     >
-                      Open active task
+                      {plan.status === "completed" ? "Open task for approval" : "Open active task"}
                     </button>
                   ) : plan.status === "draft" && steps.length > 0 ? (
                     <button
@@ -730,7 +749,7 @@ function PlanPanel({
 
                 {plan.summary_md && (
                   <div className="rounded-lg border border-th bg-th-main p-3">
-                    <p className="text-xs text-th-muted leading-relaxed whitespace-pre-wrap">{plan.summary_md}</p>
+                    <p className="text-xs text-th-primary leading-relaxed whitespace-pre-wrap">{plan.summary_md}</p>
                   </div>
                 )}
 
@@ -748,9 +767,8 @@ function PlanPanel({
                           key={step.id}
                           step={step}
                           busy={busy}
-                          onStartGates={handleStartGates}
-                          onAdvanceGate={handleAdvanceGate}
-                          disabled={roomClosed || executionPaused}
+                          onUpdateStep={handleUpdateStep}
+                          editable={!roomClosed && (plan.status === "draft" || plan.status === "ready" || (plan.status === "executing" && executionPaused && step.status === "pending"))}
                         />
                       ))}
                     </div>
@@ -771,7 +789,6 @@ const GATE_LABELS: Record<string, string> = {
   code_review: "Review",
   security_review: "Security",
   qa_validation: "QA",
-  browser_validation: "Browser",
   commit: "Commit",
 };
 
@@ -784,13 +801,41 @@ type ExecutionLogEntry = {
   durationSincePreviousMs: number;
 };
 
-function tabClass(active: boolean): string {
+type PlanStepEditableFields = {
+  title?: string;
+  objective_md?: string;
+  risk_level?: PlanStep["risk_level"];
+  requires_architecture_review?: boolean;
+  requires_security_review?: boolean;
+};
+
+function planPanelTabClass(active: boolean): string {
   return [
-    "h-7 min-w-0 flex-1 truncate rounded-md px-1.5 text-meta font-medium transition-colors",
+    "flex min-w-0 flex-1 items-center justify-center gap-1 truncate rounded px-2 py-0.5 text-xs font-medium transition-colors",
     active
-      ? "bg-th-muted text-th-primary"
-      : "text-th-muted hover:text-th-primary hover:bg-th-subtle",
+      ? "bg-th-elevated text-th-primary shadow-sm"
+      : "text-th-muted hover:text-th-secondary",
   ].join(" ");
+}
+
+function PlanningContextPanel({ planningContext, updated }: { planningContext: string; updated: boolean }) {
+  return (
+    <section className="rounded-lg border border-th bg-th-main p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-meta font-semibold text-th-primary uppercase tracking-wider">Planning Context</p>
+        {updated && <span className="text-meta text-th-dimmed">updated</span>}
+      </div>
+      {planningContext.trim() ? (
+        <div className={PROSE_CLASSES}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{planningContext}</ReactMarkdown>
+        </div>
+      ) : (
+        <p className="text-xs text-th-muted leading-relaxed">
+          The working planning context will appear here as the room discussion develops.
+        </p>
+      )}
+    </section>
+  );
 }
 
 function buildExecutionLogEntries(messages: RoomMessage[], executionStartedAt: string | null): ExecutionLogEntry[] {
@@ -901,30 +946,60 @@ function statusBadgeClass(status: string): string {
   }
 }
 
+const COMPACT_PROSE_CLASSES =
+  "prose prose-sm max-w-none break-words text-th-secondary text-xs [&_p]:my-0.5 [&_p]:leading-relaxed [&_ul]:my-0.5 [&_ol]:my-0.5 [&_li]:my-0.5 [&_code]:bg-th-muted [&_code]:text-code-inline [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[11px]";
+
 function PlanStepCard({
   step,
   busy,
-  disabled,
-  onStartGates,
-  onAdvanceGate,
+  editable,
+  onUpdateStep,
 }: {
   step: PlanStep;
   busy: boolean;
-  disabled?: boolean;
-  onStartGates: (step: PlanStep) => void;
-  onAdvanceGate: (step: PlanStep, status: "passed" | "failed") => void;
+  editable?: boolean;
+  onUpdateStep: (step: PlanStep, fields: PlanStepEditableFields) => Promise<boolean>;
 }) {
-  const gates = [
-    step.requires_architecture_review ? "Architecture" : null,
-    step.requires_security_review ? "Security" : null,
-    step.requires_browser_validation ? "Browser" : null,
-  ].filter(Boolean);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    title: step.title,
+    objective_md: step.objective_md,
+    risk_level: step.risk_level,
+    requires_architecture_review: Boolean(step.requires_architecture_review),
+    requires_security_review: Boolean(step.requires_security_review),
+  });
   const events = step.events?.filter((event) => GATE_LABELS[event.phase]) || [];
-  const pendingEvent = events.find((event) => event.status === "pending");
   const runningEvent = events.find((event) => event.status === "running");
   const latestDetailedEvent = [...events].reverse().find((event) => (
     event.summary_md && event.summary_md !== GATE_LABELS[event.phase]
   ));
+  const hasDraftChanges = draft.title !== step.title ||
+    draft.objective_md !== step.objective_md ||
+    draft.risk_level !== step.risk_level ||
+    draft.requires_architecture_review !== Boolean(step.requires_architecture_review) ||
+    draft.requires_security_review !== Boolean(step.requires_security_review);
+
+  useEffect(() => {
+    setDraft({
+      title: step.title,
+      objective_md: step.objective_md,
+      risk_level: step.risk_level,
+      requires_architecture_review: Boolean(step.requires_architecture_review),
+      requires_security_review: Boolean(step.requires_security_review),
+    });
+    setEditing(false);
+  }, [step.id, step.objective_md, step.requires_architecture_review, step.requires_security_review, step.risk_level, step.title]);
+
+  const handleSave = async () => {
+    const saved = await onUpdateStep(step, {
+      title: draft.title.trim(),
+      objective_md: draft.objective_md.trim(),
+      risk_level: draft.risk_level,
+      requires_architecture_review: draft.requires_architecture_review,
+      requires_security_review: draft.requires_security_review,
+    });
+    if (saved) setEditing(false);
+  };
 
   return (
     <div className="rounded-lg border border-th bg-th-main p-3">
@@ -936,18 +1011,115 @@ function PlanStepCard({
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium text-th-primary truncate">{step.title}</p>
             <span className={`ml-auto text-meta font-semibold ${statusTextClass(step.status)}`}>{step.status}</span>
+            {editable && !editing && (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded-md p-1 text-th-muted hover:text-th-primary hover:bg-th-muted transition-colors"
+                title="Edit step"
+                aria-label="Edit step"
+              >
+                <PencilSimple size={12} weight="bold" />
+              </button>
+            )}
           </div>
-          {step.objective_md && (
-            <p className="mt-1 text-xs text-th-muted whitespace-pre-wrap leading-relaxed">{step.objective_md}</p>
+          {editing ? (
+            <div className="mt-3 space-y-3 rounded-lg border border-th bg-th-subtle p-3">
+              <label className="block space-y-1">
+                <span className="text-meta font-medium text-th-secondary">Title</span>
+                <input
+                  value={draft.title}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
+                  className="w-full rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-meta font-medium text-th-secondary">Description</span>
+                <textarea
+                  value={draft.objective_md}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, objective_md: event.target.value }))}
+                  rows={4}
+                  className="w-full resize-y rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs leading-relaxed text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                />
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-meta font-medium text-th-secondary">Risk</span>
+                  <select
+                    value={draft.risk_level}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, risk_level: event.target.value as PlanStep["risk_level"] }))}
+                    className="w-full rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <div className="space-y-1">
+                  <span className="text-meta font-medium text-th-secondary">Review gates</span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <ReviewToggle
+                      label="Architecture"
+                      checked={draft.requires_architecture_review}
+                      disabled={busy}
+                      onChange={(checked) => setDraft((prev) => ({ ...prev, requires_architecture_review: checked }))}
+                    />
+                    <ReviewToggle
+                      label="Security"
+                      checked={draft.requires_security_review}
+                      disabled={busy}
+                      onChange={(checked) => setDraft((prev) => ({ ...prev, requires_security_review: checked }))}
+                    />
+                    <ReviewToggle label="Review" checked disabled />
+                    <ReviewToggle label="QA" checked disabled />
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft({
+                      title: step.title,
+                      objective_md: step.objective_md,
+                      risk_level: step.risk_level,
+                      requires_architecture_review: Boolean(step.requires_architecture_review),
+                      requires_security_review: Boolean(step.requires_security_review),
+                    });
+                    setEditing(false);
+                  }}
+                  className="rounded-lg px-3 py-1.5 text-xs text-th-muted hover:text-th-primary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={busy || !hasDraftChanges || !draft.title.trim()}
+                  className="rounded-lg bg-btn-primary px-3 py-1.5 text-xs font-medium text-btn-primary hover:bg-btn-primary-hover disabled:opacity-50"
+                >
+                  {busy ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {step.objective_md && (
+                <p className="mt-1 text-xs text-th-muted whitespace-pre-wrap leading-relaxed">{step.objective_md}</p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-1">
+                <span className="rounded-full bg-th-muted px-2 py-0.5 text-meta text-th-dimmed">{step.risk_level} risk</span>
+                <span className={`rounded-full px-2 py-0.5 text-meta ${step.requires_architecture_review ? "bg-st-green text-st-green" : "bg-th-muted text-th-dimmed"}`}>
+                  Architecture: {step.requires_architecture_review ? "required" : "off"}
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-meta ${step.requires_security_review ? "bg-st-green text-st-green" : "bg-th-muted text-th-dimmed"}`}>
+                  Security: {step.requires_security_review ? "required" : "off"}
+                </span>
+                <span className="rounded-full bg-st-green px-2 py-0.5 text-meta text-st-green">Review: always</span>
+                <span className="rounded-full bg-st-green px-2 py-0.5 text-meta text-st-green">QA: always</span>
+              </div>
+            </>
           )}
-          <div className="mt-2 flex flex-wrap gap-1">
-            <span className="rounded-full bg-th-muted px-2 py-0.5 text-meta text-th-dimmed">{step.risk_level} risk</span>
-            {gates.map((gate) => (
-              <span key={gate} className="rounded-full bg-th-muted px-2 py-0.5 text-meta text-th-dimmed">
-                {gate}
-              </span>
-            ))}
-          </div>
           {events.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {events.map((event) => (
@@ -963,44 +1135,42 @@ function PlanStepCard({
             </p>
           )}
           {latestDetailedEvent && (
-            <div className="mt-2 rounded-lg border border-th bg-th-subtle p-2">
+            <div className="mt-2 rounded-lg border border-th bg-th-subtle px-2 py-1.5">
               <div className="mb-1 text-meta font-semibold uppercase tracking-wider text-th-dimmed">
                 {GATE_LABELS[latestDetailedEvent.phase]} feedback
               </div>
-              <div className={PROSE_CLASSES}>
+              <div className={COMPACT_PROSE_CLASSES}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{latestDetailedEvent.summary_md}</ReactMarkdown>
               </div>
-            </div>
-          )}
-          {(step.status === "implementing" || step.status === "fixing") && step.linked_work_item_id && (
-            <button
-              onClick={() => onStartGates(step)}
-              disabled={busy || disabled}
-              className="mt-3 w-full rounded-lg border border-th px-3 py-2 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
-            >
-              Start review gates
-            </button>
-          )}
-          {pendingEvent && !runningEvent && ["reviewing", "validating", "committing"].includes(step.status) && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                onClick={() => onAdvanceGate(step, "passed")}
-                disabled={busy || disabled}
-                className="rounded-lg border border-th px-3 py-2 text-xs font-medium text-th-secondary hover:text-th-primary hover:bg-th-subtle disabled:opacity-50"
-              >
-                Pass gate
-              </button>
-              <button
-                onClick={() => onAdvanceGate(step, "failed")}
-                disabled={busy || disabled}
-                className="rounded-lg border border-th px-3 py-2 text-xs font-medium text-st-red hover:bg-th-subtle disabled:opacity-50"
-              >
-                Needs fixes
-              </button>
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function ReviewToggle({
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange?: (checked: boolean) => void;
+}) {
+  return (
+    <label className={`flex items-center gap-1.5 rounded-lg border border-th bg-th-main px-2 py-1 text-meta text-th-secondary ${disabled ? "opacity-60" : ""}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange?.(event.target.checked)}
+        className="h-3 w-3 accent-brand-500"
+      />
+      <span className="truncate">{label}</span>
+    </label>
   );
 }

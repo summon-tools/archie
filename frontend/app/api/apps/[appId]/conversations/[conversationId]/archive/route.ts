@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { execFileSync } from "child_process";
 import { runStop } from "@/lib/server/runner";
 import { removeWorktree } from "@/lib/server/worktrees";
+import { handleRoomRouteError, requireConversationAccess } from "@/lib/server/room-route-utils";
 
 /**
  * POST /api/apps/{appId}/conversations/{conversationId}/archive
@@ -13,28 +13,19 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; conversationId: string }> }
 ) {
-  let user: { id: number };
   try {
-    user = await getAuthUser(request);
+    const { appId, conversationId } = await params;
+    const { app, conversation, user } = await requireConversationAccess(request, appId, conversationId);
+    return archiveConversation(app, conversation.id, user.id);
   } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
     throw e;
   }
+}
 
-  const { appId, conversationId } = await params;
-
-  const app = dal.getApp(Number(appId));
-  if (!app) {
-    return NextResponse.json({ detail: "App not found" }, { status: 404 });
-  }
-
-  const conversation = dal.getConversation(Number(conversationId));
-  if (!conversation || conversation.app_id !== Number(appId)) {
-    return NextResponse.json({ detail: "Conversation not found" }, { status: 404 });
-  }
-
+function archiveConversation(app: NonNullable<ReturnType<typeof dal.getApp>>, conversationId: number, userId: number) {
+  const conversation = dal.getConversation(conversationId)!;
   // Find linked work item (if any)
   const workItem = dal.getWorkItemByConversationId(conversation.id);
   const env = workItem ? dal.getWorkItemEnv(workItem.id) : undefined;
@@ -102,7 +93,7 @@ export async function POST(
     dal.updateWorkItem(workItem.id, {
       status: "done",
       completed_at: new Date().toISOString(),
-      completed_by_user_id: user.id,
+      completed_by_user_id: userId,
     });
   }
 

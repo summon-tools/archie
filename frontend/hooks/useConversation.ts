@@ -333,6 +333,7 @@ export function useConversation({
     if (activeClaudeStatus === "running" || activeClaudeStatus === "waiting_approval") return;
     if (activeClaudeStatus === "failed" || activeClaudeStatus === "stopped") return;
     if (sending) return;
+    if (workItem.origin_type === "room_plan") return;
     // Wait for worktree to be ready before sending
     if (workItem.worktree_status === "preparing") return;
 
@@ -367,6 +368,7 @@ export function useConversation({
     hasAssistantAfterLatestUser,
     activeClaudeStatus,
     workItem.description,
+    workItem.origin_type,
     workItem.worktree_status,
     workItem.id,
     sending,

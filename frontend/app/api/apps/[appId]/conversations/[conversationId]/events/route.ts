@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { subscribeConversation, getEventSeq } from "@/lib/server/conversation-events";
 import { getConversationMessages } from "@/lib/server/conversation";
+import { handleRoomRouteError, requireConversationAccess } from "@/lib/server/room-route-utils";
 
 /**
  * GET /api/apps/[appId]/conversations/[conversationId]/events
@@ -14,35 +14,15 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; conversationId: string }> }
 ) {
-  try {
-    await getAuthUser(request);
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return new Response(JSON.stringify({ detail: e.message }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    throw e;
-  }
-
   const { appId, conversationId } = await params;
-  const numericConversationId = Number(conversationId);
-
-  const app = dal.getApp(Number(appId));
-  if (!app) {
-    return new Response(JSON.stringify({ detail: "App not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const conversation = dal.getConversation(numericConversationId);
-  if (!conversation || conversation.app_id !== app.id) {
-    return new Response(JSON.stringify({ detail: "Conversation not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
+  let numericConversationId: number;
+  try {
+    const access = await requireConversationAccess(request, appId, conversationId);
+    numericConversationId = access.conversation.id;
+  } catch (e) {
+    const errorResponse = handleRoomRouteError(e);
+    if (errorResponse) return errorResponse;
+    throw e;
   }
 
   // Check Last-Event-ID for reconnection

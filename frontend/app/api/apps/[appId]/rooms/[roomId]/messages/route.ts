@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { createRoomAgentReply } from "@/lib/server/room-agents";
-import { DEFAULT_HOME_AGENTS } from "@/lib/home/agents";
+import { isHomeAgentKey } from "@/lib/home/agents";
 import { handleRoomRouteError, readJsonBody, requireRoomAccess } from "@/lib/server/room-route-utils";
 
 export async function GET(
@@ -34,7 +34,7 @@ export async function POST(
       return NextResponse.json({ detail: "content is required" }, { status: 400 });
     }
     const targetAgentKey = typeof body.target_agent_key === "string" ? body.target_agent_key : null;
-    if (targetAgentKey && !DEFAULT_HOME_AGENTS.some((agent) => agent.key === targetAgentKey)) {
+    if (targetAgentKey && !isHomeAgentKey(targetAgentKey)) {
       return NextResponse.json({ detail: "Unknown agent tag" }, { status: 400 });
     }
 
