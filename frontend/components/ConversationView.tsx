@@ -172,11 +172,14 @@ export default function ConversationView({
   // otherwise classify intent, then route to tool or Claude.
   const handleSmartSend = useCallback(async () => {
     const text = conversation.inputText.trim();
-    if (!text || submitting) return;
+    const attachments = conversation.inputAttachments;
+    const fileIds = attachments.map((file) => file.id);
+    if ((!text && attachments.length === 0) || submitting) return;
 
     // Immediately clear input and show busy state — prevents double-clicks
     setSubmitting(true);
     conversation.setInputText("");
+    conversation.setInputAttachments([]);
 
     // Optimistically append the user message so it appears instantly
     const optimisticMsg = {
@@ -188,17 +191,18 @@ export default function ConversationView({
       created_by_name: null,
       created_by_color: null,
       created_at: new Date().toISOString(),
+      attachments,
     };
     conversation.setMessages((prev: any[]) => [...prev, optimisticMsg]);
     conversation.markOptimisticPending();
 
     try {
       // If user pinned a tool, use it directly (no classification)
-      if (pinnedToolId && toolStates) {
+      if (text && pinnedToolId && toolStates) {
         const toolState = toolStates.get(pinnedToolId);
         if (toolState) {
           setPinnedToolId(null);
-          await sendConversationMessage(appId, workItem.primary_conversation_id!, text, "user");
+          await sendConversationMessage(appId, workItem.primary_conversation_id!, text, "user", undefined, fileIds);
           await toolState.execute(text);
           await conversation.reloadMessages();
           return;
@@ -206,13 +210,13 @@ export default function ConversationView({
       }
 
       // Otherwise, classify intent
-      if (toolStates) {
+      if (text && toolStates) {
         try {
           const intent = await classifyIntent(appId, text);
           const toolState = toolStates.get(intent);
 
           if (toolState) {
-            await sendConversationMessage(appId, workItem.primary_conversation_id!, text, "user");
+            await sendConversationMessage(appId, workItem.primary_conversation_id!, text, "user", undefined, fileIds);
             await toolState.execute(text);
             await conversation.reloadMessages();
             return;
@@ -223,7 +227,12 @@ export default function ConversationView({
       }
 
       // Fall through to Claude — use consumeStream directly
-      await conversation.consumeStream(text);
+      await conversation.consumeStream(text, false, fileIds);
+    } catch (err) {
+      conversation.setInputText(text);
+      conversation.setInputAttachments(attachments);
+      await conversation.reloadMessages().catch(() => {});
+      console.error("Failed to send message:", err);
     } finally {
       setSubmitting(false);
     }
@@ -294,10 +303,13 @@ export default function ConversationView({
       {/* Hide input for archived conversations — read-only */}
       {!isArchived && (
         <ConversationInput
+          appId={appId}
           toolActivities={conversation.toolActivities}
           worktreeReady={worktreeReady}
           inputText={conversation.inputText}
           setInputText={conversation.setInputText}
+          inputAttachments={conversation.inputAttachments}
+          setInputAttachments={conversation.setInputAttachments}
           handleSendMessage={handleSmartSend}
           sending={conversation.sending || submitting}
           isClaudeActive={conversation.isClaudeActive}

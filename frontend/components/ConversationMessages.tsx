@@ -95,6 +95,7 @@ export default function ConversationMessages({
               messageType={msg.message_type}
               senderName={msg.role === "user" ? msg.created_by_name : undefined}
               senderColor={msg.role === "user" ? msg.created_by_color : undefined}
+              attachments={msg.attachments}
             />
           );
         })}

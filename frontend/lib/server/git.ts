@@ -26,6 +26,7 @@ dashboard.db
 .archie/logs/
 .archie/pids/
 .archie/videos/
+.archie/context-files/
 
 # Claude
 claude_logs/
@@ -49,6 +50,7 @@ out/
 .archie/logs/
 .archie/pids/
 .archie/videos/
+.archie/context-files/
 
 # Environment
 .env
@@ -73,6 +75,7 @@ dist-ssr/
 .archie/logs/
 .archie/pids/
 .archie/videos/
+.archie/context-files/
 
 # Environment
 .env
@@ -84,7 +87,7 @@ dist-ssr/
 `,
 };
 
-const CRITICAL_IGNORES = [".archie/logs/", ".archie/pids/", ".archie/videos/"];
+const CRITICAL_IGNORES = [".archie/logs/", ".archie/pids/", ".archie/videos/", ".archie/context-files/"];
 const LEGACY_IGNORES = [".archie/seed.sh", ".logs/", ".pids/", "start.sh", "stop.sh", ".preview-start.sh", ".preview-stop.sh"];
 
 function runGit(directory: string, args: string[], timeout = 30000): string {

@@ -2,6 +2,8 @@
 
 import { useRef, useEffect, useCallback, useState } from "react";
 import { Stop, SpinnerGap, ArrowUp, Lightning, X, CaretDown } from "@phosphor-icons/react";
+import { AttachmentUploadTray } from "@/components/Attachments";
+import type { AppFile } from "@/lib/types";
 import type { Tool } from "@/tools/types";
 
 interface ChatInputProps {
@@ -24,6 +26,9 @@ interface ChatInputProps {
   toolsBusy?: boolean;
   branchName?: string | null;
   isWorktree?: boolean;
+  appId?: number;
+  attachments?: AppFile[];
+  onAttachmentsChange?: (files: AppFile[]) => void;
 }
 
 export default function ChatInput({
@@ -46,6 +51,9 @@ export default function ChatInput({
   toolsBusy = false,
   branchName,
   isWorktree,
+  appId,
+  attachments = [],
+  onAttachmentsChange,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showToolPicker, setShowToolPicker] = useState(false);
@@ -90,7 +98,7 @@ export default function ChatInput({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (value.trim() && !disabled && !isLoading) {
+      if ((value.trim() || attachments.length > 0) && !disabled && !isLoading) {
         onSubmit();
       }
     }
@@ -100,7 +108,7 @@ export default function ChatInput({
     }
   };
 
-  const canSend = value.trim() && !disabled && !isLoading;
+  const canSend = (value.trim() || attachments.length > 0) && !disabled && !isLoading;
 
   return (
     <div className="flex-shrink-0 bg-transparent px-4 py-3">
@@ -138,6 +146,17 @@ export default function ChatInput({
                 : "border-th focus-within:border-th-strong"
           }`}
         >
+          {appId && onAttachmentsChange && (
+            <div className="pb-2">
+              <AttachmentUploadTray
+                appId={appId}
+                attachments={attachments}
+                onChange={onAttachmentsChange}
+                disabled={disabled || isLoading}
+              />
+            </div>
+          )}
+
           {/* Textarea + send button row */}
           <div className="flex items-end gap-2">
             <textarea

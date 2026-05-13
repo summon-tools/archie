@@ -1,4 +1,4 @@
-import { App, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption } from "./types";
 
 const BASE = "/api";
 
@@ -124,18 +124,33 @@ export async function getConversationMessages(appId: number, conversationId: num
   return data.messages;
 }
 
-export async function sendConversationMessage(appId: number, conversationId: number, content: string, role: "user" | "assistant" = "user", messageType?: string): Promise<{ message: string }> {
+export async function sendConversationMessage(
+  appId: number,
+  conversationId: number,
+  content: string,
+  role: "user" | "assistant" = "user",
+  messageType?: string,
+  fileIds: number[] = [],
+): Promise<{ message: string }> {
   return fetchJSON(`${BASE}/apps/${appId}/conversations/${conversationId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content, role, message_type: messageType }),
+    body: JSON.stringify({ content, role, message_type: messageType, file_ids: fileIds.length ? fileIds : undefined }),
   });
 }
 
-export async function streamConversationMessage(appId: number, conversationId: number, content: string, model?: string, retry?: boolean, provider?: string): Promise<Response> {
+export async function streamConversationMessage(
+  appId: number,
+  conversationId: number,
+  content: string,
+  model?: string,
+  retry?: boolean,
+  provider?: string,
+  fileIds: number[] = [],
+): Promise<Response> {
   const res = await fetch(`${BASE}/apps/${appId}/conversations/${conversationId}/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, model, provider, retry: retry || undefined }),
+    body: JSON.stringify({ content, model, provider, retry: retry || undefined, file_ids: fileIds.length ? fileIds : undefined }),
   });
   if (res.status === 401) {
     window.location.href = "/login";
@@ -170,10 +185,10 @@ export async function getWorkItems(appId: number): Promise<Task[]> {
   return data.work_items;
 }
 
-export async function createWorkItem(appId: number, message: string, taskType?: string): Promise<Task> {
+export async function createWorkItem(appId: number, message: string, taskType?: string, fileIds: number[] = []): Promise<Task> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items`, {
     method: "POST",
-    body: JSON.stringify({ message, task_type: taskType }),
+    body: JSON.stringify({ message, task_type: taskType, file_ids: fileIds.length ? fileIds : undefined }),
   });
 }
 
@@ -250,18 +265,18 @@ export async function getRoomMessages(appId: number, roomId: number): Promise<Ro
   return data.messages;
 }
 
-export async function sendRoomMessage(appId: number, roomId: number, content: string, targetAgentKey?: string | null): Promise<RoomMessage> {
+export async function sendRoomMessage(appId: number, roomId: number, content: string, targetAgentKey?: string | null, fileIds: number[] = []): Promise<RoomMessage> {
   return fetchJSON(`${BASE}/apps/${appId}/rooms/${roomId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content, target_agent_key: targetAgentKey || undefined }),
+    body: JSON.stringify({ content, target_agent_key: targetAgentKey || undefined, file_ids: fileIds.length ? fileIds : undefined }),
   });
 }
 
-export async function streamRoomMessage(appId: number, roomId: number, content: string, targetAgentKey?: string | null): Promise<Response> {
+export async function streamRoomMessage(appId: number, roomId: number, content: string, targetAgentKey?: string | null, fileIds: number[] = []): Promise<Response> {
   const res = await fetch(`${BASE}/apps/${appId}/rooms/${roomId}/messages/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, target_agent_key: targetAgentKey || undefined }),
+    body: JSON.stringify({ content, target_agent_key: targetAgentKey || undefined, file_ids: fileIds.length ? fileIds : undefined }),
   });
   if (res.status === 401) {
     window.location.href = "/login";
@@ -578,6 +593,40 @@ export interface ScriptContents { start_sh: string | null; stop_sh: string | nul
 
 export async function getScripts(appId: number): Promise<ScriptContents> {
   return fetchJSON<ScriptContents>(`${BASE}/apps/${appId}/scripts`);
+}
+
+// --- App files ---
+
+export async function getAppFiles(appId: number, includeDeleted = false): Promise<AppFile[]> {
+  const suffix = includeDeleted ? "?include_deleted=true" : "";
+  const data = await fetchJSON<{ files: AppFile[] }>(`${BASE}/apps/${appId}/files${suffix}`);
+  return data.files;
+}
+
+export async function uploadAppFile(appId: number, file: File): Promise<AppFile> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${BASE}/apps/${appId}/files`, {
+    method: "POST",
+    body: formData,
+  });
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Not authenticated");
+  }
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  const data = await res.json() as { file: AppFile };
+  return data.file;
+}
+
+export async function deleteAppFile(appId: number, fileId: number): Promise<AppFile> {
+  const data = await fetchJSON<{ file: AppFile }>(`${BASE}/apps/${appId}/files/${fileId}`, {
+    method: "DELETE",
+  });
+  return data.file;
 }
 
 // --- User management endpoints ---

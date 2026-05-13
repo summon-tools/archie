@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isHomeAgentKey } from "@/lib/home/agents";
 import * as dal from "@/lib/server/dal";
+import { serializeAppFile } from "@/lib/server/file-storage";
 import { createRoomAgentReplyStream } from "@/lib/server/room-agents";
-import { handleRoomRouteError, readJsonBody, requireRoomAccess, serializeRoomPlan } from "@/lib/server/room-route-utils";
+import { handleRoomRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireRoomAccess, serializeRoomPlan } from "@/lib/server/room-route-utils";
+import type { RoomMessageRow } from "@/lib/server/types";
 
 function streamEvent(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function serializeRoomMessage(appId: number, message: RoomMessageRow) {
+  return {
+    ...message,
+    attachments: dal.getFilesForRoomMessage(appId, message.id).map(serializeAppFile),
+  };
 }
 
 export async function POST(
@@ -22,9 +31,11 @@ export async function POST(
 
     const body = await readJsonBody(request);
     const content = typeof body.content === "string" ? body.content.trim() : "";
-    if (!content) {
+    const fileIds = parseFileIds(body.file_ids);
+    if (!content && fileIds.length === 0) {
       return NextResponse.json({ detail: "content is required" }, { status: 400 });
     }
+    requireAvailableAppFiles(app.id, fileIds);
 
     const targetAgentKey = typeof body.target_agent_key === "string" ? body.target_agent_key : null;
     if (targetAgentKey && !isHomeAgentKey(targetAgentKey)) {
@@ -38,6 +49,13 @@ export async function POST(
       body_md: content,
       author_user_id: authUser.id,
       payload_json: targetAgentKey ? JSON.stringify({ target_agent_key: targetAgentKey }) : null,
+    });
+    dal.linkAppFiles({
+      app_id: app.id,
+      file_ids: fileIds,
+      room_id: room.id,
+      room_message_id: userMessage.id,
+      link_type: "attachment",
     });
 
     const encoder = new TextEncoder();
@@ -54,7 +72,7 @@ export async function POST(
           }
         };
 
-        send("message", userMessage);
+        send("message", serializeRoomMessage(app.id, userMessage));
         send("status", { status: "running" });
 
         try {
@@ -73,7 +91,7 @@ export async function POST(
             },
           });
 
-          send("message", reply);
+          send("message", serializeRoomMessage(app.id, reply));
           send("status", { status: "completed" });
           send("done", { message_id: reply.id });
         } catch (error) {
@@ -86,7 +104,7 @@ export async function POST(
             body_md: "I saved your message, but the room agent could not complete the reply. Try again in a moment.",
             payload_json: JSON.stringify({ error: detail }),
           });
-          send("message", errorMessage);
+          send("message", serializeRoomMessage(app.id, errorMessage));
           send("error", { error: "Room agent failed", detail });
           send("done", { message_id: errorMessage.id });
         } finally {

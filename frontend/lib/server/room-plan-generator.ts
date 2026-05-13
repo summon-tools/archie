@@ -3,6 +3,7 @@ import { getProvider, type AgentProvider, type ToolStreamEvent } from "@/lib/ser
 import { resolveHomeAgent } from "@/lib/server/home-agent-configs";
 import * as dal from "./dal";
 import { getDb } from "./db";
+import { cleanupMaterializedFilesForContext, formatAttachmentContext, materializeFilesForContext } from "./file-storage";
 import { updateRoomPlanningContextFromStructuredPlan } from "./room-planning-context";
 import type { AppRow, HomeRoomRow, PlanRow, PlanStepRiskLevel, PlanStepRow, RoomMessageRow } from "./types";
 
@@ -85,6 +86,11 @@ function buildPlanGenerationPrompt({
   const existingSteps = existingPlan ? dal.getPlanSteps(existingPlan.id) : [];
   const planningContext = room.planning_context_md?.trim();
   const recentMessages = dal.getRoomMessages(room.id, MAX_PLAN_CONTEXT_MESSAGES);
+  const attachmentContext = formatAttachmentContext(materializeFilesForContext({
+    appId: app.id,
+    targetDirectory: app.directory,
+    files: dal.getFilesForRoom(app.id, room.id).filter((file) => file.status === "available"),
+  }));
 
   return [
     "You are generating the structured execution plan for an Archie planning room.",
@@ -94,6 +100,7 @@ function buildPlanGenerationPrompt({
     contextBlock("agent_prompt", agent.prompt, MAX_CONTEXT_CHARS),
     "",
     "Inspect the repository as needed before deciding the plan.",
+    "Attached files are available as local readable paths when listed below. Inspect them directly when their details matter, and do not claim visual or file details unless you actually inspect the file.",
     "This is read-only planning. Do not edit files, install dependencies, change git state, or commit.",
     "You must generate a draft plan now. Do not ask clarifying questions instead of returning the JSON.",
     "If details are missing, make conservative assumptions and keep any non-blocking uncertainty in acceptance_criteria_md.",
@@ -132,6 +139,8 @@ function buildPlanGenerationPrompt({
     room.purpose ? `Room purpose: ${room.purpose}` : null,
     planningContext ? "Planning context summary:" : "Planning context summary: none yet",
     planningContext ? contextBlock("planning_context", planningContext, MAX_CONTEXT_CHARS) : null,
+    attachmentContext ? "" : null,
+    attachmentContext ? contextBlock("attached_files", attachmentContext, MAX_CONTEXT_CHARS) : null,
     "",
     existingPlan ? `Existing plan: ${existingPlan.title} (${existingPlan.status})` : "Existing plan: none",
     existingSteps.length > 0 ? "Existing steps:" : null,
@@ -521,5 +530,7 @@ export async function generateRoomPlanFromDiscussion({
       error_text: error instanceof Error ? error.message : "Unknown plan generation error",
     });
     throw error;
+  } finally {
+    cleanupMaterializedFilesForContext({ appId: app.id, targetDirectory: app.directory });
   }
 }

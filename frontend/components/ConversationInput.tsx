@@ -3,14 +3,18 @@
 import ChatInput from "@/components/ChatInput";
 import ToolActivity from "@/components/ToolActivity";
 import { ToolActivity as ToolActivityType } from "@/hooks/useConversation";
+import type { AppFile } from "@/lib/types";
 import { tools } from "@/tools/registry";
 import type { ToolState } from "@/tools/types";
 
 interface ConversationInputProps {
+  appId: number;
   toolActivities: ToolActivityType[];
   worktreeReady: boolean;
   inputText: string;
   setInputText: (v: string) => void;
+  inputAttachments: AppFile[];
+  setInputAttachments: (files: AppFile[]) => void;
   handleSendMessage: () => void;
   sending: boolean;
   isClaudeActive: boolean;
@@ -27,10 +31,13 @@ interface ConversationInputProps {
 }
 
 export default function ConversationInput({
+  appId,
   toolActivities,
   worktreeReady,
   inputText,
   setInputText,
+  inputAttachments,
+  setInputAttachments,
   handleSendMessage,
   sending,
   isClaudeActive,
@@ -84,6 +91,9 @@ export default function ConversationInput({
         toolsBusy={isBusy}
         branchName={branchName}
         isWorktree={isWorktree}
+        appId={appId}
+        attachments={inputAttachments}
+        onAttachmentsChange={setInputAttachments}
       />
     </div>
   );

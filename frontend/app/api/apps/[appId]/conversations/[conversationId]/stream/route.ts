@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { streamConversationMessage } from "@/lib/server/conversation";
-import { handleRoomRouteError, readJsonBody, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { handleRoomRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireConversationAccess } from "@/lib/server/room-route-utils";
 
 export async function POST(
   request: NextRequest,
@@ -12,23 +12,26 @@ export async function POST(
 
     const body = await readJsonBody(request);
     const { content, model, provider, retry } = body;
+    const fileIds = parseFileIds(body.file_ids);
 
-    if (!content || typeof content !== "string") {
+    if ((!content || typeof content !== "string") && fileIds.length === 0) {
       return NextResponse.json(
         { detail: "content is required" },
         { status: 400 }
       );
     }
+    requireAvailableAppFiles(access.app.id, fileIds);
 
     const stream = await streamConversationMessage(
       access.conversation.id,
-      content,
+      typeof content === "string" ? content : "",
       access.app.name,
       access.app.directory,
       typeof model === "string" ? model : undefined,
       access.user.id,
       !!retry,
-      typeof provider === "string" ? provider : undefined
+      typeof provider === "string" ? provider : undefined,
+      fileIds,
     );
 
     return new Response(stream, {

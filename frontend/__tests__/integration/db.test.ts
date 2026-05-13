@@ -28,6 +28,8 @@ afterEach(() => {
 async function getTestDb() {
   vi.doMock("@/lib/server/config", () => ({
     DB_PATH: dbPath,
+    DATA_DIR: tmpDir,
+    UPLOADS_DIR: path.join(tmpDir, "uploads"),
     MODE: "development",
     AUTH_SECRET_KEY: "",
     HOST: "127.0.0.1",
@@ -66,6 +68,8 @@ describe("Database initialization", () => {
     expect(tables).toContain("agent_sessions");
     expect(tables).toContain("runs");
     expect(tables).toContain("artifacts");
+    expect(tables).toContain("app_files");
+    expect(tables).toContain("app_file_links");
     expect(tables).toContain("app_tool_configs");
     expect(tables).toContain("system_settings");
     expect(tables).toContain("terminal_sessions");

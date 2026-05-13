@@ -6,6 +6,7 @@ import { getAuthUser, requireAdmin, AuthError, ForbiddenError } from "@/lib/serv
 import { checkPortSync, stopApp } from "@/lib/server/apps";
 import { detectTechStack } from "@/lib/server/techstack";
 import * as dal from "@/lib/server/dal";
+import { deleteAppUploadDirectory, deleteStoredFile } from "@/lib/server/file-storage";
 
 export async function GET(
   request: NextRequest,
@@ -125,8 +126,14 @@ export async function DELETE(
       }
     }
 
+    const uploadedFiles = dal.listAppFiles(id, true);
+
     // Clean up DB records (cascading delete handles conversations via FK)
     dal.deleteApp(id);
+    for (const file of uploadedFiles) {
+      deleteStoredFile(file);
+    }
+    deleteAppUploadDirectory(id);
 
     // Optionally remove the project directory
     if (deleteFiles && app.directory && fs.existsSync(app.directory)) {

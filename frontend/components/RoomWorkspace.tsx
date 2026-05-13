@@ -7,9 +7,10 @@ import remarkGfm from "remark-gfm";
 import { ChatsCircle, CheckCircle, DotsThree, Flag, PauseCircle, Pencil, PencilSimple, PlayCircle, Sparkle, Timer } from "@phosphor-icons/react";
 import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, streamRoomMessage, updatePlanStep, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
-import type { HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
+import type { AppFile, HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS, type HomeAgentDefinition } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
+import { MessageAttachmentList } from "@/components/Attachments";
 import RoomChatInput from "@/components/RoomChatInput";
 import ToolActivity from "@/components/ToolActivity";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -67,6 +68,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     maxWidth: 84,
   });
   const [messageDraft, setMessageDraft] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<AppFile[]>([]);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [pendingMessages, setPendingMessages] = useState<RoomMessage[]>([]);
@@ -100,8 +102,9 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   }, [visibleMessages.length, streamContent, toolActivities.length, sendingMessage]);
 
   const handleSendRoomMessage = async () => {
-    if (!room || !messageDraft.trim() || sendingMessage) return;
+    if (!room || (!messageDraft.trim() && pendingAttachments.length === 0) || sendingMessage) return;
     const content = messageDraft.trim();
+    const attachments = pendingAttachments;
     const targetAgentKey = selectedAgentKey;
     const optimisticMessage: RoomMessage = {
       id: -Date.now(),
@@ -113,16 +116,18 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       body_md: content,
       payload_json: targetAgentKey ? JSON.stringify({ target_agent_key: targetAgentKey }) : null,
       created_at: new Date().toISOString(),
+      attachments,
     };
     setSendingMessage(true);
     setMessageError(null);
     setMessageDraft("");
+    setPendingAttachments([]);
     setStreamContent("");
     setToolActivities([]);
     setThinkingAgentKey(targetAgentKey || "coordinator");
     setPendingMessages((prev) => [...prev, optimisticMessage]);
     try {
-      const response = await streamRoomMessage(appId, room.id, content, targetAgentKey);
+      const response = await streamRoomMessage(appId, room.id, content, targetAgentKey, attachments.map((file) => file.id));
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No response body");
 
@@ -174,6 +179,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       setSelectedAgentKey(null);
     } catch (err) {
       setMessageDraft(content);
+      setPendingAttachments(attachments);
       setMessageError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
@@ -196,6 +202,8 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             messages={visibleMessages}
             draft={messageDraft}
             setDraft={setMessageDraft}
+            attachments={pendingAttachments}
+            setAttachments={setPendingAttachments}
             sending={sendingMessage}
             error={messageError}
             streamContent={streamContent}
@@ -263,6 +271,8 @@ function RoomShell({
   messages,
   draft,
   setDraft,
+  attachments,
+  setAttachments,
   sending,
   error,
   streamContent,
@@ -280,6 +290,8 @@ function RoomShell({
   messages: RoomMessage[];
   draft: string;
   setDraft: (value: string) => void;
+  attachments: AppFile[];
+  setAttachments: (files: AppFile[]) => void;
   sending: boolean;
   error: string | null;
   streamContent: string;
@@ -352,6 +364,9 @@ function RoomShell({
             value={draft}
             onChange={setDraft}
             onSubmit={onSend}
+            appId={room.app_id}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
             agents={agents}
             selectedAgentKey={selectedAgentKey}
             onSelectAgent={setSelectedAgentKey}
@@ -623,12 +638,15 @@ const RoomMessageBubble = memo(function RoomMessageBubble({ message, agents }: {
           )}
         </div>
         {isUser ? (
-          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p>
+          message.body_md ? <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p> : null
         ) : (
-          <div className={PROSE_CLASSES}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.body_md}</ReactMarkdown>
-          </div>
+          message.body_md ? (
+            <div className={PROSE_CLASSES}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.body_md}</ReactMarkdown>
+            </div>
+          ) : null
         )}
+        <MessageAttachmentList attachments={message.attachments} />
       </div>
     </div>
   );

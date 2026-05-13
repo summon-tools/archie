@@ -228,6 +228,12 @@ export function launchNextPlanStep({
       origin_type: "room_plan",
       origin_automation_key: `room:${room.id}:plan:${freshPlan.id}`,
     });
+    dal.linkRoomFilesToWorkItem({
+      app_id: app.id,
+      room_id: room.id,
+      work_item_id: workItem.id,
+      conversation_id: conversation.id,
+    });
     const worktreeEnv = dal.getWorkItemEnv(workItem.id);
     const baseCommitSha = nextStep.base_commit_sha || getCurrentHeadCommitSha(worktreeEnv?.worktree_dir || app.directory);
 
