@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
-import { handleRoomRouteError, readJsonBody, requireAppAccess } from "@/lib/server/room-route-utils";
+import { handleRoomRouteError, parseFileIds, readJsonBody, requireAppAccess, requireAvailableAppFiles } from "@/lib/server/room-route-utils";
 import type { WorkItemKind } from "@/lib/server/types";
 
 function parseWorkItemKind(value: unknown): WorkItemKind {
@@ -39,16 +39,20 @@ export async function POST(
 
     const body = await readJsonBody(request);
     const message = body.message;
-    if (!message || typeof message !== "string") {
+    const fileIds = parseFileIds(body.file_ids);
+    if ((!message || typeof message !== "string") && fileIds.length === 0) {
       return NextResponse.json({ detail: "message is required" }, { status: 400 });
     }
+    requireAvailableAppFiles(access.app.id, fileIds);
 
     const taskType = parseWorkItemKind(body.task_type);
+    const bodyMd = typeof message === "string" ? message : "";
 
     // Auto-generate title from message
-    const title = message.length > 60
-      ? message.slice(0, 60) + "..."
-      : message;
+    const titleSource = bodyMd.trim() || "File attachment task";
+    const title = titleSource.length > 60
+      ? titleSource.slice(0, 60) + "..."
+      : titleSource;
 
     // Create conversation first
     const conversation = dal.createConversation({
@@ -63,17 +67,25 @@ export async function POST(
       app_id: access.app.id,
       primary_conversation_id: conversation.id,
       title,
-      summary: message,
+      summary: bodyMd,
       kind: taskType,
       created_by: access.user.id,
     });
 
     // Add the initial user message to the conversation
-    dal.createMessage({
+    const initialMessage = dal.createMessage({
       conversation_id: conversation.id,
       role: "user",
       author_user_id: access.user.id,
-      body_md: message,
+      body_md: bodyMd,
+    });
+    dal.linkAppFiles({
+      app_id: access.app.id,
+      file_ids: fileIds,
+      conversation_id: conversation.id,
+      message_id: initialMessage.id,
+      work_item_id: workItem.id,
+      link_type: "attachment",
     });
 
     const enriched = enrichWorkItem({

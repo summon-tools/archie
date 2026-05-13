@@ -129,6 +129,39 @@ export interface ArtifactRow {
   created_at: string;
 }
 
+export type AppFileStatus = "uploading" | "available" | "deleted";
+export type AppFileLinkType = "attachment" | "context";
+
+export interface AppFileRow {
+  id: number;
+  app_id: number;
+  uploaded_by_user_id: number | null;
+  original_name: string;
+  stored_name: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  storage_path: string;
+  status: AppFileStatus;
+  metadata_json: string | null;
+  created_at: string;
+  deleted_at: string | null;
+}
+
+export interface AppFileLinkRow {
+  id: number;
+  app_id: number;
+  app_file_id: number;
+  room_id: number | null;
+  room_message_id: number | null;
+  conversation_id: number | null;
+  message_id: number | null;
+  work_item_id: number | null;
+  plan_step_id: number | null;
+  link_type: AppFileLinkType;
+  created_at: string;
+}
+
 export interface AppToolConfigRow {
   app_id: number;
   tool_key: string;

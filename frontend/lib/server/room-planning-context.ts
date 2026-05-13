@@ -1,6 +1,7 @@
 import type { HomeAgentDefinition } from "@/lib/home/agents";
 import type { AgentProvider, ToolStreamEvent } from "@/lib/server/agent";
 import * as dal from "./dal";
+import { cleanupMaterializedFilesForContext, formatAttachmentContext, materializeFilesForContext } from "./file-storage";
 import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
 
 const MAX_CONTEXT_MESSAGES = 16;
@@ -47,6 +48,14 @@ function buildContextSummaryPrompt({
   const steps = plan ? dal.getPlanSteps(plan.id) : [];
   const recentMessages = dal.getRoomMessages(room.id, MAX_CONTEXT_MESSAGES);
   const currentContext = currentRoom.planning_context_md?.trim();
+  const attachedFiles = dal.getFilesForRoom(app.id, room.id).filter((file) => file.status === "available");
+  const attachmentContext = attachedFiles.length > 0
+    ? formatAttachmentContext(materializeFilesForContext({
+        appId: app.id,
+        targetDirectory: app.directory,
+        files: attachedFiles,
+      }))
+    : "";
 
   return [
     "Update the room planning context summary for an Archie planning room.",
@@ -57,6 +66,7 @@ function buildContextSummaryPrompt({
     "",
     "This summary is not the structured execution plan. It captures the working plan being discussed before or alongside the structured plan.",
     "You may inspect the repository only if the latest exchange references code facts that are not already clear from the transcript.",
+    "Attached files are available as local readable paths when present. Inspect them directly before relying on file contents or visual details.",
     "Do not edit files, install dependencies, change git state, or commit.",
     "",
     "Return markdown only, with these headings:",
@@ -80,6 +90,7 @@ function buildContextSummaryPrompt({
     "",
     currentContext ? "Existing planning context summary:" : "Existing planning context summary: none yet",
     currentContext ? contextBlock("existing_planning_context", currentContext, MAX_CONTEXT_CHARS) : null,
+    attachmentContext ? contextBlock("attached_files", attachmentContext, MAX_CONTEXT_CHARS) : null,
     "",
     plan ? `Structured plan: ${plan.title} (${plan.status})` : "Structured plan: none created yet",
     steps.length > 0 ? "Structured plan steps:" : null,
@@ -156,6 +167,8 @@ export async function refreshRoomPlanningContext({
     return summary;
   } catch {
     return null;
+  } finally {
+    cleanupMaterializedFilesForContext({ appId: app.id, targetDirectory: app.directory });
   }
 }
 

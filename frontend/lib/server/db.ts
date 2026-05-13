@@ -192,6 +192,55 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_artifacts_kind ON artifacts(kind);
     CREATE INDEX IF NOT EXISTS idx_artifacts_app_kind ON artifacts(app_id, kind) WHERE work_item_id IS NULL;
 
+    CREATE TABLE IF NOT EXISTS app_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      uploaded_by_user_id INTEGER DEFAULT NULL,
+      original_name TEXT NOT NULL,
+      stored_name TEXT NOT NULL,
+      content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      size_bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'available' CHECK(status IN ('uploading', 'available', 'deleted')),
+      metadata_json TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      deleted_at TEXT DEFAULT NULL,
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_app_files_app_id ON app_files(app_id);
+    CREATE INDEX IF NOT EXISTS idx_app_files_status ON app_files(status);
+    CREATE INDEX IF NOT EXISTS idx_app_files_sha256 ON app_files(app_id, sha256);
+
+    CREATE TABLE IF NOT EXISTS app_file_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      app_file_id INTEGER NOT NULL,
+      room_id INTEGER DEFAULT NULL,
+      room_message_id INTEGER DEFAULT NULL,
+      conversation_id INTEGER DEFAULT NULL,
+      message_id INTEGER DEFAULT NULL,
+      work_item_id INTEGER DEFAULT NULL,
+      plan_step_id INTEGER DEFAULT NULL,
+      link_type TEXT NOT NULL DEFAULT 'attachment' CHECK(link_type IN ('attachment', 'context')),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (app_file_id) REFERENCES app_files(id) ON DELETE CASCADE,
+      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE,
+      FOREIGN KEY (room_message_id) REFERENCES room_messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (plan_step_id) REFERENCES plan_steps(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_app_file_links_file_id ON app_file_links(app_file_id);
+    CREATE INDEX IF NOT EXISTS idx_app_file_links_room ON app_file_links(room_id);
+    CREATE INDEX IF NOT EXISTS idx_app_file_links_room_message ON app_file_links(room_message_id);
+    CREATE INDEX IF NOT EXISTS idx_app_file_links_conversation ON app_file_links(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_app_file_links_message ON app_file_links(message_id);
+    CREATE INDEX IF NOT EXISTS idx_app_file_links_work_item ON app_file_links(work_item_id);
+
     CREATE TABLE IF NOT EXISTS app_tool_configs (
       app_id INTEGER NOT NULL,
       tool_key TEXT NOT NULL,
@@ -431,9 +480,13 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "plans", "execution_paused_ms", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "plan_steps", "fix_attempts", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "plan_steps", "base_commit_sha", "TEXT DEFAULT NULL");
-  addColumnIfMissing(db, "plan_step_events", "updated_at", "TEXT DEFAULT (datetime('now'))");
+  addColumnIfMissing(db, "plan_step_events", "updated_at", "TEXT DEFAULT NULL");
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_plan_steps_linked_conversation_id ON plan_steps(linked_conversation_id);
+
+    UPDATE plan_step_events
+    SET updated_at = COALESCE(created_at, datetime('now'))
+    WHERE updated_at IS NULL;
 
     UPDATE plan_step_events
     SET phase = 'code_review'
@@ -467,6 +520,9 @@ function initDb(db: Database.Database): void {
     WHERE status = 'running'
       AND datetime(COALESCE(updated_at, created_at)) < datetime('now', '-30 minutes');
   `);
+
+  // ── Migrate app file status constraints ───────────────────────
+  ensureAppFilesUploadingStatus(db);
 
   // ── Clean stale agent sessions ────────────────────────────────
   db.exec("UPDATE agent_sessions SET status = 'idle' WHERE status = 'running'");
@@ -512,6 +568,57 @@ function addColumnIfMissing(db: Database.Database, table: string, column: string
   if (!columns.some((c) => c.name === column)) {
     db.exec(`ALTER TABLE "${table}" ADD COLUMN ${column} ${definition}`);
   }
+}
+
+function ensureAppFilesUploadingStatus(db: Database.Database): void {
+  const row = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'app_files'"
+  ).get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'uploading'")) return;
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS app_files_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        uploaded_by_user_id INTEGER DEFAULT NULL,
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+        size_bytes INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        storage_path TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'available' CHECK(status IN ('uploading', 'available', 'deleted')),
+        metadata_json TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        deleted_at TEXT DEFAULT NULL,
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+        FOREIGN KEY (uploaded_by_user_id) REFERENCES users(id)
+      );
+      INSERT INTO app_files_new (
+        id, app_id, uploaded_by_user_id, original_name, stored_name,
+        content_type, size_bytes, sha256, storage_path, status,
+        metadata_json, created_at, deleted_at
+      )
+      SELECT
+        id, app_id, uploaded_by_user_id, original_name, stored_name,
+        content_type, size_bytes, sha256, storage_path,
+        CASE WHEN status IN ('available', 'deleted') THEN status ELSE 'available' END,
+        metadata_json, created_at, deleted_at
+      FROM app_files;
+      DROP TABLE app_files;
+      ALTER TABLE app_files_new RENAME TO app_files;
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_app_files_app_id ON app_files(app_id);
+    CREATE INDEX IF NOT EXISTS idx_app_files_status ON app_files(status);
+    CREATE INDEX IF NOT EXISTS idx_app_files_sha256 ON app_files(app_id, sha256);
+  `);
 }
 
 /**

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { subscribeConversation, getEventSeq } from "@/lib/server/conversation-events";
 import { getConversationMessages } from "@/lib/server/conversation";
+import { serializeAppFile } from "@/lib/server/file-storage";
 import { handleRoomRouteError, requireConversationAccess } from "@/lib/server/room-route-utils";
 
 /**
@@ -16,9 +17,11 @@ export async function GET(
 ) {
   const { appId, conversationId } = await params;
   let numericConversationId: number;
+  let numericAppId: number;
   try {
     const access = await requireConversationAccess(request, appId, conversationId);
     numericConversationId = access.conversation.id;
+    numericAppId = access.app.id;
   } catch (e) {
     const errorResponse = handleRoomRouteError(e);
     if (errorResponse) return errorResponse;
@@ -50,6 +53,7 @@ export async function GET(
           id: m.id, conversation_id: m.conversation_id, role: m.role, content: m.content,
           message_type: m.message_type, created_by_name: m.created_by_name,
           created_by_color: m.created_by_color, created_at: m.created_at,
+          attachments: dal.getFilesForMessage(numericAppId, m.id).map(serializeAppFile),
         })) })}\n\n`);
       }
 

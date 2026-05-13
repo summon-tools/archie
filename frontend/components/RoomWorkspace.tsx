@@ -7,9 +7,10 @@ import remarkGfm from "remark-gfm";
 import { ChatsCircle, CheckCircle, DotsThree, Flag, PauseCircle, Pencil, PencilSimple, PlayCircle, Sparkle, Timer } from "@phosphor-icons/react";
 import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, streamRoomMessage, updatePlanStep, updateRoomPlan } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
-import type { HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
+import type { AppFile, HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS, type HomeAgentDefinition } from "@/lib/home/agents";
 import { PROSE_CLASSES } from "@/lib/prose";
+import { MessageAttachmentList } from "@/components/Attachments";
 import RoomChatInput from "@/components/RoomChatInput";
 import ToolActivity from "@/components/ToolActivity";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -67,6 +68,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
     maxWidth: 84,
   });
   const [messageDraft, setMessageDraft] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<AppFile[]>([]);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [pendingMessages, setPendingMessages] = useState<RoomMessage[]>([]);
@@ -100,8 +102,9 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
   }, [visibleMessages.length, streamContent, toolActivities.length, sendingMessage]);
 
   const handleSendRoomMessage = async () => {
-    if (!room || !messageDraft.trim() || sendingMessage) return;
+    if (!room || (!messageDraft.trim() && pendingAttachments.length === 0) || sendingMessage) return;
     const content = messageDraft.trim();
+    const attachments = pendingAttachments;
     const targetAgentKey = selectedAgentKey;
     const optimisticMessage: RoomMessage = {
       id: -Date.now(),
@@ -113,16 +116,18 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       body_md: content,
       payload_json: targetAgentKey ? JSON.stringify({ target_agent_key: targetAgentKey }) : null,
       created_at: new Date().toISOString(),
+      attachments,
     };
     setSendingMessage(true);
     setMessageError(null);
     setMessageDraft("");
+    setPendingAttachments([]);
     setStreamContent("");
     setToolActivities([]);
     setThinkingAgentKey(targetAgentKey || "coordinator");
     setPendingMessages((prev) => [...prev, optimisticMessage]);
     try {
-      const response = await streamRoomMessage(appId, room.id, content, targetAgentKey);
+      const response = await streamRoomMessage(appId, room.id, content, targetAgentKey, attachments.map((file) => file.id));
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No response body");
 
@@ -174,6 +179,7 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       setSelectedAgentKey(null);
     } catch (err) {
       setMessageDraft(content);
+      setPendingAttachments(attachments);
       setMessageError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setPendingMessages((prev) => prev.filter((pending) => pending.id !== optimisticMessage.id));
@@ -196,6 +202,8 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
             messages={visibleMessages}
             draft={messageDraft}
             setDraft={setMessageDraft}
+            attachments={pendingAttachments}
+            setAttachments={setPendingAttachments}
             sending={sendingMessage}
             error={messageError}
             streamContent={streamContent}
@@ -263,6 +271,8 @@ function RoomShell({
   messages,
   draft,
   setDraft,
+  attachments,
+  setAttachments,
   sending,
   error,
   streamContent,
@@ -280,6 +290,8 @@ function RoomShell({
   messages: RoomMessage[];
   draft: string;
   setDraft: (value: string) => void;
+  attachments: AppFile[];
+  setAttachments: (files: AppFile[]) => void;
   sending: boolean;
   error: string | null;
   streamContent: string;
@@ -352,6 +364,9 @@ function RoomShell({
             value={draft}
             onChange={setDraft}
             onSubmit={onSend}
+            appId={room.app_id}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
             agents={agents}
             selectedAgentKey={selectedAgentKey}
             onSelectAgent={setSelectedAgentKey}
@@ -623,12 +638,15 @@ const RoomMessageBubble = memo(function RoomMessageBubble({ message, agents }: {
           )}
         </div>
         {isUser ? (
-          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p>
+          message.body_md ? <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body_md}</p> : null
         ) : (
-          <div className={PROSE_CLASSES}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.body_md}</ReactMarkdown>
-          </div>
+          message.body_md ? (
+            <div className={PROSE_CLASSES}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.body_md}</ReactMarkdown>
+            </div>
+          ) : null
         )}
+        <MessageAttachmentList attachments={message.attachments} />
       </div>
     </div>
   );
@@ -1309,7 +1327,7 @@ const PlanStepCard = memo(function PlanStepCard({
   };
 
   return (
-    <div className="rounded-lg border border-th bg-th-main p-3">
+    <div className="rounded-lg border border-th bg-th-elevated p-3">
       <div className="flex items-start gap-2">
         <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-th bg-th-muted text-meta font-semibold text-st-green">
           {step.position + 1}
@@ -1337,7 +1355,7 @@ const PlanStepCard = memo(function PlanStepCard({
                 <input
                   value={draft.title}
                   onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
-                  className="w-full rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                  className="w-full rounded-lg border border-th bg-th-elevated px-2 py-1.5 text-xs text-th-primary placeholder-th shadow-none outline-none [color-scheme:dark] focus:border-th-strong focus:ring-2 focus:ring-th"
                 />
               </label>
               <label className="block space-y-1">
@@ -1346,7 +1364,7 @@ const PlanStepCard = memo(function PlanStepCard({
                   value={draft.objective_md}
                   onChange={(event) => setDraft((prev) => ({ ...prev, objective_md: event.target.value }))}
                   rows={4}
-                  className="w-full resize-y rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs leading-relaxed text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                  className="w-full resize-y rounded-lg border border-th bg-th-elevated px-2 py-1.5 text-xs leading-relaxed text-th-primary placeholder-th shadow-none outline-none [color-scheme:dark] focus:border-th-strong focus:ring-2 focus:ring-th"
                 />
               </label>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -1355,7 +1373,7 @@ const PlanStepCard = memo(function PlanStepCard({
                   <select
                     value={draft.risk_level}
                     onChange={(event) => setDraft((prev) => ({ ...prev, risk_level: event.target.value as PlanStep["risk_level"] }))}
-                    className="w-full rounded-lg border border-th bg-th-main px-2 py-1.5 text-xs text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
+                    className="w-full rounded-lg border border-th bg-th-elevated px-2 py-1.5 text-xs text-th-primary shadow-none outline-none [color-scheme:dark] focus:border-th-strong focus:ring-2 focus:ring-th"
                   >
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -1469,13 +1487,13 @@ function ReviewToggle({
   onChange?: (checked: boolean) => void;
 }) {
   return (
-    <label className={`flex items-center gap-1.5 rounded-lg border border-th bg-th-main px-2 py-1 text-meta text-th-secondary ${disabled ? "opacity-60" : ""}`}>
+    <label className={`flex items-center gap-1.5 rounded-lg border border-th bg-th-elevated px-2 py-1 text-meta text-th-secondary ${disabled ? "opacity-60" : "hover:bg-th-muted"}`}>
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange?.(event.target.checked)}
-        className="h-3 w-3 accent-brand-500"
+        className="h-3 w-3 rounded border-th bg-th-overlay accent-brand-500 [color-scheme:dark]"
       />
       <span className="truncate">{label}</span>
     </label>

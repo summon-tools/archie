@@ -3,6 +3,7 @@ export * from "./work-items";
 export * from "./sessions";
 export * from "./runs";
 export * from "./artifacts";
+export * from "./app-files";
 export * from "./apps";
 export * from "./users";
 export * from "./notifications";

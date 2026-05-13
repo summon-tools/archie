@@ -7,6 +7,7 @@ import { fetcher } from "@/lib/swr";
 import ChatInput from "@/components/ChatInput";
 import { useSelectedModel } from "@/hooks/useSelectedModel";
 import { tools } from "@/tools/registry";
+import type { AppFile } from "@/lib/types";
 
 interface NewChatViewProps {
   appId: number;
@@ -16,6 +17,7 @@ interface NewChatViewProps {
 
 export default function NewChatView({ appId, onItemCreated, initialMessage }: NewChatViewProps) {
   const [message, setMessage] = useState(initialMessage || "");
+  const [attachments, setAttachments] = useState<AppFile[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinnedToolId, setPinnedToolId] = useState<string | null>(null);
@@ -23,12 +25,14 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
   const { data: modelConfig } = useSWR<ModelConfig>("/api/models/config", fetcher);
 
   const handleSubmit = async () => {
-    if (!message.trim() || sending) return;
+    if ((!message.trim() && attachments.length === 0) || sending) return;
+    const currentAttachments = attachments;
     setSending(true);
     setError(null);
     try {
-      const item = await createWorkItem(appId, message.trim());
+      const item = await createWorkItem(appId, message.trim(), undefined, currentAttachments.map((file) => file.id));
       setMessage("");
+      setAttachments([]);
       setPinnedToolId(null);
       onItemCreated(item);
     } catch (err) {
@@ -116,6 +120,9 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
         placeholder="Message..."
         disabled={sending}
         isLoading={sending}
+        appId={appId}
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
         model={selectedModel}
         provider={selectedProvider}
         onModelChange={handleModelChange}

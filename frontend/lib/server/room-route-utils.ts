@@ -70,6 +70,29 @@ export function requireEnumValue<T extends string>(
   return value as T;
 }
 
+export function parseFileIds(value: unknown): number[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new RouteInputError("file_ids must be an array");
+  if (value.length > 20) throw new RouteInputError("Too many files attached");
+  const ids = value.map((entry) => {
+    const parsed = typeof entry === "number" ? entry : Number(entry);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new RouteInputError("file_ids must contain positive integers");
+    }
+    return parsed;
+  });
+  return Array.from(new Set(ids));
+}
+
+export function requireAvailableAppFiles(appId: number, fileIds: number[]): void {
+  for (const fileId of fileIds) {
+    const file = dal.getAppFile(appId, fileId);
+    if (!file || file.status !== "available") {
+      throw new RouteInputError(`File not found: ${fileId}`, 404);
+    }
+  }
+}
+
 export function canAccessApp(user: { id: number; role: string }, app: AppRow): boolean {
   if (user.role === "admin") return true;
   if (app.project_owner_user_id === user.id) return true;

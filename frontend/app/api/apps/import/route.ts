@@ -30,12 +30,13 @@ This directory contains Archie's configuration and project context.
 | \`logs/\` | No | Runtime process output logs (git-ignored). |
 | \`pids/\` | No | Process ID files for lifecycle management (git-ignored). |
 | \`videos/\` | No | Demo recordings and walkthroughs (git-ignored). |
+| \`context-files/\` | No | Temporary read-only copies of uploaded files for agent context (git-ignored). |
 
 ## How it works
 
 - **\`app.yaml\`** is the only required file. It tells Archie how to run your project locally.
 - **\`spec/\`** and **\`skills/\`** are optional but help Archie make better decisions when working on your code.
-- **\`logs/\`**, **\`pids/\`**, and **\`videos/\`** are runtime-only and excluded from version control.
+- **\`logs/\`**, **\`pids/\`**, **\`videos/\`**, and **\`context-files/\`** are runtime-only and excluded from version control.
 
 ## Learn more
 

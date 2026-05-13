@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { emitConversationEvent } from "@/lib/server/conversation-events";
 import { getConversationMessages } from "@/lib/server/conversation";
-import { handleRoomRouteError, readJsonBody, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { serializeAppFile } from "@/lib/server/file-storage";
+import { handleRoomRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireConversationAccess } from "@/lib/server/room-route-utils";
 import type { MessageRow } from "@/lib/server/types";
 
 type MessageRole = MessageRow["role"];
@@ -31,6 +32,7 @@ export async function GET(
         created_by_name: m.created_by_name,
         created_by_color: m.created_by_color,
         created_at: m.created_at,
+        attachments: dal.getFilesForMessage(access.app.id, m.id).map(serializeAppFile),
       })),
     });
   } catch (e) {
@@ -50,30 +52,41 @@ export async function POST(
 
     const body = await readJsonBody(request);
     const { content, role, message_type, mode } = body;
+    const fileIds = parseFileIds(body.file_ids);
 
-    if (!content || typeof content !== "string") {
+    if ((!content || typeof content !== "string") && fileIds.length === 0) {
       return NextResponse.json(
         { detail: "content is required" },
         { status: 400 }
       );
     }
+    requireAvailableAppFiles(access.app.id, fileIds);
 
     const parsedRole = parseMessageRole(role);
     const parsedMessageType = typeof message_type === "string" ? message_type : "text";
+    const bodyMd = typeof content === "string" ? content : "";
     const message = dal.createMessage({
       conversation_id: access.conversation.id,
       role: parsedRole,
       kind: parsedMessageType,
       author_user_id: access.user.id,
-      body_md: content,
+      body_md: bodyMd,
     });
+    dal.linkAppFiles({
+      app_id: access.app.id,
+      file_ids: fileIds,
+      conversation_id: access.conversation.id,
+      message_id: message.id,
+      link_type: "attachment",
+    });
+    const attachments = dal.getFilesForMessage(access.app.id, message.id).map(serializeAppFile);
 
     emitConversationEvent(access.conversation.id, {
       type: "message",
-      message: { id: message.id, conversation_id: access.conversation.id, role: parsedRole, content, message_type: parsedMessageType, created_by_name: access.user.name || null, created_by_color: null, created_at: message.created_at },
+      message: { id: message.id, conversation_id: access.conversation.id, role: parsedRole, content: bodyMd, message_type: parsedMessageType, created_by_name: access.user.name || null, created_by_color: null, created_at: message.created_at, attachments },
     });
 
-    return NextResponse.json(message);
+    return NextResponse.json({ ...message, attachments });
   } catch (e) {
     const errorResponse = handleRoomRouteError(e);
     if (errorResponse) return errorResponse;

@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { App, Task, GitStatus, HomeRoom } from "@/lib/types";
 import { fetcher } from "@/lib/swr";
-import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, BookOpen, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, UsersThree, ChatsCircle } from "@phosphor-icons/react";
+import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, BookOpen, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, UsersThree, ChatsCircle, FileText } from "@phosphor-icons/react";
 import BackgroundJobsBar from "./BackgroundJobsBar";
 
 interface ChatSidebarProps {
@@ -247,6 +247,18 @@ export default function ChatSidebar({
           >
             <Lightning size={16} weight="bold" />
           </button>
+          <button
+            onClick={() => onViewChange?.("files")}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              activeView === "files"
+                ? "bg-btn-secondary text-btn-secondary"
+                : "text-th-muted hover:text-th-primary hover:bg-th-muted"
+            }`}
+            title="Files"
+            aria-label="Files"
+          >
+            <FileText size={16} weight="bold" />
+          </button>
         </div>
 
         {/* Footer */}
@@ -469,6 +481,18 @@ export default function ChatSidebar({
         >
           <Lightning size={15} weight="bold" className="text-th-muted" />
           Skills
+        </button>
+        <button
+          onClick={() => onViewChange?.("files")}
+          title="Uploaded project files"
+          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
+            activeView === "files"
+              ? "text-th-primary font-medium"
+              : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+          }`}
+        >
+          <FileText size={15} weight="bold" className="text-th-muted" />
+          Files
         </button>
       </div>
 

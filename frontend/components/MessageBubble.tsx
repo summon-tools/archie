@@ -4,7 +4,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SpinnerGap } from "@phosphor-icons/react";
 
+import { MessageAttachmentList } from "@/components/Attachments";
 import { PROSE_CLASSES } from "@/lib/prose";
+import type { MessageAttachment } from "@/lib/types";
 
 const USER_PROSE_CLASSES = PROSE_CLASSES.replace("text-th-secondary", "text-th-primary");
 
@@ -53,6 +55,7 @@ interface MessageBubbleProps {
   messageType?: string;
   senderName?: string | null;
   senderColor?: string | null;
+  attachments?: MessageAttachment[];
 }
 
 export default function MessageBubble({
@@ -64,6 +67,7 @@ export default function MessageBubble({
   messageType,
   senderName,
   senderColor,
+  attachments,
 }: MessageBubbleProps) {
   if (role === "system") {
     return (
@@ -86,6 +90,7 @@ export default function MessageBubble({
           ) : (
             <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ overflowWrap: "anywhere" }}>{content}</p>
           )}
+          <MessageAttachmentList attachments={attachments} />
         </div>
       </div>
     );
@@ -121,6 +126,7 @@ export default function MessageBubble({
           <span className="text-secondary">Thinking...</span>
         </div>
       ) : null}
+      <MessageAttachmentList attachments={attachments} />
     </div>
   );
 }

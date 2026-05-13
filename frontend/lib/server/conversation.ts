@@ -20,11 +20,43 @@ import { execSync } from "child_process";
 import * as dal from "./dal";
 import { emitConversationEvent } from "./conversation-events";
 import { buildConversationSystemPromptBase } from "./prompts/conversation";
+import { cleanupMaterializedFilesForContext, formatAttachmentContext, materializeFilesForContext, serializeAppFile } from "./file-storage";
+import type { AppFileRow } from "./types";
 
 // In-memory tracking of running queries, keyed by conversationId.
 type QueryEntry = { abort: AbortController };
 const _g = globalThis as any;
 const _conversationQueries: Map<number, QueryEntry> = _g.__conversationQueries ??= new Map();
+
+function uniqueFiles(files: AppFileRow[]): AppFileRow[] {
+  const seen = new Set<number>();
+  const result: AppFileRow[] = [];
+  for (const file of files) {
+    if (seen.has(file.id)) continue;
+    seen.add(file.id);
+    result.push(file);
+  }
+  return result;
+}
+
+function buildConversationAttachmentContext(params: {
+  appId: number;
+  conversationId: number;
+  workItemId?: number | null;
+  targetDirectory: string;
+}): string {
+  const files = uniqueFiles([
+    ...dal.getFilesForConversation(params.appId, params.conversationId),
+    ...(params.workItemId ? dal.getFilesForWorkItem(params.appId, params.workItemId) : []),
+  ]).filter((file) => file.status === "available");
+  if (files.length === 0) return "";
+  const materialized = materializeFilesForContext({
+    appId: params.appId,
+    targetDirectory: params.targetDirectory,
+    files,
+  });
+  return formatAttachmentContext(materialized);
+}
 
 function abortAllQueries(): void {
   for (const [, entry] of _conversationQueries) {
@@ -203,7 +235,8 @@ export async function streamConversationMessage(
   model?: string,
   userId?: number,
   retry?: boolean,
-  providerId?: string
+  providerId?: string,
+  fileIds: number[] = [],
 ): Promise<ReadableStream<Uint8Array>> {
   // Abort existing query on this conversation
   if (_conversationQueries.has(conversationId)) {
@@ -224,9 +257,17 @@ export async function streamConversationMessage(
       author_user_id: userId ?? null,
       body_md: content,
     });
+    dal.linkAppFiles({
+      app_id: conversation.app_id,
+      file_ids: fileIds,
+      conversation_id: conversationId,
+      message_id: userMsg.id,
+      link_type: "attachment",
+    });
+    const attachments = dal.getFilesForMessage(conversation.app_id, userMsg.id).map(serializeAppFile);
     emitConversationEvent(conversationId, {
       type: "message",
-      message: { id: userMsg.id, conversation_id: conversationId, role: "user", content, message_type: "text", created_by_name: null, created_by_color: null, created_at: userMsg.created_at },
+      message: { id: userMsg.id, conversation_id: conversationId, role: "user", content, message_type: "text", created_by_name: null, created_by_color: null, created_at: userMsg.created_at, attachments },
     });
   }
 
@@ -279,6 +320,12 @@ export async function streamConversationMessage(
   }
 
   const effectiveCwd = env?.worktree_dir || directory || undefined;
+  const attachmentContext = effectiveCwd ? buildConversationAttachmentContext({
+    appId: conversation.app_id,
+    conversationId,
+    workItemId: workItem?.id ?? null,
+    targetDirectory: effectiveCwd,
+  }) : "";
   if (effectiveCwd) {
     try {
       const { capturePlanStepBaseCommitForConversation } = await import("./plan-execution");
@@ -316,22 +363,22 @@ export async function streamConversationMessage(
     }
 
     if (contextMessages.length > 0) {
-      prompt = `Here is the recent team discussion for context:\n\n${contextMessages.join("\n\n")}${briefContext}\n\nNow the user asks:\n${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`;
+      prompt = `Here is the recent team discussion for context:\n\n${contextMessages.join("\n\n")}${briefContext}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\nNow the user asks:\n${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`;
     } else {
-      prompt = `${briefContext ? briefContext + "\n\n" : ""}${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`;
+      prompt = `${briefContext ? briefContext + "\n\n" : ""}${attachmentContext ? attachmentContext + "\n\n" : ""}${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`;
     }
   } else if (conversation.kind === "task" && workItem) {
     const systemPrompt = await buildConversationSystemPrompt(conversation.app_id, appName, effectiveCwd || directory, workItem.id);
     const taskDescription = workItem.summary || "";
 
     if (taskDescription && taskDescription !== content) {
-      prompt = `${systemPrompt}\n\n---\n\nTask instructions:\n${taskDescription}\n\n---\n\nUser message:\n${content}`;
+      prompt = `${systemPrompt}\n\n---\n\nTask instructions:\n${taskDescription}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\n---\n\nUser message:\n${content}`;
     } else {
-      prompt = `${systemPrompt}\n\n---\n\nUser task request:\n${content}`;
+      prompt = `${systemPrompt}\n\n---\n\n${attachmentContext ? `${attachmentContext}\n\n` : ""}User task request:\n${content}`;
     }
   } else {
     // Chat or conversation type — just pass the message
-    prompt = content;
+    prompt = `${attachmentContext ? `${attachmentContext}\n\n` : ""}${content}`;
   }
 
   // Preflight check
@@ -343,6 +390,9 @@ export async function streamConversationMessage(
   });
   if (!preflight.ok) {
     const errorMsg = preflight.blockers.join("; ");
+    if (effectiveCwd) {
+      cleanupMaterializedFilesForContext({ appId: conversation.app_id, targetDirectory: effectiveCwd });
+    }
     const encoder = new TextEncoder();
     return new ReadableStream<Uint8Array>({
       start(controller) {
@@ -544,6 +594,9 @@ export async function streamConversationMessage(
           safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: failureMessage(category), category, detail: e.message || String(e) })}\n\n`);
         }
       } finally {
+        if (effectiveCwd) {
+          cleanupMaterializedFilesForContext({ appId: conversation.app_id, targetDirectory: effectiveCwd });
+        }
         _conversationQueries.delete(conversationId);
         try { controller.close(); } catch {}
       }

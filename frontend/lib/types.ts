@@ -179,6 +179,24 @@ export interface Artifact {
   created_at: string;
 }
 
+export type AppFileStatus = "uploading" | "available" | "deleted";
+
+export interface AppFile {
+  id: number;
+  app_id: number;
+  original_name: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  status: AppFileStatus;
+  metadata_json: string | null;
+  created_at: string;
+  deleted_at: string | null;
+  download_url: string;
+}
+
+export type MessageAttachment = AppFile;
+
 // ── Preview / Claude status ─────────────────────────────────────────
 
 export interface PreviewStatus {
@@ -231,6 +249,7 @@ export interface ConversationMessage {
   created_by_name: string | null;
   created_by_color: string | null;
   created_at: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface ChatMessage {
@@ -278,6 +297,7 @@ export interface RoomMessage {
   body_md: string;
   payload_json: string | null;
   created_at: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface Plan {

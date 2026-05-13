@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Task, ConversationMessage } from "@/lib/types";
+import { AppFile, Task, ConversationMessage } from "@/lib/types";
 import {
   getWorkItem,
   getConversationMessages,
@@ -42,6 +42,7 @@ export function useConversation({
   const [lastError, setLastError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [inputText, setInputText] = useState("");
+  const [inputAttachments, setInputAttachments] = useState<AppFile[]>([]);
   const [messagesLoaded, setMessagesLoaded] = useState(false);
 
   const autoSentRef = useRef<string | null>(null);
@@ -214,7 +215,7 @@ export function useConversation({
 
   // Consume SSE stream (for active run — text/activity/status events)
   const consumeStream = useCallback(
-    async (content: string, retry?: boolean) => {
+    async (content: string, retry?: boolean, fileIds: number[] = []) => {
       try {
         const response = await streamConversationMessage(
           appId,
@@ -222,7 +223,8 @@ export function useConversation({
           content,
           selectedModel,
           retry,
-          selectedProvider
+          selectedProvider,
+          fileIds
         );
         const reader = response.body?.getReader();
         if (!reader) throw new Error("No response body");
@@ -339,7 +341,9 @@ export function useConversation({
 
     // If a user message already exists (e.g. saved during import), use it as the trigger
     // with retry=true to skip saving a duplicate. Otherwise use the work item description.
-    const content = latestUserMessage?.content || workItem.description;
+    const content = latestUserMessage
+      ? latestUserMessage.content || "Please use the attached files as context."
+      : workItem.description;
     if (!content) return;
 
     const autoSendKey = latestUserMessage
@@ -378,10 +382,12 @@ export function useConversation({
 
   // Send a message to Claude
   const handleSendMessage = useCallback(async () => {
-    if (!inputText.trim() || sending) return;
+    if ((!inputText.trim() && inputAttachments.length === 0) || sending) return;
     const content = inputText.trim();
+    const attachments = inputAttachments;
     setSending(true);
     setInputText("");
+    setInputAttachments([]);
     setStreamContent("");
 
     // Optimistically append the user message so it appears instantly
@@ -394,13 +400,16 @@ export function useConversation({
       created_by_name: null,
       created_by_color: null,
       created_at: new Date().toISOString(),
+      attachments,
     };
     setMessages((prev) => [...prev, optimisticMsg]);
 
     try {
-      await consumeStream(content);
+      await consumeStream(content, false, attachments.map((file) => file.id));
     } catch {
       // Stream failed — try to load messages from DB
+      setInputText(content);
+      setInputAttachments(attachments);
       await loadMessages();
       const updated = await getWorkItem(appId, workItem.id);
       setWorkItem(updated);
@@ -408,7 +417,7 @@ export function useConversation({
       setSending(false);
       setStreamContent("");
     }
-  }, [inputText, sending, consumeStream, loadMessages, appId, workItem.id, setWorkItem]);
+  }, [inputText, inputAttachments, sending, consumeStream, loadMessages, appId, workItem.id, setWorkItem]);
 
   // Stop Claude
   const handleStopClaude = useCallback(async () => {
@@ -457,6 +466,8 @@ export function useConversation({
     lastError,
     inputText,
     setInputText,
+    inputAttachments,
+    setInputAttachments,
     handleSendMessage,
     handleStopClaude,
     handleRetry,

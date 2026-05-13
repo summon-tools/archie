@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, CaretDown, SpinnerGap, UsersThree, X } from "@phosphor-icons/react";
+import { AttachmentUploadTray } from "@/components/Attachments";
 import type { HomeAgentDefinition } from "@/lib/home/agents";
+import type { AppFile } from "@/lib/types";
 
 interface RoomChatInputProps {
   value: string;
@@ -15,6 +17,9 @@ interface RoomChatInputProps {
   disabled?: boolean;
   isLoading?: boolean;
   statusText?: string;
+  appId: number;
+  attachments: AppFile[];
+  onAttachmentsChange: (files: AppFile[]) => void;
 }
 
 export default function RoomChatInput({
@@ -28,6 +33,9 @@ export default function RoomChatInput({
   disabled = false,
   isLoading = false,
   statusText,
+  appId,
+  attachments,
+  onAttachmentsChange,
 }: RoomChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -68,7 +76,7 @@ export default function RoomChatInput({
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (value.trim() && !disabled && !isLoading) {
+      if ((value.trim() || attachments.length > 0) && !disabled && !isLoading) {
         onSubmit();
       }
     }
@@ -77,7 +85,7 @@ export default function RoomChatInput({
     }
   };
 
-  const canSend = value.trim() && !disabled && !isLoading;
+  const canSend = (value.trim() || attachments.length > 0) && !disabled && !isLoading;
 
   return (
     <div className="flex-shrink-0 bg-transparent px-6 py-3">
@@ -97,6 +105,15 @@ export default function RoomChatInput({
                 : "border-th focus-within:border-th-strong"
           }`}
         >
+          <div className="pb-2">
+            <AttachmentUploadTray
+              appId={appId}
+              attachments={attachments}
+              onChange={onAttachmentsChange}
+              disabled={disabled || isLoading}
+            />
+          </div>
+
           {selectedAgent && (
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-brand-400/20 bg-brand-500/10 px-2.5 py-1.5">
               <UsersThree size={14} weight="bold" className="text-brand-400" />

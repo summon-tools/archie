@@ -11,7 +11,8 @@ export const HOST = process.env.HOST || "127.0.0.1";
 export const PORT = parseInt(process.env.PORT || "8080", 10);
 
 // Paths
-const DATA_DIR = path.join(PROJECT_ROOT, "data");
+export const DATA_DIR = path.join(PROJECT_ROOT, "data");
+export const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 export const DB_PATH =
   process.env.DATABASE_PATH || path.join(DATA_DIR, "dashboard.db");
 

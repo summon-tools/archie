@@ -9,6 +9,8 @@ import { vi } from "vitest";
 
 const DEFAULT_MOCK_CONFIG = {
   DB_PATH: "",
+  DATA_DIR: "",
+  UPLOADS_DIR: "",
   MODE: "development",
   AUTH_SECRET_KEY: "test-secret-for-tests-32chars!!!!!",
   HOST: "127.0.0.1",
@@ -48,9 +50,12 @@ export function createTestContext(prefix = "archie-test-"): TestContext {
 
 /** Build a mock config object with optional overrides. */
 export function mockConfig(dbPath: string, overrides?: Record<string, unknown>) {
+  const dataDir = path.dirname(dbPath);
   return {
     ...DEFAULT_MOCK_CONFIG,
     DB_PATH: dbPath,
+    DATA_DIR: dataDir,
+    UPLOADS_DIR: path.join(dataDir, "uploads"),
     ...overrides,
   };
 }
