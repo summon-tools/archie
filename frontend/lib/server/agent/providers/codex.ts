@@ -23,6 +23,8 @@ const CODEX_MODELS: ModelEntry[] = [
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", provider: "codex" },
 ];
 
+type CodexSandboxMode = "bypass" | "read-only" | "workspace-write" | "danger-full-access";
+
 function spawnCodex(
   args: string[],
   cwd?: string,
@@ -368,13 +370,42 @@ function isGitRepo(dir?: string): boolean {
   }
 }
 
-function buildExecArgs(model?: string, cwd?: string, toolPolicy: AgentToolPolicy = "full_access"): string[] {
-  const args = ["exec", "--json"];
-  if (toolPolicy === "full_access") {
-    args.push("--full-auto");
-  } else {
-    args.push("--sandbox", "read-only");
+function normalizeSandboxMode(value: string | undefined, fallback: CodexSandboxMode): CodexSandboxMode {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (["bypass", "no-sandbox", "none", "off", "false", "disabled", "full-auto"].includes(normalized)) {
+    return "bypass";
   }
+  if (normalized === "readonly") return "read-only";
+  if (normalized === "workspace") return "workspace-write";
+  if (["read-only", "workspace-write", "danger-full-access"].includes(normalized)) {
+    return normalized as CodexSandboxMode;
+  }
+  return fallback;
+}
+
+function sandboxModeForPolicy(toolPolicy: AgentToolPolicy): CodexSandboxMode {
+  if (toolPolicy === "full_access") {
+    // Full-access implementation runs need to work on managed deployment hosts
+    // where Bubblewrap network namespace setup is unavailable.
+    return normalizeSandboxMode(process.env.CODEX_FULL_ACCESS_MODE, "bypass");
+  }
+  // Keep planning/gate calls read-only by default. Hosts without Bubblewrap can
+  // set CODEX_READ_ONLY_MODE=bypass and rely on their external sandbox.
+  return normalizeSandboxMode(process.env.CODEX_READ_ONLY_MODE, "read-only");
+}
+
+function appendSandboxArgs(args: string[], mode: CodexSandboxMode): void {
+  if (mode === "bypass") {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    args.push("--sandbox", mode);
+  }
+}
+
+export function buildCodexExecArgs(model?: string, cwd?: string, toolPolicy: AgentToolPolicy = "full_access"): string[] {
+  const args = ["exec", "--json"];
+  appendSandboxArgs(args, sandboxModeForPolicy(toolPolicy));
   // Override reasoning effort to avoid inheriting invalid user config values
   args.push("-c", "model_reasoning_effort=high");
   if (!isGitRepo(cwd)) {
@@ -406,7 +437,7 @@ export class CodexCliProvider implements AgentProvider {
   readonly label = "Codex CLI";
 
   async *streamTask(params: StreamTaskParams): AsyncGenerator<AgentStreamEvent> {
-    const args = buildExecArgs(params.model, params.cwd);
+    const args = buildCodexExecArgs(params.model, params.cwd);
     const repoFingerprintBefore = getRepoFingerprint(params.cwd);
 
     const { child, errorPromise } = spawnCodex(args, params.cwd, params.abortController, params.prompt);
@@ -456,7 +487,7 @@ export class CodexCliProvider implements AgentProvider {
     // Codex CLI >=0.22 removed the `resume` subcommand. Fall back to a fresh
     // `exec` session with the full prompt (which already contains conversation
     // context assembled by the caller).
-    const args = buildExecArgs(params.model, params.cwd);
+    const args = buildCodexExecArgs(params.model, params.cwd);
     const repoFingerprintBefore = getRepoFingerprint(params.cwd);
 
     const { child, errorPromise } = spawnCodex(args, params.cwd, params.abortController, params.prompt);
@@ -500,7 +531,7 @@ export class CodexCliProvider implements AgentProvider {
   }
 
   async ephemeralQuery(prompt: string, opts?: EphemeralOpts): Promise<string> {
-    const args = buildExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy === "full_access" ? "full_access" : "read_only_codebase");
+    const args = buildCodexExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy === "full_access" ? "full_access" : "read_only_codebase");
 
     const { child, errorPromise } = spawnCodex(args, opts?.cwd, opts?.abortController, prompt);
 
@@ -545,7 +576,7 @@ export class CodexCliProvider implements AgentProvider {
   }
 
   async *toolEnabledStream(prompt: string, opts?: EphemeralOpts): AsyncGenerator<ToolStreamEvent> {
-    const args = buildExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy);
+    const args = buildCodexExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy);
 
     const { child, errorPromise } = spawnCodex(args, opts?.cwd, opts?.abortController, prompt);
 

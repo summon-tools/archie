@@ -94,9 +94,10 @@ export function requireAvailableAppFiles(appId: number, fileIds: number[]): void
 }
 
 export function canAccessApp(user: { id: number; role: string }, app: AppRow): boolean {
-  if (user.role === "admin") return true;
-  if (app.project_owner_user_id === user.id) return true;
-  return false;
+  // Apps are workspace-wide. project_owner_user_id is used for ownership metadata,
+  // not for hiding apps from authenticated teammates.
+  void app;
+  return Number.isInteger(user.id) && user.id > 0;
 }
 
 function assertCanAccessApp(user: { id: number; role: string }, app: AppRow): void {
