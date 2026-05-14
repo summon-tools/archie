@@ -23,8 +23,57 @@ const CODEX_MODELS: ModelEntry[] = [
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", provider: "codex" },
 ];
 
-const ERROR_DETAIL_LIMIT = 2000;
+const ERROR_DETAIL_LIMIT = 8000;
+const CAPTURED_STREAM_LIMIT = 12000;
 type CodexSandboxMode = "bypass" | "read-only" | "workspace-write" | "danger-full-access";
+
+function appendBounded(current: string, next: string, limit = CAPTURED_STREAM_LIMIT): string {
+  const combined = current + next;
+  return combined.length > limit ? combined.slice(-limit) : combined;
+}
+
+function tailText(value: string | undefined, limit = 4000): string {
+  const trimmed = (value || "").trim();
+  if (trimmed.length <= limit) return trimmed;
+  return `[truncated]\n${trimmed.slice(-limit)}`;
+}
+
+function shellQuote(arg: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(arg)) return arg;
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+export function formatCodexFailureDetail(params: {
+  exitError?: string | null;
+  stderr?: string | null;
+  stdout?: string | null;
+  args?: string[] | null;
+  cwd?: string | null;
+}): string {
+  const parts: string[] = [];
+  const exitError = tailText(params.exitError || "", 1000);
+  const stderr = tailText(params.stderr || "");
+  const stdout = tailText(params.stdout || "");
+
+  if (exitError) parts.push(exitError);
+  if (stderr && stderr !== exitError) parts.push(`stderr:\n${stderr}`);
+  if (stdout && stdout !== stderr && stdout !== exitError) parts.push(`stdout:\n${stdout}`);
+  if (params.args?.length) parts.push(`command:\ncodex ${params.args.map(shellQuote).join(" ")}`);
+  if (params.cwd) parts.push(`cwd:\n${params.cwd}`);
+
+  return (parts.join("\n\n") || "Codex CLI failed without stderr or stdout.").slice(0, ERROR_DETAIL_LIMIT);
+}
+
+function formatChildCodexFailure(child: ChildProcess, exitError: string | null): string {
+  const metadata = child as any;
+  return formatCodexFailureDetail({
+    exitError,
+    stderr: metadata._stderrBuf?.() || "",
+    stdout: metadata._stdoutBuf?.() || "",
+    args: metadata._codexArgs || null,
+    cwd: metadata._codexCwd || null,
+  });
+}
 
 function spawnCodex(
   args: string[],
@@ -32,8 +81,9 @@ function spawnCodex(
   abortController?: AbortController,
   stdinData?: string,
 ): { child: ChildProcess; kill: () => void; errorPromise: Promise<string | null> } {
+  const resolvedCwd = cwd || process.env.HOME || "/tmp";
   const child = spawn("codex", args, {
-    cwd: cwd || process.env.HOME || "/tmp",
+    cwd: resolvedCwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env },
   });
@@ -63,10 +113,19 @@ function spawnCodex(
 
   // Collect stderr for error diagnostics
   let stderrBuf = "";
+  let stdoutBuf = "";
   if (child.stderr) {
-    child.stderr.on("data", (chunk: Buffer) => { stderrBuf += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrBuf = appendBounded(stderrBuf, chunk.toString());
+    });
   }
   (child as any)._stderrBuf = () => stderrBuf;
+  (child as any)._stdoutBuf = () => stdoutBuf;
+  (child as any)._appendStdoutBuf = (chunk: string) => {
+    stdoutBuf = appendBounded(stdoutBuf, chunk);
+  };
+  (child as any)._codexArgs = args;
+  (child as any)._codexCwd = resolvedCwd;
 
   if (abortController) {
     const onAbort = () => kill();
@@ -85,7 +144,9 @@ async function* readLines(child: ChildProcess): AsyncGenerator<string> {
 
   let buffer = "";
   for await (const chunk of stdout) {
-    buffer += chunk.toString();
+    const text = chunk.toString();
+    (child as any)._appendStdoutBuf?.(text);
+    buffer += text;
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
     for (const line of lines) {
@@ -98,11 +159,11 @@ async function* readLines(child: ChildProcess): AsyncGenerator<string> {
 /** Wait for the child to exit and return an error message if it failed */
 function waitForExit(child: ChildProcess): Promise<string | null> {
   return new Promise((resolve) => {
-    child.on("exit", (code) => {
+    child.on("exit", (code, signal) => {
       if (code && code !== 0) {
-        const stderr = (child as any)._stderrBuf?.() || "";
-        const detail = stderr.trim().split("\n").slice(-3).join("\n").slice(0, 300);
-        resolve(detail || `Codex CLI exited with code ${code}`);
+        resolve(`Codex CLI exited with code ${code}`);
+      } else if (signal) {
+        resolve(`Codex CLI exited with signal ${signal}`);
       } else {
         resolve(null);
       }
@@ -477,9 +538,7 @@ export class CodexCliProvider implements AgentProvider {
         // Synthesize an empty success rather than showing a scary error.
         yield { type: "result", result: buildResultFromState(state, { synthesized: true }) };
       } else {
-        const stderrOutput = (child as any)._stderrBuf?.() || "";
-        const errorDetail = exitError || stderrOutput.trim();
-        yield { type: "error", error: `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}` };
+        yield { type: "error", error: `Codex CLI error:\n${formatChildCodexFailure(child, exitError)}` };
       }
     }
   }
@@ -524,9 +583,7 @@ export class CodexCliProvider implements AgentProvider {
       } else if (!exitError) {
         yield { type: "result", result: buildResultFromState(state, { synthesized: true }) };
       } else {
-        const stderrOutput = (child as any)._stderrBuf?.() || "";
-        const errorDetail = exitError || stderrOutput.trim();
-        yield { type: "error", error: `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}` };
+        yield { type: "error", error: `Codex CLI error:\n${formatChildCodexFailure(child, exitError)}` };
       }
     }
   }
@@ -562,11 +619,10 @@ export class CodexCliProvider implements AgentProvider {
         return buildResultFromState(state, { synthesized: true }).text;
       }
 
-      const stderrOutput = (child as any)._stderrBuf?.() || "";
-      const errorDetail = exitError || stderrOutput.trim();
+      const errorDetail = formatChildCodexFailure(child, exitError);
       throw new Error(
         errorDetail
-          ? `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}`
+          ? `Codex CLI error:\n${errorDetail}`
           : state.sawToolActivity
             ? "Codex CLI completed after tool activity but did not return a final response."
             : "Codex CLI completed without a final response."
@@ -632,10 +688,9 @@ export class CodexCliProvider implements AgentProvider {
           resultText: buildResultFromState(state, { synthesized: true }).text,
         };
       } else {
-        const stderrOutput = (child as any)._stderrBuf?.() || "";
-        const errorDetail = exitError || stderrOutput.trim();
+        const errorDetail = formatChildCodexFailure(child, exitError);
         if (errorDetail) {
-          yield { type: "error", detail: `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}` };
+          yield { type: "error", detail: `Codex CLI error:\n${errorDetail}` };
         } else if (state.sawToolActivity) {
           yield { type: "error", detail: "Codex CLI completed after tool activity but did not return a final response." };
         }

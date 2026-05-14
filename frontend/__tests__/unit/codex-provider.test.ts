@@ -10,6 +10,7 @@ import {
   buildResultFromState,
   canSynthesizeSuccess,
   buildCodexExecArgs,
+  formatCodexFailureDetail,
 } from "@/lib/server/agent/providers/codex";
 
 describe("parseCodexEvent", () => {
@@ -301,5 +302,27 @@ describe("buildCodexExecArgs", () => {
       if (previous === undefined) delete process.env.CODEX_READ_ONLY_MODE;
       else process.env.CODEX_READ_ONLY_MODE = previous;
     }
+  });
+});
+
+describe("formatCodexFailureDetail", () => {
+  it("includes captured stderr, stdout, command, and cwd instead of only the exit code", () => {
+    const detail = formatCodexFailureDetail({
+      exitError: "Codex CLI exited with code 1",
+      stderr: "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted",
+      stdout: "{\"type\":\"error\",\"message\":\"sandbox failed\"}",
+      args: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--model", "gpt-5.5", "-"],
+      cwd: "/srv/archie/apps/example-task-1",
+    });
+
+    expect(detail).toContain("Codex CLI exited with code 1");
+    expect(detail).toContain("stderr:");
+    expect(detail).toContain("Failed RTM_NEWADDR");
+    expect(detail).toContain("stdout:");
+    expect(detail).toContain("sandbox failed");
+    expect(detail).toContain("command:");
+    expect(detail).toContain("codex exec --json --dangerously-bypass-approvals-and-sandbox --model gpt-5.5 -");
+    expect(detail).toContain("cwd:");
+    expect(detail).toContain("/srv/archie/apps/example-task-1");
   });
 });
