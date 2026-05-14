@@ -160,7 +160,7 @@ describe("rooms API", () => {
     await expect(response.json()).resolves.toMatchObject({ detail: "appId must be a positive integer" });
   });
 
-  it("requires app ownership or admin role for room APIs", async () => {
+  it("allows authenticated members to access room APIs for any app", async () => {
     const app = seedApp(db);
     const owner = seedUser(db, { username: "owner", name: "Owner", role: "member" });
     db.prepare("UPDATE apps SET project_owner_user_id = ? WHERE id = ?").run(owner.id, app.id);
@@ -172,25 +172,27 @@ describe("rooms API", () => {
       { params: Promise.resolve({ appId: String(app.id) }) },
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
   });
 
-  it("filters app lists for members and hides null-owner apps", async () => {
+  it("lists all apps for authenticated members", async () => {
     const ownedApp = seedApp(db, { name: "Owned App" });
-    const adminOnlyApp = seedApp(db, { name: "Admin Only App" });
+    const sharedApp = seedApp(db, { name: "Shared App" });
     const { token, user } = await createMemberToken("Owner Member");
     db.prepare("UPDATE apps SET project_owner_user_id = ? WHERE id = ?").run(user.id, ownedApp.id);
-    db.prepare("UPDATE apps SET project_owner_user_id = NULL WHERE id = ?").run(adminOnlyApp.id);
+    db.prepare("UPDATE apps SET project_owner_user_id = NULL WHERE id = ?").run(sharedApp.id);
     const { GET } = await import("@/app/api/apps/route");
 
     const response = await GET(makeRequest("http://localhost:8080/api/apps", { token }));
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.apps.map((app: any) => app.id)).toEqual([ownedApp.id]);
+    const appIds = body.apps.map((app: any) => app.id);
+    expect(appIds).toHaveLength(2);
+    expect(appIds).toEqual(expect.arrayContaining([ownedApp.id, sharedApp.id]));
   });
 
-  it("requires app ownership or admin role for conversation and work item APIs", async () => {
+  it("allows authenticated members to access conversation and work item APIs for any app", async () => {
     const app = seedApp(db);
     const owner = seedUser(db, { username: "owned-app-user", name: "Owner", role: "member" });
     db.prepare("UPDATE apps SET project_owner_user_id = ? WHERE id = ?").run(owner.id, app.id);
@@ -209,8 +211,8 @@ describe("rooms API", () => {
       { params: Promise.resolve({ appId: String(app.id) }) },
     );
 
-    expect(messagesResponse.status).toBe(403);
-    expect(workItemsResponse.status).toBe(403);
+    expect(messagesResponse.status).toBe(200);
+    expect(workItemsResponse.status).toBe(200);
   });
 
   it("creates rooms and lists them for an app", async () => {

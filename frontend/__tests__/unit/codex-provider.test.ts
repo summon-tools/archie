@@ -9,6 +9,7 @@ import {
   extractItemText,
   buildResultFromState,
   canSynthesizeSuccess,
+  buildCodexExecArgs,
 } from "@/lib/server/agent/providers/codex";
 
 describe("parseCodexEvent", () => {
@@ -248,5 +249,57 @@ describe("parseCodexEvent", () => {
       usage: { inputTokens: 0, outputTokens: 0 },
       models: [],
     });
+  });
+});
+
+describe("buildCodexExecArgs", () => {
+  it("uses explicit no-sandbox execution for full-access implementation runs by default", () => {
+    const previous = process.env.CODEX_FULL_ACCESS_MODE;
+    delete process.env.CODEX_FULL_ACCESS_MODE;
+
+    try {
+      const args = buildCodexExecArgs("gpt-5.5", undefined, "full_access");
+
+      expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+      expect(args).not.toContain("--full-auto");
+      expect(args).not.toContain("--sandbox");
+      expect(args).toContain("--model");
+      expect(args).toContain("gpt-5.5");
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_FULL_ACCESS_MODE;
+      else process.env.CODEX_FULL_ACCESS_MODE = previous;
+    }
+  });
+
+  it("keeps read-only Codex calls sandboxed by default", () => {
+    const previous = process.env.CODEX_READ_ONLY_MODE;
+    delete process.env.CODEX_READ_ONLY_MODE;
+
+    try {
+      const args = buildCodexExecArgs("gpt-5.5", undefined, "read_only_codebase");
+      const sandboxIndex = args.indexOf("--sandbox");
+
+      expect(sandboxIndex).toBeGreaterThanOrEqual(0);
+      expect(args[sandboxIndex + 1]).toBe("read-only");
+      expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_READ_ONLY_MODE;
+      else process.env.CODEX_READ_ONLY_MODE = previous;
+    }
+  });
+
+  it("can bypass the read-only sandbox on hosts where Bubblewrap is unavailable", () => {
+    const previous = process.env.CODEX_READ_ONLY_MODE;
+    process.env.CODEX_READ_ONLY_MODE = "bypass";
+
+    try {
+      const args = buildCodexExecArgs("gpt-5.5", undefined, "read_only_codebase");
+
+      expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+      expect(args).not.toContain("--sandbox");
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_READ_ONLY_MODE;
+      else process.env.CODEX_READ_ONLY_MODE = previous;
+    }
   });
 });
