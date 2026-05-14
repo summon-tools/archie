@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AppFile, Task, ConversationMessage } from "@/lib/types";
+import { AppFile, Task, ConversationMessage, ConversationErrorDiagnostic, ClaudeStatusResponse } from "@/lib/types";
 import {
   getWorkItem,
   getConversationMessages,
@@ -40,6 +40,7 @@ export function useConversation({
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [claudeStatus, setClaudeStatus] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [lastErrorDiagnostic, setLastErrorDiagnostic] = useState<ConversationErrorDiagnostic | null>(null);
   const [sending, setSending] = useState(false);
   const [inputText, setInputText] = useState("");
   const [inputAttachments, setInputAttachments] = useState<AppFile[]>([]);
@@ -58,6 +59,17 @@ export function useConversation({
     activeClaudeStatus === "running" ||
     activeClaudeStatus === "waiting_approval";
 
+  const applyStatusResponse = useCallback((status: ClaudeStatusResponse) => {
+    setClaudeStatus(status.claude_status);
+    if (status.claude_status === "failed" && status.last_error) {
+      setLastError(status.last_error.summary || status.last_error.detail || "Something went wrong. The request could not be completed.");
+      setLastErrorDiagnostic(status.last_error);
+    } else if (status.claude_status !== "failed") {
+      setLastError(null);
+      setLastErrorDiagnostic(null);
+    }
+  }, []);
+
   // Load messages
   const loadMessages = useCallback(async () => {
     try {
@@ -74,6 +86,13 @@ export function useConversation({
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
+
+  useEffect(() => {
+    if (activeClaudeStatus !== "failed") return;
+    getConversationClaudeStatus(appId, conversationId)
+      .then(applyStatusResponse)
+      .catch(() => {});
+  }, [activeClaudeStatus, appId, conversationId, applyStatusResponse]);
 
   // ── SSE Event Channel ─────────────────────────────────────────────
   // Replaces the 3s multi-user polling and 2s status fallback
@@ -121,6 +140,14 @@ export function useConversation({
             setWorkItem(updated);
             onItemUpdate();
           }).catch(() => {});
+          if (data.status === "failed") {
+            getConversationClaudeStatus(appId, conversationId)
+              .then(applyStatusResponse)
+              .catch(() => {});
+          } else {
+            setLastError(null);
+            setLastErrorDiagnostic(null);
+          }
           // Also reload messages to get final state
           loadMessages();
         }
@@ -159,7 +186,7 @@ export function useConversation({
               setMessages(msgs);
             }
             if (status.claude_status !== claudeStatus && !streamAbortRef.current) {
-              setClaudeStatus(status.claude_status);
+              applyStatusResponse(status);
             }
           } catch {}
         }, 10000);
@@ -234,6 +261,7 @@ export function useConversation({
 
         setClaudeStatus("running");
         setLastError(null);
+        setLastErrorDiagnostic(null);
 
         const decoder = new TextDecoder();
         let buffer = "";
@@ -281,7 +309,14 @@ export function useConversation({
                 setToolActivities([]);
                 const updated = await getWorkItem(appId, workItem.id);
                 setWorkItem(updated);
-                setClaudeStatus(parsed.status);
+                if (parsed.status === "failed") {
+                  const status = await getConversationClaudeStatus(appId, conversationId);
+                  applyStatusResponse(status);
+                } else {
+                  setClaudeStatus(parsed.status);
+                  setLastError(null);
+                  setLastErrorDiagnostic(null);
+                }
                 await loadMessages();
                 onItemUpdate();
                 if (parsed.status === "completed" && hadCodeChanges) reloadPreview();
@@ -291,7 +326,7 @@ export function useConversation({
                 const updated = await getWorkItem(appId, workItem.id);
                 setWorkItem(updated);
                 const status = await getConversationClaudeStatus(appId, conversationId);
-                setClaudeStatus(status.claude_status);
+                applyStatusResponse(status);
                 await loadMessages();
                 onItemUpdate();
                 if (hadCodeChanges) reloadPreview();
@@ -299,7 +334,17 @@ export function useConversation({
                 setStreamContent("");
                 setToolActivities([]);
                 setClaudeStatus("failed");
-                setLastError(parsed.detail || parsed.error || "An unexpected error occurred");
+                const diagnostic = parsed.diagnostic || (parsed.detail ? {
+                  summary: parsed.error || "Something went wrong. The request could not be completed.",
+                  category: parsed.category || "unknown",
+                  detail: parsed.detail,
+                  provider_id: null,
+                  model_id: selectedModel || null,
+                  run_id: null,
+                  updated_at: new Date().toISOString(),
+                } : null);
+                setLastError(parsed.error || diagnostic?.summary || "Something went wrong. The request could not be completed.");
+                setLastErrorDiagnostic(diagnostic);
                 const updated = await getWorkItem(appId, workItem.id);
                 setWorkItem(updated);
                 await loadMessages();
@@ -317,7 +362,7 @@ export function useConversation({
         throw err;
       }
     },
-    [appId, workItem.id, selectedModel, selectedProvider, onItemUpdate, setWorkItem, loadMessages, reloadPreview, debouncedReloadPreview]
+    [appId, workItem.id, selectedModel, selectedProvider, onItemUpdate, setWorkItem, loadMessages, reloadPreview, debouncedReloadPreview, applyStatusResponse]
   );
 
   // Auto-send a server-seeded user message when it has not received an assistant response yet.
@@ -406,10 +451,22 @@ export function useConversation({
 
     try {
       await consumeStream(content, false, attachments.map((file) => file.id));
-    } catch {
+    } catch (error) {
       // Stream failed — try to load messages from DB
       setInputText(content);
       setInputAttachments(attachments);
+      setClaudeStatus("failed");
+      const detail = error instanceof Error ? error.message : String(error);
+      setLastError("The request could not be started.");
+      setLastErrorDiagnostic({
+        summary: "The request could not be started.",
+        category: "request_error",
+        detail,
+        provider_id: selectedProvider || null,
+        model_id: selectedModel || null,
+        run_id: null,
+        updated_at: new Date().toISOString(),
+      });
       await loadMessages();
       const updated = await getWorkItem(appId, workItem.id);
       setWorkItem(updated);
@@ -417,7 +474,7 @@ export function useConversation({
       setSending(false);
       setStreamContent("");
     }
-  }, [inputText, inputAttachments, sending, consumeStream, loadMessages, appId, workItem.id, setWorkItem]);
+  }, [inputText, inputAttachments, sending, consumeStream, loadMessages, appId, workItem.id, setWorkItem, selectedProvider, selectedModel]);
 
   // Stop Claude
   const handleStopClaude = useCallback(async () => {
@@ -464,6 +521,7 @@ export function useConversation({
     isClaudeActive,
     sending,
     lastError,
+    lastErrorDiagnostic,
     inputText,
     setInputText,
     inputAttachments,

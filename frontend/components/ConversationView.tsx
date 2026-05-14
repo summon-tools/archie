@@ -277,6 +277,7 @@ export default function ConversationView({
         worktreeStatus={workItem.worktree_status}
         handleRetry={conversation.handleRetry}
         lastError={conversation.lastError}
+        lastErrorDiagnostic={conversation.lastErrorDiagnostic}
         logEndRef={logEndRef}
         appId={appId}
         workItemId={workItem.id}

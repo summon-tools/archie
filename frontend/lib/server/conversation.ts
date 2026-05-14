@@ -13,7 +13,7 @@ import { refreshIfStale } from "./knowledge/indexer";
 import { generateWorkItemBrief } from "./knowledge/brief";
 import { assembleContext } from "./knowledge/context";
 import { TASK_CONTEXT } from "./knowledge/contracts";
-import { categorizeFailure, failureMessage } from "./knowledge/failures";
+import { categorizeFailure, failureMessage, type FailureCategory } from "./knowledge/failures";
 import { getBudget, checkBudget } from "./knowledge/budgets";
 import { preflightCheck } from "./knowledge/preflight";
 import { execSync } from "child_process";
@@ -27,6 +27,35 @@ import type { AppFileRow } from "./types";
 type QueryEntry = { abort: AbortController };
 const _g = globalThis as any;
 const _conversationQueries: Map<number, QueryEntry> = _g.__conversationQueries ??= new Map();
+
+type ConversationFailureDiagnostic = {
+  summary: string;
+  category: string;
+  detail: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  run_id: number | null;
+  updated_at: string | null;
+};
+
+const FAILURE_CATEGORIES: FailureCategory[] = [
+  "timeout",
+  "budget_exceeded",
+  "provider_error",
+  "provider_unavailable",
+  "abort",
+  "context_error",
+  "execution_environment",
+  "dependency_missing",
+  "unknown",
+];
+
+function normalizeFailureCategory(value: string | null | undefined, detail: string): FailureCategory {
+  if (value && FAILURE_CATEGORIES.includes(value as FailureCategory)) {
+    return value as FailureCategory;
+  }
+  return categorizeFailure(detail || "unknown");
+}
 
 function uniqueFiles(files: AppFileRow[]): AppFileRow[] {
   const seen = new Set<number>();
@@ -56,6 +85,39 @@ function buildConversationAttachmentContext(params: {
     files,
   });
   return formatAttachmentContext(materialized);
+}
+
+function buildFailureDiagnostic(run: { id: number; status: string; provider_id: string; model_id: string | null; error_text: string | null; failure_category: string | null; updated_at: string } | undefined): ConversationFailureDiagnostic | null {
+  if (!run || run.status !== "failed") return null;
+  const category = normalizeFailureCategory(run.failure_category, run.error_text || "");
+  return {
+    summary: failureMessage(category),
+    category,
+    detail: run.error_text || null,
+    provider_id: run.provider_id || null,
+    model_id: run.model_id || null,
+    run_id: run.id,
+    updated_at: run.updated_at || null,
+  };
+}
+
+function buildLiveFailureDiagnostic(params: {
+  category: string;
+  detail: string;
+  providerId: string;
+  modelId: string | null;
+  runId: number;
+}): ConversationFailureDiagnostic {
+  const category = normalizeFailureCategory(params.category, params.detail);
+  return {
+    summary: failureMessage(category),
+    category,
+    detail: params.detail,
+    provider_id: params.providerId,
+    model_id: params.modelId,
+    run_id: params.runId,
+    updated_at: new Date().toISOString(),
+  };
 }
 
 function abortAllQueries(): void {
@@ -570,13 +632,20 @@ export async function streamConversationMessage(
 
             case "error": {
               const category = categorizeFailure(event.error);
+              const diagnostic = buildLiveFailureDiagnostic({
+                category,
+                detail: event.error,
+                providerId: resolvedProviderId,
+                modelId: model || null,
+                runId: run.id,
+              });
               dal.upsertSessionForConversation(conversationId, {
                 external_session_id: resultSessionId,
                 status: "failed",
               });
-              emitConversationEvent(conversationId, { type: "status", status: "failed" });
               dal.updateRun(run.id, { status: "failed", error_text: event.error, failure_category: category });
-              safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: failureMessage(category), category, detail: event.error })}\n\n`);
+              emitConversationEvent(conversationId, { type: "status", status: "failed" });
+              safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: diagnostic.summary, category, detail: event.error, diagnostic })}\n\n`);
               break;
             }
           }
@@ -587,11 +656,19 @@ export async function streamConversationMessage(
         const category = categorizeFailure(e);
         const status = category === "abort" ? "stopped" : "failed";
         dal.upsertSessionForConversation(conversationId, { status });
-        emitConversationEvent(conversationId, { type: "status", status });
         dal.updateRun(run.id, { status, error_text: e.message || String(e), failure_category: category });
+        emitConversationEvent(conversationId, { type: "status", status });
 
         if (category !== "abort") {
-          safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: failureMessage(category), category, detail: e.message || String(e) })}\n\n`);
+          const detail = e.message || String(e);
+          const diagnostic = buildLiveFailureDiagnostic({
+            category,
+            detail,
+            providerId: resolvedProviderId,
+            modelId: model || null,
+            runId: run.id,
+          });
+          safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: diagnostic.summary, category, detail, diagnostic })}\n\n`);
         }
       } finally {
         if (effectiveCwd) {
@@ -609,14 +686,18 @@ export function getConversationStatus(conversationId: number): {
   claude_log: string;
   claude_mode: string | null;
   claude_pending_prompt: string | null;
+  last_error: ConversationFailureDiagnostic | null;
 } {
   const session = dal.getSessionForConversation(conversationId);
   const isRunning = _conversationQueries.has(conversationId);
+  const status = isRunning ? "running" : (session?.status || null);
+  const latestRun = status === "failed" ? dal.getLatestRunForConversation(conversationId) : undefined;
   return {
-    claude_status: isRunning ? "running" : (session?.status || null),
+    claude_status: status,
     claude_log: "",
     claude_mode: null,
     claude_pending_prompt: null,
+    last_error: buildFailureDiagnostic(latestRun),
   };
 }
 
