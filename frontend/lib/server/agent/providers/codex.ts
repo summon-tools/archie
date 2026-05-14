@@ -23,6 +23,7 @@ const CODEX_MODELS: ModelEntry[] = [
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", provider: "codex" },
 ];
 
+const ERROR_DETAIL_LIMIT = 2000;
 type CodexSandboxMode = "bypass" | "read-only" | "workspace-write" | "danger-full-access";
 
 function spawnCodex(
@@ -478,7 +479,7 @@ export class CodexCliProvider implements AgentProvider {
       } else {
         const stderrOutput = (child as any)._stderrBuf?.() || "";
         const errorDetail = exitError || stderrOutput.trim();
-        yield { type: "error", error: `Codex CLI error: ${errorDetail.slice(0, 500)}` };
+        yield { type: "error", error: `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}` };
       }
     }
   }
@@ -525,7 +526,7 @@ export class CodexCliProvider implements AgentProvider {
       } else {
         const stderrOutput = (child as any)._stderrBuf?.() || "";
         const errorDetail = exitError || stderrOutput.trim();
-        yield { type: "error", error: `Codex CLI error: ${errorDetail.slice(0, 500)}` };
+        yield { type: "error", error: `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}` };
       }
     }
   }
@@ -565,7 +566,7 @@ export class CodexCliProvider implements AgentProvider {
       const errorDetail = exitError || stderrOutput.trim();
       throw new Error(
         errorDetail
-          ? `Codex CLI error: ${errorDetail.slice(0, 500)}`
+          ? `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}`
           : state.sawToolActivity
             ? "Codex CLI completed after tool activity but did not return a final response."
             : "Codex CLI completed without a final response."
@@ -634,7 +635,7 @@ export class CodexCliProvider implements AgentProvider {
         const stderrOutput = (child as any)._stderrBuf?.() || "";
         const errorDetail = exitError || stderrOutput.trim();
         if (errorDetail) {
-          yield { type: "error", detail: `Codex CLI error: ${errorDetail.slice(0, 500)}` };
+          yield { type: "error", detail: `Codex CLI error: ${errorDetail.slice(0, ERROR_DETAIL_LIMIT)}` };
         } else if (state.sawToolActivity) {
           yield { type: "error", detail: "Codex CLI completed after tool activity but did not return a final response." };
         }

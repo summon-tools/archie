@@ -70,6 +70,10 @@ describe("categorizeFailure", () => {
     expect(categorizeFailure("Failed to assemble context")).toBe("context_error");
   });
 
+  it("categorizes Bubblewrap sandbox errors as execution environment failures", () => {
+    expect(categorizeFailure("bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted")).toBe("execution_environment");
+  });
+
   it("categorizes knowledge errors", () => {
     expect(categorizeFailure("knowledge index failed")).toBe("context_error");
   });
@@ -91,6 +95,7 @@ describe("failureMessage", () => {
     "provider_unavailable",
     "abort",
     "context_error",
+    "execution_environment",
     "dependency_missing",
     "unknown",
   ];

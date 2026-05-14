@@ -201,6 +201,66 @@ describe("conversation streaming", () => {
     });
   });
 
+  it("persists failed provider diagnostics for the conversation status endpoint", async () => {
+    const app = seedApp(db);
+    const conversation = seedConversation(db, app.id);
+    const sandboxError = "Codex CLI error: bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted";
+
+    const mockProvider = createMockProvider({
+      streamTask: async function* () {
+        yield { type: "error" as const, error: sandboxError };
+      },
+    });
+
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: () => mockProvider,
+    }));
+    vi.doMock("@/lib/server/knowledge/indexer", () => ({ refreshIfStale: async () => {} }));
+    vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
+    vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
+    vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
+    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
+    vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
+    vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
+
+    const { streamConversationMessage, getConversationStatus } = await import("@/lib/server/conversation");
+    const stream = await streamConversationMessage(
+      conversation.id,
+      "Read the attached screenshot.",
+      "Test App",
+      ctx.tmpDir,
+      "gpt-5.5",
+      undefined,
+      false,
+      "codex",
+    );
+
+    const reader = stream.getReader();
+    const chunks: string[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(new TextDecoder().decode(value));
+    }
+
+    const sseText = chunks.join("");
+    expect(sseText).toContain("event: error");
+    expect(sseText).toContain("execution_environment");
+
+    const status = getConversationStatus(conversation.id);
+    expect(status.claude_status).toBe("failed");
+    expect(status.last_error).toMatchObject({
+      category: "execution_environment",
+      provider_id: "codex",
+      model_id: "gpt-5.5",
+      detail: sandboxError,
+    });
+
+    const run = db.prepare("SELECT * FROM runs WHERE conversation_id = ? ORDER BY id DESC LIMIT 1").get(conversation.id) as any;
+    expect(run.failure_category).toBe("execution_environment");
+    expect(run.error_text).toBe(sandboxError);
+  });
+
   it("starts plan step gates when a linked implementation conversation completes", async () => {
     const app = seedApp(db);
     const conversation = seedConversation(db, app.id);

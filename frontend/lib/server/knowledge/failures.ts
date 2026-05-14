@@ -10,6 +10,7 @@ export type FailureCategory =
   | "provider_unavailable"
   | "abort"
   | "context_error"
+  | "execution_environment"
   | "dependency_missing"
   | "unknown";
 
@@ -54,6 +55,18 @@ export function categorizeFailure(error: Error | string): FailureCategory {
     return "provider_error";
   }
 
+  // Tool execution environment issues (sandbox/container/kernel restrictions)
+  if (
+    msg.includes("bwrap") ||
+    msg.includes("bubblewrap") ||
+    msg.includes("Failed RTM_NEWADDR") ||
+    msg.includes("loopback") ||
+    msg.includes("Operation not permitted") ||
+    msg.includes("sandbox")
+  ) {
+    return "execution_environment";
+  }
+
   // Dependency missing (spawn errors, missing binaries)
   if (
     msg.includes("ENOENT") ||
@@ -87,6 +100,7 @@ export function failureMessage(category: FailureCategory): string {
     case "provider_unavailable": return "Could not reach the AI provider. Check your connection and API key.";
     case "abort": return "The operation was cancelled.";
     case "context_error": return "Failed to assemble context for this operation.";
+    case "execution_environment": return "The tool execution environment blocked the run. Check sandbox or container permissions.";
     case "dependency_missing": return "A required tool or file was not found. Check the app directory.";
     case "unknown": return "An unexpected error occurred.";
   }

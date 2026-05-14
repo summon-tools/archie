@@ -210,6 +210,17 @@ export interface ClaudeStatusResponse {
   claude_log: string;
   claude_mode: ClaudeMode | null;
   claude_pending_prompt: string | null;
+  last_error: ConversationErrorDiagnostic | null;
+}
+
+export interface ConversationErrorDiagnostic {
+  summary: string;
+  category: string;
+  detail: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  run_id: number | null;
+  updated_at: string | null;
 }
 
 // ── Enriched work item (API response shape with flattened env/artifact fields) ──

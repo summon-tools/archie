@@ -5,6 +5,12 @@ export function getRun(runId: number): RunRow | undefined {
   return getDb().prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
 }
 
+export function getLatestRunForConversation(conversationId: number): RunRow | undefined {
+  return getDb().prepare(
+    "SELECT * FROM runs WHERE conversation_id = ? ORDER BY id DESC LIMIT 1"
+  ).get(conversationId) as RunRow | undefined;
+}
+
 export function createRun(data: {
   app_id: number;
   conversation_id?: number | null;

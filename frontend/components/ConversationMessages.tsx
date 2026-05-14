@@ -1,6 +1,6 @@
 "use client";
 
-import { ConversationMessage } from "@/lib/types";
+import { ConversationErrorDiagnostic, ConversationMessage } from "@/lib/types";
 import MessageBubble from "@/components/MessageBubble";
 import SetupNextSteps from "@/components/SetupNextSteps";
 import { WarningCircle, SpinnerGap } from "@phosphor-icons/react";
@@ -43,6 +43,7 @@ interface ConversationMessagesProps {
   worktreeStatus: string | null;
   handleRetry: () => void;
   lastError?: string | null;
+  lastErrorDiagnostic?: ConversationErrorDiagnostic | null;
   logEndRef: React.RefObject<HTMLDivElement | null>;
   appId?: number;
   workItemId?: number;
@@ -61,6 +62,7 @@ export default function ConversationMessages({
   worktreeStatus,
   handleRetry,
   lastError,
+  lastErrorDiagnostic,
   logEndRef,
   appId,
   workItemId,
@@ -122,8 +124,32 @@ export default function ConversationMessages({
           <div className="animate-fadeIn">
             <div className="flex items-start gap-2 text-st-red text-sm">
               <WarningCircle size={16} weight="bold" className="flex-shrink-0 mt-0.5" />
-              <div>
+              <div className="min-w-0 flex-1">
                 <p>{lastError || "Something went wrong. The request could not be completed."}</p>
+                {lastErrorDiagnostic && (
+                  <details className="mt-2 max-w-2xl rounded-lg border border-th bg-th-elevated text-th-secondary">
+                    <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-th-primary hover:text-th-primary">
+                      Show technical details
+                    </summary>
+                    <div className="border-t border-th px-3 py-2 text-xs">
+                      <dl className="grid gap-x-3 gap-y-1 sm:grid-cols-[120px_1fr]">
+                        <dt className="text-th-muted">Category</dt>
+                        <dd className="break-words font-mono text-th-primary">{lastErrorDiagnostic.category || "unknown"}</dd>
+                        <dt className="text-th-muted">Provider</dt>
+                        <dd className="break-words font-mono text-th-primary">{lastErrorDiagnostic.provider_id || "unknown"}</dd>
+                        <dt className="text-th-muted">Model</dt>
+                        <dd className="break-words font-mono text-th-primary">{lastErrorDiagnostic.model_id || "unknown"}</dd>
+                        <dt className="text-th-muted">Run</dt>
+                        <dd className="break-words font-mono text-th-primary">{lastErrorDiagnostic.run_id ? `#${lastErrorDiagnostic.run_id}` : "unknown"}</dd>
+                      </dl>
+                      {lastErrorDiagnostic.detail && (
+                        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-th bg-th-main p-2 font-mono text-[11px] leading-relaxed text-th-secondary">
+                          {lastErrorDiagnostic.detail}
+                        </pre>
+                      )}
+                    </div>
+                  </details>
+                )}
                 <button
                   onClick={handleRetry}
                   disabled={sending}
