@@ -19,7 +19,7 @@ export function parseGitHubRemoteUrl(
   return null;
 }
 
-const API_VERSION = "2026-03-10";
+const API_VERSION = "2022-11-28";
 
 function githubHeaders(token: string): Record<string, string> {
   return {
@@ -44,6 +44,44 @@ interface PRResult {
   message: string;
   pr_url?: string;
   pr_number?: number;
+}
+
+function githubPullRequestErrorMessage({
+  status,
+  owner,
+  repo,
+  body,
+  acceptedPermissions,
+}: {
+  status: number;
+  owner: string;
+  repo: string;
+  body: any;
+  acceptedPermissions?: string | null;
+}): string {
+  const details: string[] = [];
+  if (body.message) details.push(body.message);
+  if (body.errors?.length) {
+    for (const err of body.errors) {
+      const parts = [err.message, err.field, err.code].filter(Boolean);
+      if (parts.length) details.push(parts.join(" — "));
+    }
+  }
+
+  const fullError = details.join(": ") || `GitHub API error ${status}`;
+  if (status === 404) {
+    const permissionHint = acceptedPermissions
+      ? ` GitHub says this endpoint accepts: ${acceptedPermissions}.`
+      : "";
+    return [
+      `GitHub could not create the PR for ${owner}/${repo}.`,
+      "Push can still work when Contents access is configured, but PR creation also needs the GitHub App installation to have Pull requests: Read and write.",
+      "If you changed GitHub App permissions, reinstall or approve the updated installation for this repository, then reconnect/retry.",
+      `${fullError}.${permissionHint}`,
+    ].join(" ");
+  }
+
+  return fullError;
 }
 
 export async function getDefaultBranch({
@@ -83,13 +121,11 @@ export async function createPullRequest({
     "Content-Type": "application/json",
   };
 
-  const fullHead = head.includes(":") ? head : `${owner}:${head}`;
-
   // Try creating the PR
   const createRes = await fetch(`${apiBase}/pulls`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ title, body: body || "", head: fullHead, base }),
+    body: JSON.stringify({ title, body: body || "", head, base }),
   });
 
   if (createRes.ok) {
@@ -105,16 +141,13 @@ export async function createPullRequest({
   // Read body once before any other async calls
   const errorBody = await createRes.json().catch(() => ({}));
 
-  // Build detailed error message
-  const details: string[] = [];
-  if (errorBody.message) details.push(errorBody.message);
-  if (errorBody.errors?.length) {
-    for (const err of errorBody.errors) {
-      const parts = [err.message, err.field, err.code].filter(Boolean);
-      if (parts.length) details.push(parts.join(" — "));
-    }
-  }
-  const fullError = details.join(": ") || `GitHub API error ${createRes.status}`;
+  const fullError = githubPullRequestErrorMessage({
+    status: createRes.status,
+    owner,
+    repo,
+    body: errorBody,
+    acceptedPermissions: createRes.headers.get("x-accepted-github-permissions"),
+  });
 
   // 422 often means a PR already exists for this head branch
   if (createRes.status === 422) {

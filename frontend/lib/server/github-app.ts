@@ -5,7 +5,7 @@ import { decryptSecret, encryptSecret } from "./secret-box";
 import type { GitHubUserConnectionRow } from "./types";
 
 export const GITHUB_OAUTH_CALLBACK_SUFFIX = "/api/github/oauth/callback";
-const GITHUB_API_VERSION = "2026-03-10";
+const GITHUB_API_VERSION = "2022-11-28";
 const REFRESH_SKEW_MS = 2 * 60 * 1000;
 
 export class GitHubAppError extends Error {
