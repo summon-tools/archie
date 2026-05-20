@@ -47,7 +47,7 @@ export async function POST(
       app_id: access.app.id,
       primary_conversation_id: conversation.id,
       title,
-      summary: `Imported existing branch ${branch}`,
+      summary: "",
       kind: "task",
       created_by: access.user.id,
     });

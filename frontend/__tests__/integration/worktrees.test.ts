@@ -6,7 +6,7 @@ import { createTempGitRepo, type TempGitRepo } from "../helpers/temp-git";
 
 // Import the module under test — worktrees.ts uses child_process (not SQLite)
 // so it works without the vi.doMock dance.
-import { createWorktree, createWorktreeFromBranch, removeWorktree } from "@/lib/server/worktrees";
+import { createWorktree, createWorktreeFromBranch, listRemoteBranches, removeWorktree } from "@/lib/server/worktrees";
 
 let repos: TempGitRepo[] = [];
 
@@ -85,6 +85,56 @@ describe("createWorktree", () => {
 });
 
 describe("createWorktreeFromBranch", () => {
+  it("lists available remote branches", () => {
+    const repo = makeRepo();
+    const remoteDir = fs.mkdtempSync(path.join(path.dirname(repo.dir), "archie-remote-"));
+    const baseBranch = execSync("git branch --show-current", { cwd: repo.dir, encoding: "utf-8" }).trim();
+    repos.push({
+      dir: remoteDir,
+      cleanup: () => fs.rmSync(remoteDir, { recursive: true, force: true }),
+    });
+
+    execSync("git init --bare", { cwd: remoteDir, stdio: "ignore" });
+    execSync(`git remote add origin "${remoteDir}"`, { cwd: repo.dir, stdio: "ignore" });
+    execSync("git push origin HEAD:main", { cwd: repo.dir, stdio: "ignore" });
+    execSync("git checkout -b feature/existing", { cwd: repo.dir, stdio: "ignore" });
+    fs.writeFileSync(path.join(repo.dir, "feature.txt"), "remote branch\n");
+    execSync("git add feature.txt", { cwd: repo.dir, stdio: "ignore" });
+    execSync('git commit -m "add feature branch"', { cwd: repo.dir, stdio: "ignore" });
+    execSync("git push origin feature/existing", { cwd: repo.dir, stdio: "ignore" });
+    execSync(`git checkout ${baseBranch}`, { cwd: repo.dir, stdio: "ignore" });
+
+    const result = listRemoteBranches(repo.dir);
+
+    expect(result.success).toBe(true);
+    expect(result.branches).toEqual(["feature/existing", "main"]);
+  });
+
+  it("can exclude branches already checked out in a worktree", () => {
+    const repo = makeRepo();
+    const remoteDir = fs.mkdtempSync(path.join(path.dirname(repo.dir), "archie-remote-"));
+    const baseBranch = execSync("git branch --show-current", { cwd: repo.dir, encoding: "utf-8" }).trim();
+    repos.push({
+      dir: remoteDir,
+      cleanup: () => fs.rmSync(remoteDir, { recursive: true, force: true }),
+    });
+
+    execSync("git init --bare", { cwd: remoteDir, stdio: "ignore" });
+    execSync(`git remote add origin "${remoteDir}"`, { cwd: repo.dir, stdio: "ignore" });
+    execSync("git push origin HEAD:main", { cwd: repo.dir, stdio: "ignore" });
+    execSync("git checkout -b feature/existing", { cwd: repo.dir, stdio: "ignore" });
+    fs.writeFileSync(path.join(repo.dir, "feature.txt"), "remote branch\n");
+    execSync("git add feature.txt", { cwd: repo.dir, stdio: "ignore" });
+    execSync('git commit -m "add feature branch"', { cwd: repo.dir, stdio: "ignore" });
+    execSync("git push origin feature/existing", { cwd: repo.dir, stdio: "ignore" });
+    execSync(`git checkout ${baseBranch}`, { cwd: repo.dir, stdio: "ignore" });
+
+    const result = listRemoteBranches(repo.dir, { excludeCheckedOut: true });
+
+    expect(result.success).toBe(true);
+    expect(result.branches).toEqual(["feature/existing"]);
+  });
+
   it("creates a worktree from an existing remote branch without deleting the branch on cleanup", () => {
     const repo = makeRepo();
     const remoteDir = fs.mkdtempSync(path.join(path.dirname(repo.dir), "archie-remote-"));

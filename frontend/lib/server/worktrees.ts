@@ -48,6 +48,10 @@ function gitArgsWithGitHubToken(args: string[], token?: string | null): string[]
   return [
     "-c",
     `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`,
+    "-c",
+    "url.https://github.com/.insteadOf=git@github.com:",
+    "-c",
+    "url.https://github.com/.insteadOf=ssh://git@github.com/",
     ...args,
   ];
 }
@@ -432,6 +436,72 @@ function validateExistingBranchName(appDir: string, branchName: string): string 
 
 function localBranchExists(appDir: string, branchName: string): boolean {
   return runGitSafe(appDir, ["rev-parse", "--verify", `refs/heads/${branchName}`]).returncode === 0;
+}
+
+function checkedOutBranches(appDir: string): Set<string> {
+  const result = runGitSafe(appDir, ["worktree", "list", "--porcelain"], 15000);
+  if (result.returncode !== 0) return new Set();
+  return new Set(result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("branch refs/heads/"))
+    .map((line) => line.replace(/^branch refs\/heads\//, ""))
+    .filter(Boolean));
+}
+
+export function listRemoteBranches(
+  appDir: string,
+  options: { token?: string | null; excludeCheckedOut?: boolean } = {},
+): { success: boolean; message: string; branches: string[]; checked_out_branches: string[] } {
+  if (!fs.existsSync(path.join(appDir, ".git"))) {
+    return {
+      success: false,
+      message: "App directory is not a git repository. Initialize git first.",
+      branches: [],
+      checked_out_branches: [],
+    };
+  }
+
+  const remote = runGitSafe(appDir, ["remote", "get-url", "origin"]);
+  if (remote.returncode !== 0) {
+    return {
+      success: false,
+      message: "No remote configured. Connect the project to GitHub first.",
+      branches: [],
+      checked_out_branches: [],
+    };
+  }
+
+  const result = runGitSafe(appDir, ["ls-remote", "--heads", "origin"], 30000, options.token);
+  if (result.returncode !== 0) {
+    return {
+      success: false,
+      message: result.stdout.trim() || "Unable to load remote branches.",
+      branches: [],
+      checked_out_branches: [],
+    };
+  }
+
+  const unavailableBranches = options.excludeCheckedOut ? checkedOutBranches(appDir) : new Set<string>();
+  const remoteBranches = new Set(result.stdout
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/)[1] || "")
+    .filter((ref) => ref.startsWith("refs/heads/"))
+    .map((ref) => ref.replace(/^refs\/heads\//, ""))
+    .filter(Boolean));
+  const checkedOutRemoteBranches = Array.from(unavailableBranches)
+    .filter((branch) => remoteBranches.has(branch))
+    .sort((a, b) => a.localeCompare(b));
+  const branches = Array.from(remoteBranches)
+    .filter((branch) => !unavailableBranches.has(branch))
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    success: true,
+    message: "Remote branches loaded",
+    branches,
+    checked_out_branches: checkedOutRemoteBranches,
+  };
 }
 
 export function createWorktreeFromBranch(

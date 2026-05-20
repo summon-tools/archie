@@ -199,6 +199,17 @@ export async function importExistingBranch(appId: number, branch: string): Promi
   });
 }
 
+export interface RemoteBranchesResponse {
+  branches: string[];
+  checked_out_branches: string[];
+}
+
+export async function getRemoteBranches(appId: number): Promise<RemoteBranchesResponse> {
+  return fetchJSON<RemoteBranchesResponse>(`${BASE}/apps/${appId}/git/branches`, {
+    cache: "no-store",
+  });
+}
+
 export async function getWorkItem(appId: number, itemId: number): Promise<Task> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}`);
 }
@@ -413,6 +424,10 @@ export async function getWorktreeGitStatus(appId: number, itemId: number): Promi
 
 export async function pushWorktreeBranch(appId: number, itemId: number): Promise<GitPushResult> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/push`, { method: "POST" });
+}
+
+export async function pullWorktreeBranch(appId: number, itemId: number): Promise<{ success: boolean; message: string; branch: string }> {
+  return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/pull`, { method: "POST" });
 }
 
 export async function rebaseWorktreeFromMain(appId: number, itemId: number): Promise<{ success: boolean; message: string }> {

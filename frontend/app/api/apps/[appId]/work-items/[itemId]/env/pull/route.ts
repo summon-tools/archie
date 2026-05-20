@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
-import { GitWorkflowError, publishWorkItemBranch } from "@/lib/server/git-workflows";
+import { GitWorkflowError, pullWorkItemBranch } from "@/lib/server/git-workflows";
 import { GitHubAppError } from "@/lib/server/github-app";
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ appId: string; itemId: string }> }
+  { params }: { params: Promise<{ appId: string; itemId: string }> },
 ) {
   let currentUser: Awaited<ReturnType<typeof getAuthUser>>;
   try {
@@ -19,23 +19,23 @@ export async function POST(
 
   try {
     const { appId, itemId } = await params;
-    const result = await publishWorkItemBranch({
+    const result = await pullWorkItemBranch({
       appId: Number(appId),
       workItemId: Number(itemId),
       user: currentUser,
-      mode: "update_pr",
     });
     return NextResponse.json({
       success: true,
       message: result.message,
+      branch: result.branch,
     });
-  } catch (err) {
-    if (err instanceof GitWorkflowError || err instanceof GitHubAppError) {
-      return NextResponse.json({ detail: err.message }, { status: err.status });
+  } catch (e) {
+    if (e instanceof GitWorkflowError || e instanceof GitHubAppError) {
+      return NextResponse.json({ detail: e.message }, { status: e.status });
     }
     return NextResponse.json(
-      { detail: err instanceof Error ? err.message : "Failed to update PR" },
-      { status: 500 }
+      { detail: e instanceof Error ? e.message : "Failed to pull branch" },
+      { status: 500 },
     );
   }
 }

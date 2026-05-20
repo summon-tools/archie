@@ -440,7 +440,46 @@ function getDefaultBranch(directory: string): string {
   return mainCheck.returncode === 0 ? "main" : "master";
 }
 
-export function pull(directory: string, branch?: string): { success: boolean; message: string } {
+export function getDefaultBranchName(directory: string): string {
+  return getDefaultBranch(directory);
+}
+
+export interface GitPullOptions {
+  branch?: string;
+  token?: string | null;
+  fastForwardOnly?: boolean;
+  requireClean?: boolean;
+  allowDefaultBranchHardReset?: boolean;
+  allowDeletedBranchFallback?: boolean;
+}
+
+function normalizePullOptions(branchOrOptions?: string | GitPullOptions): GitPullOptions {
+  if (typeof branchOrOptions === "string") return { branch: branchOrOptions };
+  return branchOrOptions || {};
+}
+
+function tokenizedGitArgs(token: string | null | undefined, args: string[]): string[] {
+  if (!token) return args;
+  return githubTokenGitArgs(token, args);
+}
+
+export function isWorktreeClean(directory: string): { clean: boolean; message: string } {
+  const status = runGitSafe(directory, ["status", "--porcelain"]);
+  if (status.returncode !== 0) {
+    return { clean: false, message: status.stdout.trim() || "Unable to inspect worktree status" };
+  }
+  if (status.stdout.trim()) {
+    return {
+      clean: false,
+      message: "Cannot pull because the worktree has local changes. Commit, push, or stash them before pulling.",
+    };
+  }
+  return { clean: true, message: "Worktree is clean" };
+}
+
+export function pull(directory: string, branchOrOptions?: string | GitPullOptions): { success: boolean; message: string } {
+  const options = normalizePullOptions(branchOrOptions);
+  let branch = options.branch;
   if (!isGitInitialized(directory)) {
     return { success: false, message: "Git not initialized" };
   }
@@ -455,26 +494,45 @@ export function pull(directory: string, branch?: string): { success: boolean; me
       branch = br.stdout.trim() || "main";
     }
 
-    // On main/master, force-sync to match remote exactly.
-    // Main is read-only locally — all work happens in worktrees.
-    if (branch === "main" || branch === "master") {
-      ensureGitignore(directory);
-      runGitSafe(directory, ["fetch", "origin", branch], 15000);
-      runGitSafe(directory, ["reset", "--hard", `origin/${branch}`]);
-      runGitSafe(directory, ["clean", "-fd", "--exclude=.archie"]);
-      return { success: true, message: "Synced to latest main from GitHub" };
+    if (options.requireClean) {
+      const clean = isWorktreeClean(directory);
+      if (!clean.clean) return { success: false, message: clean.message };
     }
 
-    const pullResult = runGitSafe(directory, ["pull", "origin", branch]);
+    // On main/master, force-sync to match remote exactly unless callers opt
+    // into the safer fast-forward flow used by chat-triggered git operations.
+    if (branch === "main" || branch === "master") {
+      if (options.allowDefaultBranchHardReset !== false) {
+        ensureGitignore(directory);
+        runGitSafe(directory, tokenizedGitArgs(options.token, ["fetch", "origin", branch]), 15000);
+        runGitSafe(directory, ["reset", "--hard", `origin/${branch}`]);
+        runGitSafe(directory, ["clean", "-fd", "--exclude=.archie"]);
+        return { success: true, message: `Synced to latest ${branch} from GitHub` };
+      }
+    }
+
+    const pullArgs = [
+      "pull",
+      ...(options.fastForwardOnly ? ["--ff-only"] : []),
+      "origin",
+      branch,
+    ];
+    const pullResult = runGitSafe(directory, tokenizedGitArgs(options.token, pullArgs));
     if (pullResult.returncode !== 0) {
       let errorMsg = pullResult.stdout.trim();
 
       // If the remote branch was deleted (e.g. merged and cleaned up),
       // switch to main and sync from there
       if (errorMsg.includes("couldn't find remote ref")) {
+        if (options.allowDeletedBranchFallback === false) {
+          return {
+            success: false,
+            message: `Remote branch "${branch}" was not found. It may have been merged or deleted on GitHub.`,
+          };
+        }
         const defaultBranch = getDefaultBranch(directory);
         runGitSafe(directory, ["checkout", defaultBranch]);
-        runGitSafe(directory, ["fetch", "origin", defaultBranch], 15000);
+        runGitSafe(directory, tokenizedGitArgs(options.token, ["fetch", "origin", defaultBranch]), 15000);
         runGitSafe(directory, ["reset", "--hard", `origin/${defaultBranch}`]);
         runGitSafe(directory, ["clean", "-fd", "--exclude=.archie"]);
         // Clean up the now-orphaned local branch
@@ -488,6 +546,8 @@ export function pull(directory: string, branch?: string): { success: boolean; me
         errorMsg = "Repository not found. Check your remote URL.";
       } else if (errorMsg.includes("CONFLICT")) {
         errorMsg = "Merge conflicts detected. Resolve them manually.";
+      } else if (errorMsg.includes("Not possible to fast-forward")) {
+        errorMsg = "Cannot pull because the branch cannot be fast-forwarded. Rebase or merge manually, then retry.";
       }
       return { success: false, message: errorMsg };
     }
@@ -516,16 +576,21 @@ function commitMessageWithCoAuthor(message: string, coAuthor?: { name: string; e
   return base.includes(footer) ? base : `${base}\n\n${footer}`;
 }
 
-function githubTokenPushArgs(token: string, branch: string): string[] {
+export function githubTokenGitArgs(token: string, args: string[]): string[] {
   const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
   return [
     "-c",
     `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`,
-    "push",
-    "-u",
-    "origin",
-    branch,
+    "-c",
+    "url.https://github.com/.insteadOf=git@github.com:",
+    "-c",
+    "url.https://github.com/.insteadOf=ssh://git@github.com/",
+    ...args,
   ];
+}
+
+function githubTokenPushArgs(token: string, branch: string): string[] {
+  return githubTokenGitArgs(token, ["push", "-u", "origin", branch]);
 }
 
 export function push(
