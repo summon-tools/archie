@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTestContext, getTestDb, type TestContext } from "../helpers/test-db";
-import { seedApp, seedConversation } from "../helpers/seed";
+import { seedApp, seedConversation, seedUser, seedWorkItem } from "../helpers/seed";
 import { createMockProvider } from "../helpers/mock-provider";
 import type Database from "better-sqlite3";
 
@@ -344,5 +344,144 @@ describe("conversation streaming", () => {
     ]);
     const roomMessage = db.prepare("SELECT * FROM room_messages WHERE room_id = ? AND kind = 'execution_event'").get(room.id) as any;
     expect(roomMessage.body_md).toContain("Started review gates");
+  });
+
+  it("handles explicit git chat commands through the backend flow without invoking the provider", async () => {
+    const app = seedApp(db, { directory: ctx.tmpDir });
+    const user = seedUser(db);
+    const conversation = seedConversation(db, app.id, { kind: "task" });
+    const workItem = seedWorkItem(db, app.id, conversation.id);
+    db.prepare(
+      "INSERT INTO work_item_env (work_item_id, branch_name, worktree_dir, worktree_status) VALUES (?, ?, ?, ?)",
+    ).run(workItem.id, "task/test-branch", ctx.tmpDir, "ready");
+
+    const getProvider = vi.fn(() => {
+      throw new Error("provider should not be called");
+    });
+    const publishWorkItemBranch = vi.fn(async () => ({
+      success: true,
+      action: "publish_pr",
+      message: "Pull request #7 created",
+      chat_message: "Pushed branch `task/test-branch` using the connected GitHub account.\nPR #7: https://github.com/acme/repo/pull/7",
+      branch: "task/test-branch",
+      commit_hash: "abc1234",
+      pr_url: "https://github.com/acme/repo/pull/7",
+      pr_number: 7,
+    }));
+
+    vi.doMock("@/lib/server/agent", () => ({ getProvider }));
+    vi.doMock("@/lib/server/git-workflows", () => ({
+      publishWorkItemBranch,
+      pullWorkItemBranch: vi.fn(),
+      pullAppDefaultBranch: vi.fn(),
+    }));
+
+    const { streamConversationMessage } = await import("@/lib/server/conversation");
+    const stream = await streamConversationMessage(
+      conversation.id,
+      "commit and push and create a PR",
+      "Test App",
+      ctx.tmpDir,
+      undefined,
+      user.id,
+    );
+
+    const reader = stream.getReader();
+    const chunks: string[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(new TextDecoder().decode(value));
+    }
+
+    expect(getProvider).not.toHaveBeenCalled();
+    expect(publishWorkItemBranch).toHaveBeenCalledWith(expect.objectContaining({
+      appId: app.id,
+      workItemId: workItem.id,
+      mode: "publish_pr",
+      user: expect.objectContaining({ id: user.id, name: "Test User" }),
+    }));
+    expect(chunks.join("")).toContain("event: done");
+
+    const messages = db.prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY seq ASC").all(conversation.id) as any[];
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(messages[0].body_md).toBe("commit and push and create a PR");
+    expect(messages[1].body_md).toContain("PR #7");
+  });
+
+  it("keeps non-git chat on the provider path", async () => {
+    const app = seedApp(db, { directory: ctx.tmpDir });
+    const conversation = seedConversation(db, app.id);
+    const streamTask = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        result: {
+          text: "Provider handled this.",
+          sessionId: "provider-session",
+          costUsd: 0.001,
+          durationMs: 20,
+          numTurns: 1,
+          usage: { inputTokens: 5, outputTokens: 5 },
+          models: ["mock-model"],
+        },
+      };
+    });
+    const mockProvider = createMockProvider({ streamTask });
+    vi.doMock("@/lib/server/agent", () => ({ getProvider: () => mockProvider }));
+    vi.doMock("@/lib/server/knowledge/indexer", () => ({ refreshIfStale: async () => {} }));
+    vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
+    vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
+    vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
+    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
+    vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
+    vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
+
+    const { streamConversationMessage } = await import("@/lib/server/conversation");
+    const stream = await streamConversationMessage(conversation.id, "Please inspect the app", "Test App", ctx.tmpDir);
+    const reader = stream.getReader();
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    expect(streamTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns dirty pull failures as assistant messages", async () => {
+    const app = seedApp(db, { directory: ctx.tmpDir });
+    const user = seedUser(db);
+    const conversation = seedConversation(db, app.id, { kind: "task" });
+    const workItem = seedWorkItem(db, app.id, conversation.id);
+    db.prepare(
+      "INSERT INTO work_item_env (work_item_id, branch_name, worktree_dir, worktree_status) VALUES (?, ?, ?, ?)",
+    ).run(workItem.id, "task/test-branch", ctx.tmpDir, "ready");
+
+    vi.doMock("@/lib/server/agent", () => ({ getProvider: vi.fn() }));
+    vi.doMock("@/lib/server/git-workflows", () => ({
+      publishWorkItemBranch: vi.fn(),
+      pullWorkItemBranch: vi.fn(async () => {
+        throw new Error("Cannot pull because the worktree has local changes. Commit, push, or stash them before pulling.");
+      }),
+      pullAppDefaultBranch: vi.fn(),
+    }));
+
+    const { streamConversationMessage } = await import("@/lib/server/conversation");
+    const stream = await streamConversationMessage(
+      conversation.id,
+      "pull latest",
+      "Test App",
+      ctx.tmpDir,
+      undefined,
+      user.id,
+    );
+    const reader = stream.getReader();
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    const assistant = db.prepare("SELECT * FROM messages WHERE conversation_id = ? AND role = 'assistant'").get(conversation.id) as any;
+    expect(assistant.body_md).toContain("I couldn't complete that git operation.");
+    expect(assistant.body_md).toContain("worktree has local changes");
   });
 });

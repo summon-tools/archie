@@ -192,6 +192,24 @@ export async function createWorkItem(appId: number, message: string, taskType?: 
   });
 }
 
+export async function importExistingBranch(appId: number, branch: string): Promise<Task> {
+  return fetchJSON(`${BASE}/apps/${appId}/work-items/import-branch`, {
+    method: "POST",
+    body: JSON.stringify({ branch }),
+  });
+}
+
+export interface RemoteBranchesResponse {
+  branches: string[];
+  checked_out_branches: string[];
+}
+
+export async function getRemoteBranches(appId: number): Promise<RemoteBranchesResponse> {
+  return fetchJSON<RemoteBranchesResponse>(`${BASE}/apps/${appId}/git/branches`, {
+    cache: "no-store",
+  });
+}
+
 export async function getWorkItem(appId: number, itemId: number): Promise<Task> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}`);
 }
@@ -408,6 +426,10 @@ export async function pushWorktreeBranch(appId: number, itemId: number): Promise
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/push`, { method: "POST" });
 }
 
+export async function pullWorktreeBranch(appId: number, itemId: number): Promise<{ success: boolean; message: string; branch: string }> {
+  return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/pull`, { method: "POST" });
+}
+
 export async function rebaseWorktreeFromMain(appId: number, itemId: number): Promise<{ success: boolean; message: string }> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/rebase`, { method: "POST" });
 }
@@ -542,6 +564,50 @@ export async function updateGitSettings(name: string, email: string): Promise<{ 
 
 export async function generateSSHKey(): Promise<{ success: boolean; message: string; public_key: string }> {
   return fetchJSON(`${BASE}/git/ssh-key`, { method: "POST" });
+}
+
+export interface GitHubAppSettings {
+  public_server_url: string;
+  callback_suffix: string;
+  callback_url: string;
+  client_id: string;
+  client_secret_configured: boolean;
+  app_slug: string;
+  install_url: string;
+  bot_username: string;
+  bot_display_name: string;
+  bot_email: string;
+}
+
+export interface GitHubConnection {
+  connected: boolean;
+  github_login?: string;
+  github_name?: string | null;
+  github_email?: string | null;
+  access_token_expires_at?: string | null;
+  refresh_token_expires_at?: string | null;
+  connected_at?: string;
+}
+
+export async function getGitHubAppSettings(): Promise<GitHubAppSettings> {
+  return fetchJSON<GitHubAppSettings>(`${BASE}/github/app-settings`);
+}
+
+export async function updateGitHubAppSettings(
+  data: Partial<GitHubAppSettings> & { client_secret?: string; clear_client_secret?: boolean },
+): Promise<GitHubAppSettings> {
+  return fetchJSON<GitHubAppSettings>(`${BASE}/github/app-settings`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getGitHubConnection(): Promise<GitHubConnection> {
+  return fetchJSON<GitHubConnection>(`${BASE}/github/connection`);
+}
+
+export async function disconnectGitHub(): Promise<GitHubConnection> {
+  return fetchJSON<GitHubConnection>(`${BASE}/github/connection`, { method: "DELETE" });
 }
 
 export async function getGitStatus(appId: number): Promise<GitStatus> {

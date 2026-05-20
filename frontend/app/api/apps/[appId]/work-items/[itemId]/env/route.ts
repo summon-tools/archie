@@ -70,12 +70,15 @@ export async function DELETE(
       stopPreview(env.preview_pid, env.worktree_dir, env.preview_port, { appId: Number(appId), workItemId: wi.id });
     }
 
-    const result = removeWorktree(directory, env.worktree_dir, env.branch_name);
+    const branchToDelete = env.delete_branch_on_remove ? env.branch_name : "";
+    const result = removeWorktree(directory, env.worktree_dir, branchToDelete);
 
     // Clear env fields
     dal.updateWorkItemEnv(wi.id, {
       branch_name: null,
       worktree_dir: null,
+      branch_source: "generated",
+      delete_branch_on_remove: 1,
       preview_port: null,
       preview_pid: null,
       worktree_status: null,

@@ -27,6 +27,7 @@ When the user describes a task or request:
 2. If the task is clear enough to implement, go ahead and implement it directly.
 3. If something is genuinely ambiguous and cannot be determined from the code, ask clarifying questions before implementing.
 4. Keep your responses concise and focused.
+5. Do not run git commit, git push, git pull, gh pr create, or other pull request commands yourself. Archie handles those through its built-in GitHub flow when the user asks.
 
 Repo memory structure:
 - Spec files: .archie/spec/ — describes what the app does (features, routes, models, flows). Index at .archie/spec/_index.md.

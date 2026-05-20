@@ -7,6 +7,7 @@ export function getGitHubToken(): string | null {
 export function parseGitHubRemoteUrl(
   url: string
 ): { owner: string; repo: string } | null {
+  url = url.trim().replace(/^https?:\/\/[^@]+@github\.com\//, "https://github.com/");
   // SSH format: git@github.com:owner/repo.git
   const sshMatch = url.match(/git@github\.com:([^/]+)\/([^/.]+)(?:\.git)?$/);
   if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] };
@@ -16,6 +17,16 @@ export function parseGitHubRemoteUrl(
   );
   if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] };
   return null;
+}
+
+const API_VERSION = "2022-11-28";
+
+function githubHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": API_VERSION,
+  };
 }
 
 interface CreatePRParams {
@@ -35,6 +46,44 @@ interface PRResult {
   pr_number?: number;
 }
 
+function githubPullRequestErrorMessage({
+  status,
+  owner,
+  repo,
+  body,
+  acceptedPermissions,
+}: {
+  status: number;
+  owner: string;
+  repo: string;
+  body: any;
+  acceptedPermissions?: string | null;
+}): string {
+  const details: string[] = [];
+  if (body.message) details.push(body.message);
+  if (body.errors?.length) {
+    for (const err of body.errors) {
+      const parts = [err.message, err.field, err.code].filter(Boolean);
+      if (parts.length) details.push(parts.join(" — "));
+    }
+  }
+
+  const fullError = details.join(": ") || `GitHub API error ${status}`;
+  if (status === 404) {
+    const permissionHint = acceptedPermissions
+      ? ` GitHub says this endpoint accepts: ${acceptedPermissions}.`
+      : "";
+    return [
+      `GitHub could not create the PR for ${owner}/${repo}.`,
+      "Push can still work when Contents access is configured, but PR creation also needs the GitHub App installation to have Pull requests: Read and write.",
+      "If you changed GitHub App permissions, reinstall or approve the updated installation for this repository, then reconnect/retry.",
+      `${fullError}.${permissionHint}`,
+    ].join(" ");
+  }
+
+  return fullError;
+}
+
 export async function getDefaultBranch({
   owner,
   repo,
@@ -47,10 +96,7 @@ export async function getDefaultBranch({
   const res = await fetch(
     `https://api.github.com/repos/${owner}/${repo}`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-      },
+      headers: githubHeaders(token),
     }
   );
   if (res.ok) {
@@ -71,18 +117,15 @@ export async function createPullRequest({
 }: CreatePRParams): Promise<PRResult> {
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
   const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
+    ...githubHeaders(token),
     "Content-Type": "application/json",
   };
-
-  const fullHead = head.includes(":") ? head : `${owner}:${head}`;
 
   // Try creating the PR
   const createRes = await fetch(`${apiBase}/pulls`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ title, body: body || "", head: fullHead, base }),
+    body: JSON.stringify({ title, body: body || "", head, base }),
   });
 
   if (createRes.ok) {
@@ -98,16 +141,13 @@ export async function createPullRequest({
   // Read body once before any other async calls
   const errorBody = await createRes.json().catch(() => ({}));
 
-  // Build detailed error message
-  const details: string[] = [];
-  if (errorBody.message) details.push(errorBody.message);
-  if (errorBody.errors?.length) {
-    for (const err of errorBody.errors) {
-      const parts = [err.message, err.field, err.code].filter(Boolean);
-      if (parts.length) details.push(parts.join(" — "));
-    }
-  }
-  const fullError = details.join(": ") || `GitHub API error ${createRes.status}`;
+  const fullError = githubPullRequestErrorMessage({
+    status: createRes.status,
+    owner,
+    repo,
+    body: errorBody,
+    acceptedPermissions: createRes.headers.get("x-accepted-github-permissions"),
+  });
 
   // 422 often means a PR already exists for this head branch
   if (createRes.status === 422) {
@@ -141,8 +181,7 @@ export async function updatePullRequest({
     {
       method: "PATCH",
       headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
+        ...githubHeaders(token),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ ...(title && { title }), body }),
@@ -157,6 +196,31 @@ export async function updatePullRequest({
   return {
     success: false,
     message: errorBody.message || `GitHub API error ${res.status}`,
+  };
+}
+
+export async function getPullRequest({
+  owner,
+  repo,
+  pr_number,
+  token,
+}: {
+  owner: string;
+  repo: string;
+  pr_number: number;
+  token: string;
+}): Promise<{ state: string; pr_url: string; pr_number: number; title: string } | null> {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pr_number}`,
+    { headers: githubHeaders(token) },
+  );
+  if (!res.ok) return null;
+  const pr = await res.json();
+  return {
+    state: pr.merged_at ? "MERGED" : String(pr.state || "unknown").toUpperCase(),
+    pr_url: pr.html_url,
+    pr_number: pr.number,
+    title: pr.title,
   };
 }
 
@@ -179,10 +243,7 @@ export async function uploadVideoToGitHub({
   token: string;
 }): Promise<string> {
   const fs = await import("fs");
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-  };
+  const headers = githubHeaders(token);
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
   const tag = "demo-assets";
 
@@ -268,10 +329,7 @@ export async function findExistingPR({
   const searchRes = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/pulls?head=${encodeURIComponent(headParam)}&state=open`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-      },
+      headers: githubHeaders(token),
     }
   );
 

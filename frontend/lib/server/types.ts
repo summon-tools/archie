@@ -77,8 +77,25 @@ export interface WorkItemEnvRow {
   branch_name: string | null;
   worktree_dir: string | null;
   worktree_status: WorktreeStatus;
+  branch_source: "generated" | "imported" | "setup";
+  delete_branch_on_remove: number;
   preview_port: number | null;
   preview_pid: number | null;
+}
+
+export interface GitHubUserConnectionRow {
+  user_id: number;
+  github_user_id: number;
+  github_login: string;
+  github_name: string | null;
+  github_email: string | null;
+  access_token_ciphertext: string;
+  refresh_token_ciphertext: string | null;
+  access_token_expires_at: string | null;
+  refresh_token_expires_at: string | null;
+  connected_at: string;
+  updated_at: string;
+  revoked_at: string | null;
 }
 
 export interface AgentSessionRow {

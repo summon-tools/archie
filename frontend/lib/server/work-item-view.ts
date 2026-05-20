@@ -32,6 +32,8 @@ export function enrichWorkItem(wi: WorkItemWithUser): WorkItemWithUser & Record<
     branch_name: env.branch_name || null,
     worktree_dir: env.worktree_dir || null,
     worktree_status: env.worktree_status || null,
+    branch_source: env.branch_source || "generated",
+    delete_branch_on_remove: env.delete_branch_on_remove ?? 1,
     preview_port: env.preview_port || null,
     preview_pid: env.preview_pid || null,
     pr_url: prMeta.pr_url || null,

@@ -22,6 +22,12 @@ import { emitConversationEvent } from "./conversation-events";
 import { buildConversationSystemPromptBase } from "./prompts/conversation";
 import { cleanupMaterializedFilesForContext, formatAttachmentContext, materializeFilesForContext, serializeAppFile } from "./file-storage";
 import type { AppFileRow } from "./types";
+import { detectGitChatIntent, type GitChatIntent } from "./chat-git-intents";
+import {
+  pullAppDefaultBranch,
+  pullWorkItemBranch,
+  publishWorkItemBranch,
+} from "./git-workflows";
 
 // In-memory tracking of running queries, keyed by conversationId.
 type QueryEntry = { abort: AbortController };
@@ -289,6 +295,149 @@ export function isConversationRunning(conversationId: number): boolean {
   return _conversationQueries.has(conversationId);
 }
 
+function assistantMessagePayload(message: ReturnType<typeof dal.createMessage>, conversationId: number, content: string) {
+  return {
+    id: message.id,
+    conversation_id: conversationId,
+    role: "assistant",
+    content,
+    message_type: "text",
+    created_by_name: null,
+    created_by_color: null,
+    created_at: message.created_at,
+  };
+}
+
+async function runGitChatIntent(params: {
+  intent: GitChatIntent;
+  appId: number;
+  conversationId: number;
+  workItemId?: number;
+  userId?: number;
+}): Promise<string> {
+  if (!params.userId) {
+    return "I couldn't run that git operation because there is no authenticated user attached to this chat request.";
+  }
+
+  const user = dal.getUser(params.userId);
+  const workflowUser = {
+    id: params.userId,
+    name: user?.name || user?.username || "User",
+  };
+
+  switch (params.intent) {
+    case "push": {
+      if (!params.workItemId) return "This git command needs a task branch. Open a task conversation, then ask me to push again.";
+      const result = await publishWorkItemBranch({
+        appId: params.appId,
+        workItemId: params.workItemId,
+        user: workflowUser,
+        mode: "push",
+      });
+      return result.chat_message;
+    }
+    case "publish_pr": {
+      if (!params.workItemId) return "This git command needs a task branch. Open a task conversation, then ask me to create the PR again.";
+      const result = await publishWorkItemBranch({
+        appId: params.appId,
+        workItemId: params.workItemId,
+        user: workflowUser,
+        mode: "publish_pr",
+      });
+      return result.chat_message;
+    }
+    case "update_pr": {
+      if (!params.workItemId) return "This git command needs an existing task PR. Open the task conversation, then ask me to update the PR again.";
+      const result = await publishWorkItemBranch({
+        appId: params.appId,
+        workItemId: params.workItemId,
+        user: workflowUser,
+        mode: "update_pr",
+      });
+      return result.chat_message;
+    }
+    case "pull_worktree": {
+      if (!params.workItemId) {
+        const result = await pullAppDefaultBranch({ appId: params.appId, user: workflowUser });
+        return result.chat_message;
+      }
+      const result = await pullWorkItemBranch({
+        appId: params.appId,
+        workItemId: params.workItemId,
+        user: workflowUser,
+      });
+      return result.chat_message;
+    }
+    case "pull_app_default": {
+      const result = await pullAppDefaultBranch({ appId: params.appId, user: workflowUser });
+      return result.chat_message;
+    }
+    default:
+      return "";
+  }
+}
+
+function streamHandledGitChatIntent(params: {
+  intent: GitChatIntent;
+  appId: number;
+  conversationId: number;
+  workItemId?: number;
+  userId?: number;
+}): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const abortController = new AbortController();
+  _conversationQueries.set(params.conversationId, { abort: abortController });
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let controllerOpen = true;
+      const safeEnqueue = (data: string) => {
+        if (!controllerOpen) return;
+        try { controller.enqueue(encoder.encode(data)); } catch { controllerOpen = false; }
+      };
+
+      try {
+        dal.upsertSessionForConversation(params.conversationId, { status: "running" });
+        emitConversationEvent(params.conversationId, { type: "status", status: "running" });
+        safeEnqueue(`event: activity\ndata: ${JSON.stringify({ kind: "status", message: "Running GitHub flow" })}\n\n`);
+
+        let body: string;
+        try {
+          body = await runGitChatIntent(params);
+        } catch (e) {
+          body = `I couldn't complete that git operation.\n\n${e instanceof Error ? e.message : String(e)}`;
+        }
+
+        const assistantMsg = dal.createMessage({
+          conversation_id: params.conversationId,
+          role: "assistant",
+          kind: "text",
+          body_md: body,
+          provider_id: "backend_git",
+        });
+        emitConversationEvent(params.conversationId, {
+          type: "message",
+          message: assistantMessagePayload(assistantMsg, params.conversationId, body),
+        });
+
+        dal.upsertSessionForConversation(params.conversationId, { status: "completed" });
+        emitConversationEvent(params.conversationId, { type: "status", status: "completed" });
+
+        safeEnqueue(`event: text\ndata: ${JSON.stringify({ text: body })}\n\n`);
+        safeEnqueue(`event: status\ndata: ${JSON.stringify({ status: "completed" })}\n\n`);
+        safeEnqueue(`event: done\ndata: ${JSON.stringify({ session_id: "" })}\n\n`);
+      } catch (e: any) {
+        const detail = e.message || String(e);
+        safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: detail })}\n\n`);
+        safeEnqueue(`event: done\ndata: ${JSON.stringify({ session_id: "" })}\n\n`);
+      } finally {
+        _conversationQueries.delete(params.conversationId);
+        try { controller.close(); } catch {}
+      }
+    },
+  });
+}
+
 export async function streamConversationMessage(
   conversationId: number,
   content: string,
@@ -340,7 +489,6 @@ export async function streamConversationMessage(
   const resolvedProviderId = providerId || session?.provider_id || "claude";
   const isProviderSwitch = Boolean(session && providerId && session.provider_id !== resolvedProviderId);
   const sessionId = isProviderSwitch ? undefined : session?.external_session_id || undefined;
-  const provider = getProvider(resolvedProviderId);
 
   // Resolve worktree for task conversations
   const workItem = dal.getWorkItemByConversationId(conversationId);
@@ -367,6 +515,8 @@ export async function streamConversationMessage(
           dal.updateWorkItemEnv(workItem.id, {
             worktree_dir: wt.worktree_dir,
             branch_name: wt.branch_name,
+            branch_source: "generated",
+            delete_branch_on_remove: 1,
             worktree_status: "ready",
           });
           env = dal.getWorkItemEnv(workItem.id);
@@ -382,6 +532,17 @@ export async function streamConversationMessage(
   }
 
   const effectiveCwd = env?.worktree_dir || directory || undefined;
+  const gitIntent = detectGitChatIntent(content, { hasWorkItem: Boolean(workItem) });
+  if (gitIntent.type !== "none") {
+    return streamHandledGitChatIntent({
+      intent: gitIntent.type,
+      appId: conversation.app_id,
+      conversationId,
+      workItemId: workItem?.id,
+      userId,
+    });
+  }
+
   const attachmentContext = effectiveCwd ? buildConversationAttachmentContext({
     appId: conversation.app_id,
     conversationId,
@@ -494,6 +655,7 @@ export async function streamConversationMessage(
   const streamCwd = conversation.kind === "conversation" ? (process.env.HOME || "/tmp") : effectiveCwd;
 
   // Get the event stream from the provider
+  const provider = getProvider(resolvedProviderId);
   const events = sessionId
     ? provider.resumeSession({ prompt, cwd: streamCwd, model, sessionId, abortController })
     : provider.streamTask({ prompt, cwd: streamCwd, model, abortController });

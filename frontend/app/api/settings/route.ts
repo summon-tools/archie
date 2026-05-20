@@ -34,7 +34,9 @@ export async function GET(request: NextRequest) {
 
   const settings: Record<string, string> = {};
   for (const [key, value] of Object.entries(allSettings)) {
-    if (key === "github_token" && value) {
+    if (key === "github_app_client_secret" && value) {
+      settings[key] = "configured";
+    } else if (key === "github_token" && value) {
       // Mask token: show prefix + last 4 chars
       const v = value;
       const prefix = v.startsWith("ghp_") ? "ghp_" : v.startsWith("github_pat_") ? "github_pat_" : "";

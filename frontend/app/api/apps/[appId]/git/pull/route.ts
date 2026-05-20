@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/server/db";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
-import { pull, isGitInitialized } from "@/lib/server/git";
-import type { AppRow } from "@/lib/server/types";
+import { GitWorkflowError, pullAppDefaultBranch } from "@/lib/server/git-workflows";
+import { GitHubAppError } from "@/lib/server/github-app";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string }> }
 ) {
+  let currentUser: Awaited<ReturnType<typeof getAuthUser>>;
   try {
-    await getAuthUser(request);
+    currentUser = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
@@ -22,34 +22,20 @@ export async function POST(
   const body = await request.json().catch(() => ({}));
   const { branch } = body;
 
-  const db = getDb();
-  const app = db
-    .prepare("SELECT * FROM apps WHERE id = ?")
-    .get(appId) as AppRow | undefined;
-
-  if (!app) {
-    return NextResponse.json({ detail: "App not found" }, { status: 404 });
-  }
-
-  if (!app.directory) {
+  try {
+    const result = await pullAppDefaultBranch({
+      appId: Number(appId),
+      user: currentUser,
+      branch,
+    });
+    return NextResponse.json({ message: result.message });
+  } catch (e) {
+    if (e instanceof GitWorkflowError || e instanceof GitHubAppError) {
+      return NextResponse.json({ detail: e.message }, { status: e.status });
+    }
     return NextResponse.json(
-      { detail: "App has no directory configured" },
-      { status: 400 }
+      { detail: e instanceof Error ? e.message : "Failed to pull from GitHub" },
+      { status: 500 },
     );
   }
-
-  if (!isGitInitialized(app.directory)) {
-    return NextResponse.json(
-      { detail: "Git not initialized" },
-      { status: 400 }
-    );
-  }
-
-  const result = pull(app.directory, branch);
-
-  if (!result.success) {
-    return NextResponse.json({ detail: result.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ message: result.message });
 }
