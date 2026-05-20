@@ -31,6 +31,7 @@ export async function GET(
         message_type: m.message_type,
         created_by_name: m.created_by_name,
         created_by_color: m.created_by_color,
+        sender_label: m.sender_label,
         created_at: m.created_at,
         attachments: dal.getFilesForMessage(access.app.id, m.id).map(serializeAppFile),
       })),
@@ -83,7 +84,18 @@ export async function POST(
 
     emitConversationEvent(access.conversation.id, {
       type: "message",
-      message: { id: message.id, conversation_id: access.conversation.id, role: parsedRole, content: bodyMd, message_type: parsedMessageType, created_by_name: access.user.name || null, created_by_color: null, created_at: message.created_at, attachments },
+      message: {
+        id: message.id,
+        conversation_id: access.conversation.id,
+        role: parsedRole,
+        content: bodyMd,
+        message_type: parsedMessageType,
+        created_by_name: access.user.name || null,
+        created_by_color: null,
+        sender_label: access.user.name || null,
+        created_at: message.created_at,
+        attachments,
+      },
     });
 
     return NextResponse.json({ ...message, attachments });

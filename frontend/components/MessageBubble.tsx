@@ -58,6 +58,21 @@ interface MessageBubbleProps {
   attachments?: MessageAttachment[];
 }
 
+function SenderLabel({ name, color }: { name: string; color?: string | null }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-meta font-semibold text-th-dimmed">
+      {color && (
+        <span
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: color }}
+          aria-hidden="true"
+        />
+      )}
+      {name}
+    </span>
+  );
+}
+
 export default function MessageBubble({
   role,
   content,
@@ -80,9 +95,13 @@ export default function MessageBubble({
   }
 
   if (role === "user") {
+    const displaySender = senderName?.trim() || "Unknown user";
     return (
       <div className="flex justify-end animate-fadeIn">
         <div className="max-w-[80%] bg-th-muted text-th-primary rounded-2xl rounded-tr-sm px-4 py-2.5 overflow-hidden">
+          <div className="mb-1">
+            <SenderLabel name={displaySender} color={senderColor} />
+          </div>
           {isMarkdown ? (
             <div className={USER_PROSE_CLASSES} style={{ overflowWrap: "anywhere" }}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>

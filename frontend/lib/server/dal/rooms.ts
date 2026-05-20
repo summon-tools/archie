@@ -129,9 +129,11 @@ export function createRoomMessage(data: {
 
 export function getRoomMessages(roomId: number, limit = 200): RoomMessageRow[] {
   return getDb().prepare(
-    `SELECT * FROM room_messages
-     WHERE room_id = ?
-     ORDER BY id ASC
+    `SELECT rm.*, u.name as author_name, u.color as author_color
+     FROM room_messages rm
+     LEFT JOIN users u ON rm.author_user_id = u.id
+     WHERE rm.room_id = ?
+     ORDER BY rm.id ASC
      LIMIT ?`
   ).all(roomId, limit) as RoomMessageRow[];
 }

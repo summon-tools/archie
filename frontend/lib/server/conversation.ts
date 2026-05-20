@@ -34,6 +34,12 @@ type QueryEntry = { abort: AbortController };
 const _g = globalThis as any;
 const _conversationQueries: Map<number, QueryEntry> = _g.__conversationQueries ??= new Map();
 
+interface ConversationMessageSource {
+  sent_by_agent_key?: string;
+  sent_by_agent_name?: string;
+  behalf_of_user_id?: number | null;
+}
+
 type ConversationFailureDiagnostic = {
   summary: string;
   category: string;
@@ -72,6 +78,54 @@ function uniqueFiles(files: AppFileRow[]): AppFileRow[] {
     result.push(file);
   }
   return result;
+}
+
+function formatAgentSenderLabel(agentKey: string): string {
+  return agentKey
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || "Agent";
+}
+
+function parseMessageSource(payloadJson: string | null | undefined): ConversationMessageSource | null {
+  if (!payloadJson) return null;
+  try {
+    const payload = JSON.parse(payloadJson) as Record<string, unknown>;
+    const source: ConversationMessageSource = {};
+    if (typeof payload.sent_by_agent_key === "string") source.sent_by_agent_key = payload.sent_by_agent_key;
+    if (typeof payload.sent_by_agent_name === "string") source.sent_by_agent_name = payload.sent_by_agent_name;
+    if (typeof payload.behalf_of_user_id === "number") source.behalf_of_user_id = payload.behalf_of_user_id;
+    return source.sent_by_agent_key || source.sent_by_agent_name ? source : null;
+  } catch {
+    return null;
+  }
+}
+
+function inferLegacyMessageSource(body: string): ConversationMessageSource | null {
+  const trimmed = body.trimStart();
+  if (
+    trimmed.startsWith("# Plan step implementation brief") ||
+    trimmed.startsWith("# Plan gate feedback")
+  ) {
+    return { sent_by_agent_key: "coordinator" };
+  }
+  return null;
+}
+
+function buildSenderLabel(authorName: string | null, source: ConversationMessageSource | null): string | null {
+  if (!source) return authorName;
+  const agentName = source.sent_by_agent_name || (source.sent_by_agent_key ? formatAgentSenderLabel(source.sent_by_agent_key) : "Agent");
+  return authorName ? `${agentName} for ${authorName}` : agentName;
+}
+
+function sourcePayloadJson(source?: ConversationMessageSource | null): string | null {
+  if (!source?.sent_by_agent_key && !source?.sent_by_agent_name) return null;
+  return JSON.stringify({
+    sent_by_agent_key: source.sent_by_agent_key || null,
+    sent_by_agent_name: source.sent_by_agent_name || null,
+    behalf_of_user_id: source.behalf_of_user_id ?? null,
+  });
 }
 
 function buildConversationAttachmentContext(params: {
@@ -448,6 +502,7 @@ export async function streamConversationMessage(
   retry?: boolean,
   providerId?: string,
   fileIds: number[] = [],
+  messageSource?: ConversationMessageSource,
 ): Promise<ReadableStream<Uint8Array>> {
   // Abort existing query on this conversation
   if (_conversationQueries.has(conversationId)) {
@@ -467,6 +522,7 @@ export async function streamConversationMessage(
       kind: "text",
       author_user_id: userId ?? null,
       body_md: content,
+      payload_json: sourcePayloadJson(messageSource),
     });
     dal.linkAppFiles({
       app_id: conversation.app_id,
@@ -476,9 +532,23 @@ export async function streamConversationMessage(
       link_type: "attachment",
     });
     const attachments = dal.getFilesForMessage(conversation.app_id, userMsg.id).map(serializeAppFile);
+    const behalfUserId = messageSource?.behalf_of_user_id ?? userId ?? null;
+    const author = behalfUserId ? dal.getUser(behalfUserId) : null;
+    const senderLabel = buildSenderLabel(author?.name || null, messageSource || inferLegacyMessageSource(content));
     emitConversationEvent(conversationId, {
       type: "message",
-      message: { id: userMsg.id, conversation_id: conversationId, role: "user", content, message_type: "text", created_by_name: null, created_by_color: null, created_at: userMsg.created_at, attachments },
+      message: {
+        id: userMsg.id,
+        conversation_id: conversationId,
+        role: "user",
+        content,
+        message_type: "text",
+        created_by_name: author?.name || null,
+        created_by_color: author?.color || null,
+        sender_label: senderLabel,
+        created_at: userMsg.created_at,
+        attachments,
+      },
     });
   }
 
@@ -885,18 +955,30 @@ export function getConversationMessages(
   created_by: number | null;
   created_by_name: string | null;
   created_by_color: string | null;
+  sender_label: string | null;
   created_at: string;
 }[] {
   const messages = dal.getConversationMessages(conversationId, limit);
-  return messages.map(m => ({
-    id: m.id,
-    conversation_id: m.conversation_id,
-    role: m.role,
-    content: m.body_md,
-    message_type: m.kind,
-    created_by: m.author_user_id,
-    created_by_name: m.author_name || null,
-    created_by_color: m.author_color || null,
-    created_at: m.created_at,
-  }));
+  const conversation = dal.getConversation(conversationId);
+  const workItem = dal.getWorkItemByConversationId(conversationId);
+  const fallbackAuthorId = workItem?.created_by ?? conversation?.created_by ?? null;
+  const fallbackAuthor = fallbackAuthorId ? dal.getUser(fallbackAuthorId) : null;
+  return messages.map(m => {
+    const source = parseMessageSource(m.payload_json) || (m.role === "user" ? inferLegacyMessageSource(m.body_md) : null);
+    const sourceUser = source?.behalf_of_user_id ? dal.getUser(source.behalf_of_user_id) : null;
+    const authorName = m.author_name || (m.role === "user" ? sourceUser?.name || fallbackAuthor?.name || null : null);
+    const authorColor = m.author_color || (m.role === "user" ? sourceUser?.color || fallbackAuthor?.color || null : null);
+    return {
+      id: m.id,
+      conversation_id: m.conversation_id,
+      role: m.role,
+      content: m.body_md,
+      message_type: m.kind,
+      created_by: m.author_user_id,
+      created_by_name: authorName,
+      created_by_color: authorColor,
+      sender_label: m.role === "user" ? buildSenderLabel(authorName, source) : authorName,
+      created_at: m.created_at,
+    };
+  });
 }

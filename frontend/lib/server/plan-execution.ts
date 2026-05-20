@@ -242,6 +242,10 @@ export function launchNextPlanStep({
       role: "user",
       author_user_id: userId,
       body_md: prompt,
+      payload_json: JSON.stringify({
+        sent_by_agent_key: "coordinator",
+        behalf_of_user_id: userId,
+      }),
     });
 
     if (freshPlan.status === "ready" || freshPlan.execution_state !== "running") {
@@ -1247,6 +1251,7 @@ async function sendFixPromptToImplementation({
 }): Promise<void> {
   if (!step.linked_conversation_id) return;
   const implementer = resolveHomeAgent("implementer");
+  const workItem = step.linked_work_item_id ? dal.getWorkItem(step.linked_work_item_id) : null;
   const { streamConversationMessage } = await import("./conversation");
   const stream = await streamConversationMessage(
     step.linked_conversation_id,
@@ -1257,6 +1262,11 @@ async function sendFixPromptToImplementation({
     undefined,
     false,
     implementer.defaultProvider,
+    [],
+    {
+      sent_by_agent_key: "coordinator",
+      behalf_of_user_id: workItem?.created_by ?? null,
+    },
   );
   await drainConversationStream(stream);
 }

@@ -263,6 +263,7 @@ export interface ConversationMessage {
   message_type: string;
   created_by_name: string | null;
   created_by_color: string | null;
+  sender_label: string | null;
   created_at: string;
   attachments?: MessageAttachment[];
 }
@@ -306,6 +307,8 @@ export interface RoomMessage {
   id: number;
   room_id: number;
   author_user_id: number | null;
+  created_by_name: string | null;
+  created_by_color: string | null;
   agent_key: string | null;
   role: RoomMessageRole;
   kind: RoomMessageKind;

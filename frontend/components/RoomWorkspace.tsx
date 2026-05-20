@@ -5,7 +5,7 @@ import useSWR, { useSWRConfig } from "swr";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatsCircle, CheckCircle, DotsThree, Flag, PauseCircle, Pencil, PencilSimple, PlayCircle, Sparkle, Timer } from "@phosphor-icons/react";
-import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, streamRoomMessage, updatePlanStep, updateRoomPlan } from "@/lib/api";
+import { executeNextPlanStep, generateRoomPlan, pausePlanExecution, resumePlanExecution, runPlanStepGates, streamRoomMessage, updatePlanStep, updateRoomPlan, type MeResponse } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import type { AppFile, HomeAgentConfig, HomeRoom, PlanStep, RoomMessage, RoomPlanResponse, Task } from "@/lib/types";
 import { DEFAULT_HOME_AGENTS, type HomeAgentDefinition } from "@/lib/home/agents";
@@ -61,6 +61,7 @@ interface RoomWorkspaceProps {
 
 export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkItemCreated, onCloseRoom, onRenameRoom }: RoomWorkspaceProps) {
   const { mutate: mutateGlobal } = useSWRConfig();
+  const { data: me } = useSWR<MeResponse>("/api/auth/me", fetcher);
   const { leftWidth, isDragging, containerRef, dragHandleProps } = useResizablePanel({
     storageKey: "archie-room-plan-ratio",
     defaultWidth: 78,
@@ -110,6 +111,8 @@ export default function RoomWorkspace({ appId, room, onOpenConversation, onWorkI
       id: -Date.now(),
       room_id: room.id,
       author_user_id: null,
+      created_by_name: me?.name || null,
+      created_by_color: me?.color || null,
       agent_key: null,
       role: "user",
       kind: "message",
@@ -612,7 +615,7 @@ function RoomStreamingBubble({
 
 const RoomMessageBubble = memo(function RoomMessageBubble({ message, agents }: { message: RoomMessage; agents: HomeAgentDefinition[] }) {
   const isUser = message.role === "user";
-  const label = isUser ? "You" : message.agent_key ? formatAgentLabel(message.agent_key) : "Archie";
+  const label = isUser ? message.created_by_name?.trim() || "Unknown user" : message.agent_key ? formatAgentLabel(message.agent_key) : "Archie";
   const taggedAgent = isUser ? getTaggedAgentName(message, agents) : null;
 
   return (
@@ -622,6 +625,13 @@ const RoomMessageBubble = memo(function RoomMessageBubble({ message, agents }: {
       }`}>
         <div className="flex items-center gap-2 mb-1">
           <span className={`text-meta font-semibold ${isUser ? "text-th-dimmed" : "text-th-dimmed"}`}>
+            {isUser && message.created_by_color && (
+              <span
+                className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
+                style={{ backgroundColor: message.created_by_color }}
+                aria-hidden="true"
+              />
+            )}
             {label}
           </span>
           {message.kind !== "message" && (
