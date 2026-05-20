@@ -52,7 +52,8 @@ export async function GET(
         enqueue(`event: snapshot\ndata: ${JSON.stringify({ messages: messages.map(m => ({
           id: m.id, conversation_id: m.conversation_id, role: m.role, content: m.content,
           message_type: m.message_type, created_by_name: m.created_by_name,
-          created_by_color: m.created_by_color, created_at: m.created_at,
+          created_by_color: m.created_by_color, sender_label: m.sender_label,
+          created_at: m.created_at,
           attachments: dal.getFilesForMessage(numericAppId, m.id).map(serializeAppFile),
         })) })}\n\n`);
       }

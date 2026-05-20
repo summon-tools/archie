@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import useSWR from "swr";
 import { Task } from "@/lib/types";
-import { archiveConversation, classifyIntent, pullFromGitHub, sendConversationMessage, updateWorkItem, type ModelConfig } from "@/lib/api";
+import { archiveConversation, classifyIntent, pullFromGitHub, sendConversationMessage, updateWorkItem, type MeResponse, type ModelConfig } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import { useBranchControls } from "@/hooks/useBranchControls";
 import { useSelectedModel } from "@/hooks/useSelectedModel";
@@ -51,6 +51,7 @@ export default function ConversationView({
 
   // Fetch available models for the model picker
   const { data: modelConfig } = useSWR<ModelConfig>("/api/models/config", fetcher);
+  const { data: me } = useSWR<MeResponse>("/api/auth/me", fetcher);
 
   // Mark as done state
   const [archiving, setArchiving] = useState(false);
@@ -188,8 +189,9 @@ export default function ConversationView({
       role: "user" as const,
       content: text,
       message_type: "text",
-      created_by_name: null,
-      created_by_color: null,
+      created_by_name: me?.name || null,
+      created_by_color: me?.color || null,
+      sender_label: me?.name || null,
       created_at: new Date().toISOString(),
       attachments,
     };

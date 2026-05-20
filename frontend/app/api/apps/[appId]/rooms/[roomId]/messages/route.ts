@@ -7,8 +7,13 @@ import { handleRoomRouteError, parseFileIds, readJsonBody, requireAvailableAppFi
 import type { RoomMessageRow } from "@/lib/server/types";
 
 function serializeRoomMessage(appId: number, message: RoomMessageRow) {
+  const author = message.author_user_id && message.author_name === undefined
+    ? dal.getUser(message.author_user_id)
+    : null;
   return {
     ...message,
+    created_by_name: message.author_name ?? author?.name ?? null,
+    created_by_color: message.author_color ?? author?.color ?? null,
     attachments: dal.getFilesForRoomMessage(appId, message.id).map(serializeAppFile),
   };
 }

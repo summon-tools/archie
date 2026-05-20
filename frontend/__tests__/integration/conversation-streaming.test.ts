@@ -33,6 +33,8 @@ describe("conversation streaming", () => {
   it("streamConversationMessage saves user message and returns a ReadableStream", async () => {
     const app = seedApp(db);
     const conversation = seedConversation(db, app.id);
+    const user = seedUser(db, { name: "Alice", color: "#3366ff" });
+    db.prepare("UPDATE conversations SET created_by = ? WHERE id = ?").run(user.id, conversation.id);
 
     // Build a mock provider using the shared helper (correct AgentProvider interface)
     const mockProvider = createMockProvider({
@@ -66,7 +68,7 @@ describe("conversation streaming", () => {
     vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
 
     // Import the conversation module with mocks in place
-    const { streamConversationMessage } = await import("@/lib/server/conversation");
+    const { streamConversationMessage, getConversationMessages: serializeConversationMessages } = await import("@/lib/server/conversation");
 
     // Collect emitted events
     const { subscribeConversation } = await import("@/lib/server/conversation-events");
@@ -80,6 +82,8 @@ describe("conversation streaming", () => {
       "Say hello",
       "Test App",
       ctx.tmpDir,
+      undefined,
+      user.id,
     );
 
     // The result should be a ReadableStream
@@ -107,6 +111,26 @@ describe("conversation streaming", () => {
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg!.body_md).toContain("Hello world");
 
+    db.prepare(
+      "INSERT INTO messages (conversation_id, seq, role, kind, body_md) VALUES (?, ?, 'user', 'text', ?)",
+    ).run(conversation.id, 99, "Legacy feedback without an author");
+    const serializedMessages = serializeConversationMessages(conversation.id);
+    expect(serializedMessages.find((message) => message.content === "Legacy feedback without an author")).toMatchObject({
+      created_by_name: "Alice",
+      created_by_color: "#3366ff",
+      sender_label: "Alice",
+    });
+
+    db.prepare(
+      "INSERT INTO messages (conversation_id, seq, role, kind, body_md) VALUES (?, ?, 'user', 'text', ?)",
+    ).run(conversation.id, 100, "# Plan gate feedback\n\nLegacy coordinator feedback");
+    const serializedWithCoordinator = serializeConversationMessages(conversation.id);
+    expect(serializedWithCoordinator.find((message) => message.content.startsWith("# Plan gate feedback"))).toMatchObject({
+      created_by_name: "Alice",
+      created_by_color: "#3366ff",
+      sender_label: "Coordinator for Alice",
+    });
+
     // Verify: SSE events were sent
     const sseText = chunks.join("");
     expect(sseText).toContain("event: text");
@@ -114,6 +138,13 @@ describe("conversation streaming", () => {
 
     // Verify: conversation events were emitted
     expect(events.length).toBeGreaterThan(0);
+    const messageEvent = events.find((e: any) => e.type === "message");
+    expect(messageEvent?.message).toMatchObject({
+      role: "user",
+      created_by_name: "Alice",
+      created_by_color: "#3366ff",
+      sender_label: "Alice",
+    });
     const statusEvents = events.filter((e: any) => e.type === "status");
     expect(statusEvents.length).toBeGreaterThan(0);
   });

@@ -446,6 +446,7 @@ export function useConversation({
       message_type: "text",
       created_by_name: null,
       created_by_color: null,
+      sender_label: null,
       created_at: new Date().toISOString(),
       attachments,
     };

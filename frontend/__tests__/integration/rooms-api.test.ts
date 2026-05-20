@@ -348,6 +348,7 @@ describe("rooms API", () => {
     await expect(created.json()).resolves.toMatchObject({
       role: "user",
       body_md: "Please critique this plan.",
+      created_by_name: "API Tester",
       payload_json: JSON.stringify({ target_agent_key: "architect" }),
     });
 
@@ -360,6 +361,7 @@ describe("rooms API", () => {
     const body = await listed.json();
     expect(body.messages.length).toBeGreaterThanOrEqual(1);
     expect(body.messages[0].body_md).toBe("Please critique this plan.");
+    expect(body.messages[0].created_by_name).toBe("API Tester");
     expect(body.messages[0].payload_json).toBe(JSON.stringify({ target_agent_key: "architect" }));
     await vi.waitFor(() => {
       const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ? ORDER BY id ASC").all(room.id) as any[];
@@ -414,6 +416,11 @@ describe("rooms API", () => {
     expect(events.filter((event) => event.event === "text").map((event) => event.data.text).join("")).toBe("Hello room");
     expect(events.find((event) => event.event === "activity")?.data).toMatchObject({ kind: "status", message: "Reading code" });
     expect(events.find((event) => event.event === "plan_updated")?.data).toMatchObject({ step_count: 0 });
+    expect(events.find((event) => event.event === "message")?.data).toMatchObject({
+      role: "user",
+      body_md: "Ask architect",
+      created_by_name: "API Tester",
+    });
     expect(createRoomAgentReplyStream).toHaveBeenCalledOnce();
 
     const messages = db.prepare("SELECT * FROM room_messages WHERE room_id = ? ORDER BY id ASC").all(room.id) as any[];
@@ -1668,6 +1675,8 @@ describe("rooms API", () => {
       undefined,
       false,
       "codex",
+      [],
+      expect.objectContaining({ sent_by_agent_key: "coordinator" }),
     );
   });
 
@@ -1745,6 +1754,8 @@ describe("rooms API", () => {
       undefined,
       false,
       "codex",
+      [],
+      expect.objectContaining({ sent_by_agent_key: "coordinator" }),
     );
   });
 

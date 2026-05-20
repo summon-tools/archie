@@ -99,6 +99,7 @@ describe("rooms DAL", () => {
     const messages = dal.getRoomMessages(room.id);
     expect(messages.map((m) => m.id)).toEqual([m1.id, m2.id]);
     expect(messages[0].author_user_id).toBe(user.id);
+    expect(messages[0].author_name).toBe("Alice");
     expect(messages[1].agent_key).toBe("coordinator");
     expect(messages[1].kind).toBe("plan_update");
   });

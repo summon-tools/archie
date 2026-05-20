@@ -16,6 +16,7 @@ export interface ConversationMessageEvent {
     message_type: string;
     created_by_name: string | null;
     created_by_color: string | null;
+    sender_label?: string | null;
     created_at: string;
     attachments?: unknown[];
   };

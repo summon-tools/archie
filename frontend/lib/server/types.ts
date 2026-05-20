@@ -211,6 +211,8 @@ export interface RoomMessageRow {
   id: number;
   room_id: number;
   author_user_id: number | null;
+  author_name?: string | null;
+  author_color?: string | null;
   agent_key: string | null;
   role: RoomMessageRole;
   kind: RoomMessageKind;
