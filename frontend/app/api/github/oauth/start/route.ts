@@ -9,6 +9,7 @@ import {
 import {
   buildOAuthAuthorizeUrl,
   generateOAuthVerifier,
+  getPublicServerOrigin,
   GitHubAppError,
 } from "@/lib/server/github-app";
 
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     user = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      return NextResponse.redirect(new URL("/login", getPublicServerOrigin(request)));
     }
     throw e;
   }
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (e) {
     if (e instanceof GitHubAppError) {
-      const url = new URL("/profile", request.url);
+      const url = new URL("/profile", getPublicServerOrigin(request));
       url.searchParams.set("github", "error");
       url.searchParams.set("message", e.message);
       return NextResponse.redirect(url);

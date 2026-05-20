@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser, isSecureRequest } from "@/lib/server/auth";
-import { completeOAuthConnection, GitHubAppError } from "@/lib/server/github-app";
+import { completeOAuthConnection, getPublicServerOrigin, GitHubAppError } from "@/lib/server/github-app";
 
 const STATE_COOKIE = "github_oauth_state";
 const VERIFIER_COOKIE = "github_oauth_verifier";
 const USER_COOKIE = "github_oauth_user";
 
 function profileRedirect(request: NextRequest, params: Record<string, string>): NextResponse {
-  const url = new URL("/profile", request.url);
+  const url = new URL("/profile", getPublicServerOrigin(request));
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     user = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      return NextResponse.redirect(new URL("/login", getPublicServerOrigin(request)));
     }
     throw e;
   }
