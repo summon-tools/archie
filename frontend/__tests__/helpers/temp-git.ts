@@ -15,7 +15,7 @@ export interface TempGitRepo {
 export function createTempGitRepo(prefix = "archie-git-test-"): TempGitRepo {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 
-  execSync("git init", { cwd: dir, stdio: "ignore" });
+  execSync("git init --initial-branch=main", { cwd: dir, stdio: "ignore" });
   execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "ignore" });
   execSync('git config user.name "Test"', { cwd: dir, stdio: "ignore" });
 
