@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import Header from "@/components/Header";
 import { useTheme, Theme } from "@/components/ThemeProvider";
 import { useToast } from "@/components/Toast";
-import { Sun, Moon, Monitor } from "@phosphor-icons/react";
+import { disconnectGitHub, getGitHubConnection, type GitHubConnection } from "@/lib/api";
+import { GithubLogo, LinkBreak, Sun, Moon, Monitor } from "@phosphor-icons/react";
 
 export default function ProfilePage() {
   const { theme, setTheme } = useTheme();
@@ -18,12 +19,18 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
+  const [githubConnection, setGithubConnection] = useState<GitHubConnection | null>(null);
+  const [disconnectingGithub, setDisconnectingGithub] = useState(false);
 
   const loadProfile = useCallback(async () => {
     try {
-      const meRes = await fetch("/api/auth/me").then((r) => r.json());
+      const [meRes, connection] = await Promise.all([
+        fetch("/api/auth/me").then((r) => r.json()),
+        getGitHubConnection().catch(() => ({ connected: false } as GitHubConnection)),
+      ]);
       if (meRes.name) { setName(meRes.name); setSavedName(meRes.name); }
       if (meRes.email) setUserEmail(meRes.email);
+      setGithubConnection(connection);
     } catch (err) {
       console.error("Failed to load profile:", err);
     } finally {
@@ -34,6 +41,24 @@ export default function ProfilePage() {
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const github = params.get("github");
+    if (github === "connected") {
+      toast.success("GitHub account connected");
+      loadProfile();
+    } else if (github === "error") {
+      toast.error(params.get("message") || "GitHub connection failed");
+    }
+
+    if (github) {
+      params.delete("github");
+      params.delete("message");
+      const nextQuery = params.toString();
+      window.history.replaceState(null, "", nextQuery ? `/profile?${nextQuery}` : "/profile");
+    }
+  }, [loadProfile, toast]);
 
   const showMessage = (type: "success" | "error", text: string) => {
     toast[type](text);
@@ -95,6 +120,19 @@ export default function ProfilePage() {
     }
   };
 
+  const handleDisconnectGitHub = async () => {
+    setDisconnectingGithub(true);
+    try {
+      const connection = await disconnectGitHub();
+      setGithubConnection(connection);
+      showMessage("success", "GitHub account disconnected");
+    } catch (err) {
+      showMessage("error", err instanceof Error ? err.message : "Failed to disconnect GitHub");
+    } finally {
+      setDisconnectingGithub(false);
+    }
+  };
+
   if (loading) {
     return (
       <>
@@ -143,6 +181,57 @@ export default function ProfilePage() {
               {savingName ? "Saving..." : "Save"}
             </button>
           </div>
+        </div>
+
+        {/* GitHub */}
+        <div className="bg-th-surface rounded-2xl border border-th p-6 backdrop-blur-xl">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-lg font-bold text-th-primary mb-1">GitHub</h2>
+              <p className="text-sm text-th-dimmed">
+                Used for PR authorship, branch pushes, and pull request creation.
+              </p>
+            </div>
+            <GithubLogo size={22} className="text-th-muted flex-shrink-0" />
+          </div>
+
+          {githubConnection?.connected ? (
+            <div className="space-y-4">
+              <div className="bg-th-subtle border border-th rounded-lg px-3 py-2">
+                <p className="text-sm font-medium text-th-primary">
+                  @{githubConnection.github_login}
+                </p>
+                <p className="text-xs text-th-dimmed">
+                  {githubConnection.github_email || "Email not provided by GitHub"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href="/api/github/oauth/start"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-btn-secondary text-btn-secondary rounded-lg hover:bg-btn-secondary-hover text-sm font-medium"
+                >
+                  <GithubLogo size={16} weight="bold" />
+                  Reconnect
+                </a>
+                <button
+                  onClick={handleDisconnectGitHub}
+                  disabled={disconnectingGithub}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-th-subtle text-th-secondary border border-th rounded-lg hover:bg-th-muted disabled:opacity-50 text-sm font-medium"
+                >
+                  <LinkBreak size={16} weight="bold" />
+                  {disconnectingGithub ? "Disconnecting..." : "Disconnect"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <a
+              href="/api/github/oauth/start"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-btn-primary text-btn-primary rounded-lg hover:bg-btn-primary-hover text-sm font-medium"
+            >
+              <GithubLogo size={16} weight="bold" />
+              Connect GitHub
+            </a>
+          )}
         </div>
 
         {/* Appearance */}

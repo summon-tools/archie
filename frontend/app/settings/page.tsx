@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import type { GitSettings, HomeAgentConfig } from "@/lib/types";
-import { getMe, getGitSettings, updateGitSettings, generateSSHKey, getSettings, getUsers, updateUserRole, deleteUser, restoreUser, createInvitation, getInvitations, revokeInvitation, getModelConfig, updateModelConfig, getHomeAgents } from "@/lib/api";
-import type { UserInfo, InvitationInfo } from "@/lib/api";
-import { GitBranch, CheckCircle, Users, Gear, Heartbeat, Warning, XCircle, Robot, PencilSimple } from "@phosphor-icons/react";
+import { getMe, getGitSettings, updateGitSettings, generateSSHKey, getSettings, getUsers, updateUserRole, deleteUser, restoreUser, createInvitation, getInvitations, revokeInvitation, getModelConfig, updateModelConfig, getHomeAgents, getGitHubAppSettings, updateGitHubAppSettings } from "@/lib/api";
+import type { GitHubAppSettings, UserInfo, InvitationInfo } from "@/lib/api";
+import { GitBranch, CheckCircle, Users, Gear, Heartbeat, Warning, XCircle, Robot, PencilSimple, Copy } from "@phosphor-icons/react";
 import { useToast } from "@/components/Toast";
 
 const SETTINGS_SECTIONS = ["git", "team", "models", "agents", "system"] as const;
@@ -214,6 +214,7 @@ export default function SettingsPage() {
   const [authorized, setAuthorized] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("git");
   const [settings, setSettings] = useState<GitSettings | null>(null);
+  const [githubAppSettings, setGithubAppSettings] = useState<GitHubAppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -225,6 +226,8 @@ export default function SettingsPage() {
   const [maskedToken, setMaskedToken] = useState<string | null>(null);
   const [savingToken, setSavingToken] = useState(false);
   const [removingToken, setRemovingToken] = useState(false);
+  const [githubClientSecret, setGithubClientSecret] = useState("");
+  const [savingGithubApp, setSavingGithubApp] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
@@ -256,12 +259,14 @@ export default function SettingsPage() {
 
   const loadSettings = useCallback(async () => {
     try {
-      const [data, dashSettings, meRes] = await Promise.all([
+      const [data, dashSettings, meRes, githubApp] = await Promise.all([
         getGitSettings(),
         getSettings(),
         fetch("/api/auth/me").then((r) => r.json()),
+        getGitHubAppSettings(),
       ]);
       setSettings(data);
+      setGithubAppSettings(githubApp);
       setName(data.name);
       setEmail(data.email);
       setMaskedToken(dashSettings.settings.github_token || null);
@@ -377,6 +382,36 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveGitHubApp = async () => {
+    if (!githubAppSettings) return;
+    setSavingGithubApp(true);
+    try {
+      const updated = await updateGitHubAppSettings({
+        public_server_url: githubAppSettings.public_server_url,
+        client_id: githubAppSettings.client_id,
+        client_secret: githubClientSecret.trim() || undefined,
+        app_slug: githubAppSettings.app_slug,
+        install_url: githubAppSettings.install_url,
+        bot_username: githubAppSettings.bot_username,
+        bot_display_name: githubAppSettings.bot_display_name,
+        bot_email: githubAppSettings.bot_email,
+      });
+      setGithubAppSettings(updated);
+      setGithubClientSecret("");
+      showMessage("success", "GitHub App settings saved");
+    } catch (err) {
+      showMessage("error", err instanceof Error ? err.message : "Failed to save GitHub App settings");
+    } finally {
+      setSavingGithubApp(false);
+    }
+  };
+
+  const handleCopyCallback = async () => {
+    if (!githubAppSettings?.callback_url) return;
+    await navigator.clipboard.writeText(githubAppSettings.callback_url);
+    showMessage("success", "Callback URL copied");
   };
 
   const handleGenerateKey = async () => {
@@ -643,7 +678,7 @@ export default function SettingsPage() {
                 <div className="bg-th-surface rounded-2xl border border-th p-6 backdrop-blur-xl">
                   <h2 className="text-lg font-bold text-th-primary mb-1">Git Identity</h2>
                   <p className="text-sm text-th-dimmed mb-4">
-                    Used for commit author information.
+                    Fallback identity for repositories that are not published through the GitHub App flow.
                   </p>
 
                   <div className="space-y-3">
@@ -681,23 +716,145 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* GitHub CLI */}
-                <div className="bg-th-surface rounded-2xl border border-th p-6 backdrop-blur-xl">
-                  <h2 className="text-lg font-bold text-th-primary mb-1">GitHub CLI</h2>
-                  <p className="text-sm text-th-dimmed mb-4">
-                    Archie uses the GitHub CLI (<code className="text-th-secondary">gh</code>) to push code and create pull requests.
-                    Authenticate once and it handles everything.
-                  </p>
+                {/* GitHub App */}
+                {githubAppSettings && (
+                  <div className="bg-th-surface rounded-2xl border border-th p-6 backdrop-blur-xl">
+                    <h2 className="text-lg font-bold text-th-primary mb-1">GitHub App</h2>
+                    <p className="text-sm text-th-dimmed mb-4">
+                      Configure the GitHub App that users authorize before publishing pull requests.
+                    </p>
 
-                  <GhStatusDisplay />
-                </div>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-th-secondary mb-1">
+                          Public server URL
+                        </label>
+                        <input
+                          type="url"
+                          value={githubAppSettings.public_server_url}
+                          onChange={(e) => setGithubAppSettings({ ...githubAppSettings, public_server_url: e.target.value })}
+                          placeholder="https://archie.example.com"
+                          className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-2 items-end">
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">
+                            Callback URL
+                          </label>
+                          <div className="text-sm text-th-primary bg-th-code border border-th rounded-lg px-3 py-2 font-mono break-all">
+                            {githubAppSettings.callback_url}
+                          </div>
+                          <p className="text-xs text-th-muted mt-1">
+                            Callback suffix: <code>{githubAppSettings.callback_suffix}</code>
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleCopyCallback}
+                          className="inline-flex items-center justify-center gap-2 px-3 py-2 bg-btn-secondary text-btn-secondary rounded-lg hover:bg-btn-secondary-hover text-sm font-medium"
+                        >
+                          <Copy size={14} weight="bold" />
+                          Copy
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Client ID</label>
+                          <input
+                            type="text"
+                            value={githubAppSettings.client_id}
+                            onChange={(e) => setGithubAppSettings({ ...githubAppSettings, client_id: e.target.value })}
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Client Secret</label>
+                          <input
+                            type="password"
+                            value={githubClientSecret}
+                            onChange={(e) => setGithubClientSecret(e.target.value)}
+                            placeholder={githubAppSettings.client_secret_configured ? "Saved — enter a new secret to replace" : "Client secret"}
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">App slug</label>
+                          <input
+                            type="text"
+                            value={githubAppSettings.app_slug}
+                            onChange={(e) => setGithubAppSettings({ ...githubAppSettings, app_slug: e.target.value })}
+                            placeholder="archie"
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Install URL</label>
+                          <input
+                            type="url"
+                            value={githubAppSettings.install_url}
+                            onChange={(e) => setGithubAppSettings({ ...githubAppSettings, install_url: e.target.value })}
+                            placeholder="https://github.com/apps/archie/installations/new"
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Bot username</label>
+                          <input
+                            type="text"
+                            value={githubAppSettings.bot_username}
+                            onChange={(e) => setGithubAppSettings({ ...githubAppSettings, bot_username: e.target.value })}
+                            placeholder="archie-agent"
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Bot display name</label>
+                          <input
+                            type="text"
+                            value={githubAppSettings.bot_display_name}
+                            onChange={(e) => setGithubAppSettings({ ...githubAppSettings, bot_display_name: e.target.value })}
+                            placeholder="Archie"
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Bot email</label>
+                          <input
+                            type="email"
+                            value={githubAppSettings.bot_email}
+                            onChange={(e) => setGithubAppSettings({ ...githubAppSettings, bot_email: e.target.value })}
+                            placeholder="archie-agent@users.noreply.github.com"
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleSaveGitHubApp}
+                        disabled={savingGithubApp}
+                        className="px-4 py-2 bg-btn-primary text-btn-primary rounded-lg hover:bg-btn-primary-hover disabled:opacity-50 text-sm font-medium"
+                      >
+                        {savingGithubApp ? "Saving..." : "Save GitHub App"}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Legacy GitHub Token — hidden unless one exists */}
                 {maskedToken && (
                   <div className="bg-th-surface rounded-2xl border border-th p-6 backdrop-blur-xl opacity-70">
                     <h2 className="text-sm font-bold text-th-muted mb-1">Legacy GitHub Token</h2>
                     <p className="text-xs text-th-dimmed mb-3">
-                      You have a stored GitHub token from before the gh CLI migration. It is no longer needed if <code>gh auth login</code> is configured.
+                      You have a stored GitHub token from the older integration. It is no longer used by the GitHub App publishing flow.
                     </p>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-th-secondary font-mono bg-th-code border border-th rounded px-2 py-1">{maskedToken}</span>

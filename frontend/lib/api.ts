@@ -544,6 +544,50 @@ export async function generateSSHKey(): Promise<{ success: boolean; message: str
   return fetchJSON(`${BASE}/git/ssh-key`, { method: "POST" });
 }
 
+export interface GitHubAppSettings {
+  public_server_url: string;
+  callback_suffix: string;
+  callback_url: string;
+  client_id: string;
+  client_secret_configured: boolean;
+  app_slug: string;
+  install_url: string;
+  bot_username: string;
+  bot_display_name: string;
+  bot_email: string;
+}
+
+export interface GitHubConnection {
+  connected: boolean;
+  github_login?: string;
+  github_name?: string | null;
+  github_email?: string | null;
+  access_token_expires_at?: string | null;
+  refresh_token_expires_at?: string | null;
+  connected_at?: string;
+}
+
+export async function getGitHubAppSettings(): Promise<GitHubAppSettings> {
+  return fetchJSON<GitHubAppSettings>(`${BASE}/github/app-settings`);
+}
+
+export async function updateGitHubAppSettings(
+  data: Partial<GitHubAppSettings> & { client_secret?: string; clear_client_secret?: boolean },
+): Promise<GitHubAppSettings> {
+  return fetchJSON<GitHubAppSettings>(`${BASE}/github/app-settings`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getGitHubConnection(): Promise<GitHubConnection> {
+  return fetchJSON<GitHubConnection>(`${BASE}/github/connection`);
+}
+
+export async function disconnectGitHub(): Promise<GitHubConnection> {
+  return fetchJSON<GitHubConnection>(`${BASE}/github/connection`, { method: "DELETE" });
+}
+
 export async function getGitStatus(appId: number): Promise<GitStatus> {
   return fetchJSON<GitStatus>(`${BASE}/apps/${appId}/git/status`);
 }

@@ -502,7 +502,42 @@ export function pull(directory: string, branch?: string): { success: boolean; me
   }
 }
 
-export function push(directory: string, commitMessage = "", branch?: string): { success: boolean; message: string; commit_hash: string } {
+export interface GitPushOptions {
+  branch?: string;
+  author?: { name: string; email: string } | null;
+  coAuthor?: { name: string; email: string } | null;
+  token?: string | null;
+}
+
+function commitMessageWithCoAuthor(message: string, coAuthor?: { name: string; email: string } | null): string {
+  const base = (message || "Update from dashboard").trim();
+  if (!coAuthor?.name || !coAuthor.email) return base;
+  const footer = `Co-authored-by: ${coAuthor.name} <${coAuthor.email}>`;
+  return base.includes(footer) ? base : `${base}\n\n${footer}`;
+}
+
+function githubTokenPushArgs(token: string, branch: string): string[] {
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return [
+    "-c",
+    `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`,
+    "push",
+    "-u",
+    "origin",
+    branch,
+  ];
+}
+
+export function push(
+  directory: string,
+  commitMessage = "",
+  branchOrOptions?: string | GitPushOptions,
+): { success: boolean; message: string; commit_hash: string } {
+  const options: GitPushOptions = typeof branchOrOptions === "string"
+    ? { branch: branchOrOptions }
+    : (branchOrOptions || {});
+  let branch = options.branch;
+
   if (!isGitInitialized(directory)) {
     return { success: false, message: "Git not initialized", commit_hash: "" };
   }
@@ -517,8 +552,13 @@ export function push(directory: string, commitMessage = "", branch?: string): { 
 
     const diff = runGitSafe(directory, ["diff", "--cached", "--quiet"]);
     if (diff.returncode !== 0) {
-      const msg = commitMessage || "Update from dashboard";
-      const commitResult = runGitSafe(directory, ["commit", "-m", msg]);
+      const msg = commitMessageWithCoAuthor(commitMessage, options.coAuthor);
+      const commitArgs = ["commit"];
+      if (options.author?.name && options.author.email) {
+        commitArgs.push("--author", `${options.author.name} <${options.author.email}>`);
+      }
+      commitArgs.push("-m", msg);
+      const commitResult = runGitSafe(directory, commitArgs);
       if (commitResult.returncode !== 0) {
         return { success: false, message: `Commit failed: ${commitResult.stdout}`, commit_hash: "" };
       }
@@ -533,13 +573,16 @@ export function push(directory: string, commitMessage = "", branch?: string): { 
       return { success: false, message: "Cannot push directly to the main branch. Use a worktree and create a PR instead.", commit_hash: "" };
     }
 
-    const pushResult = runGitSafe(directory, ["push", "-u", "origin", branch]);
+    const pushResult = runGitSafe(
+      directory,
+      options.token ? githubTokenPushArgs(options.token, branch) : ["push", "-u", "origin", branch],
+    );
     if (pushResult.returncode !== 0) {
       let errorMsg = pushResult.stdout.trim();
       if (errorMsg.includes("could not read Username")) {
-        errorMsg = "Authentication failed. The remote may be using HTTPS \u2014 try reconnecting with an SSH URL.";
+        errorMsg = "Authentication failed. Connect your GitHub account and ensure the GitHub App has repository Contents access.";
       } else if (errorMsg.includes("Permission denied")) {
-        errorMsg = "Authentication failed. Run `gh auth login` to authenticate with GitHub.";
+        errorMsg = "Authentication failed. Connect your GitHub account and ensure you have repository write access.";
       } else if (errorMsg.includes("not found")) {
         errorMsg = "Repository not found. Create the repo on GitHub first.";
       }

@@ -3,13 +3,20 @@ import { getDb } from "@/lib/server/db";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import { push, isGitInitialized, initRepo } from "@/lib/server/git";
 import type { AppRow } from "@/lib/server/types";
+import {
+  getArchieCoAuthor,
+  getValidGitHubUserToken,
+  githubAuthorFromConnection,
+  GitHubAppError,
+} from "@/lib/server/github-app";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string }> }
 ) {
+  let currentUser: Awaited<ReturnType<typeof getAuthUser>>;
   try {
-    await getAuthUser(request);
+    currentUser = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
@@ -49,7 +56,22 @@ export async function POST(
     }
   }
 
-  const result = push(app.directory, commit_message || "", branch);
+  let githubAuth;
+  try {
+    githubAuth = await getValidGitHubUserToken(currentUser.id);
+  } catch (e) {
+    if (e instanceof GitHubAppError) {
+      return NextResponse.json({ detail: e.message }, { status: e.status });
+    }
+    throw e;
+  }
+
+  const result = push(app.directory, commit_message || "", {
+    branch,
+    author: githubAuthorFromConnection(githubAuth.connection, currentUser.name),
+    coAuthor: getArchieCoAuthor(),
+    token: githubAuth.token,
+  });
 
   if (!result.success) {
     return NextResponse.json({ detail: result.message }, { status: 500 });

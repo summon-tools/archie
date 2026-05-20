@@ -7,6 +7,7 @@ export function getGitHubToken(): string | null {
 export function parseGitHubRemoteUrl(
   url: string
 ): { owner: string; repo: string } | null {
+  url = url.trim().replace(/^https?:\/\/[^@]+@github\.com\//, "https://github.com/");
   // SSH format: git@github.com:owner/repo.git
   const sshMatch = url.match(/git@github\.com:([^/]+)\/([^/.]+)(?:\.git)?$/);
   if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] };
@@ -16,6 +17,16 @@ export function parseGitHubRemoteUrl(
   );
   if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] };
   return null;
+}
+
+const API_VERSION = "2026-03-10";
+
+function githubHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": API_VERSION,
+  };
 }
 
 interface CreatePRParams {
@@ -47,10 +58,7 @@ export async function getDefaultBranch({
   const res = await fetch(
     `https://api.github.com/repos/${owner}/${repo}`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-      },
+      headers: githubHeaders(token),
     }
   );
   if (res.ok) {
@@ -71,8 +79,7 @@ export async function createPullRequest({
 }: CreatePRParams): Promise<PRResult> {
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
   const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
+    ...githubHeaders(token),
     "Content-Type": "application/json",
   };
 
@@ -141,8 +148,7 @@ export async function updatePullRequest({
     {
       method: "PATCH",
       headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
+        ...githubHeaders(token),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ ...(title && { title }), body }),
@@ -157,6 +163,31 @@ export async function updatePullRequest({
   return {
     success: false,
     message: errorBody.message || `GitHub API error ${res.status}`,
+  };
+}
+
+export async function getPullRequest({
+  owner,
+  repo,
+  pr_number,
+  token,
+}: {
+  owner: string;
+  repo: string;
+  pr_number: number;
+  token: string;
+}): Promise<{ state: string; pr_url: string; pr_number: number; title: string } | null> {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pr_number}`,
+    { headers: githubHeaders(token) },
+  );
+  if (!res.ok) return null;
+  const pr = await res.json();
+  return {
+    state: pr.merged_at ? "MERGED" : String(pr.state || "unknown").toUpperCase(),
+    pr_url: pr.html_url,
+    pr_number: pr.number,
+    title: pr.title,
   };
 }
 
@@ -179,10 +210,7 @@ export async function uploadVideoToGitHub({
   token: string;
 }): Promise<string> {
   const fs = await import("fs");
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-  };
+  const headers = githubHeaders(token);
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
   const tag = "demo-assets";
 
@@ -268,10 +296,7 @@ export async function findExistingPR({
   const searchRes = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/pulls?head=${encodeURIComponent(headParam)}&state=open`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-      },
+      headers: githubHeaders(token),
     }
   );
 

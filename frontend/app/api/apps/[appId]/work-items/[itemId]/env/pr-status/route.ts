@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { ghPrView } from "@/lib/server/gh";
+import { getPullRequest, parseGitHubRemoteUrl } from "@/lib/server/github";
+import { getStatus as getGitStatus } from "@/lib/server/git";
+import { getValidGitHubUserToken, GitHubAppError } from "@/lib/server/github-app";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
+  let currentUser: Awaited<ReturnType<typeof getAuthUser>>;
   try {
-    await getAuthUser(request);
+    currentUser = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
@@ -34,7 +37,35 @@ export async function GET(
     return NextResponse.json({ state: "unknown" });
   }
 
-  const prInfo = ghPrView(gitDir);
+  const prArt = dal.getArtifactByKind(wi.id, "pull_request");
+  let prMeta: any = {};
+  if (prArt?.metadata_json) try { prMeta = JSON.parse(prArt.metadata_json); } catch {}
+  if (!prMeta.pr_number) {
+    return NextResponse.json({ state: "unknown" });
+  }
+
+  let githubAuth;
+  try {
+    githubAuth = await getValidGitHubUserToken(currentUser.id);
+  } catch (e) {
+    if (e instanceof GitHubAppError) {
+      return NextResponse.json({ state: "unknown", detail: e.message });
+    }
+    throw e;
+  }
+
+  const status = getGitStatus(gitDir);
+  const parsed = status.remote_url ? parseGitHubRemoteUrl(status.remote_url) : null;
+  if (!parsed) {
+    return NextResponse.json({ state: "unknown" });
+  }
+
+  const prInfo = await getPullRequest({
+    owner: parsed.owner,
+    repo: parsed.repo,
+    pr_number: prMeta.pr_number,
+    token: githubAuth.token,
+  });
   if (!prInfo) {
     return NextResponse.json({ state: "unknown" });
   }

@@ -5,6 +5,12 @@ import { push as gitPush } from "@/lib/server/git";
 import { execSync } from "child_process";
 import { runEphemeralQuery } from "@/lib/server/sdk-helpers";
 import { buildCommitMessagePrompt } from "@/lib/server/prompts/git";
+import {
+  getArchieCoAuthor,
+  getValidGitHubUserToken,
+  githubAuthorFromConnection,
+  GitHubAppError,
+} from "@/lib/server/github-app";
 
 /**
  * Gets a summary of staged/unstaged changes for commit message generation.
@@ -98,8 +104,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
+  let currentUser: Awaited<ReturnType<typeof getAuthUser>>;
   try {
-    await getAuthUser(request);
+    currentUser = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
@@ -131,7 +138,22 @@ export async function POST(
   // Generate a Conventional Commits message from the diff + work item context
   const commitMessage = await generateCommitMessage(gitDir, wi);
 
-  const result = gitPush(gitDir, commitMessage);
+  let githubAuth;
+  try {
+    githubAuth = await getValidGitHubUserToken(currentUser.id);
+  } catch (e) {
+    if (e instanceof GitHubAppError) {
+      return NextResponse.json({ detail: e.message }, { status: e.status });
+    }
+    throw e;
+  }
+
+  const author = githubAuthorFromConnection(githubAuth.connection, currentUser.name);
+  const result = gitPush(gitDir, commitMessage, {
+    author,
+    coAuthor: getArchieCoAuthor(),
+    token: githubAuth.token,
+  });
 
   if (!result.success) {
     return NextResponse.json({ detail: result.message }, { status: 500 });

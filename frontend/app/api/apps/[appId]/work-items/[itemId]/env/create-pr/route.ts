@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { ghPrCreate, ghAuthStatus } from "@/lib/server/gh";
 import { getConversationMessages } from "@/lib/server/conversation";
 import { getWorktreeCodeDiff } from "@/lib/server/demo";
 import { generatePRDescription } from "@/lib/server/pr-description";
+import { createPullRequest, getDefaultBranch, parseGitHubRemoteUrl } from "@/lib/server/github";
+import { getStatus as getGitStatus } from "@/lib/server/git";
+import { getValidGitHubUserToken, GitHubAppError } from "@/lib/server/github-app";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
+  let currentUser: Awaited<ReturnType<typeof getAuthUser>>;
   try {
-    await getAuthUser(request);
+    currentUser = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
@@ -47,16 +50,14 @@ export async function POST(
     );
   }
 
-  // Check gh auth
-  const auth = ghAuthStatus();
-  if (!auth.authenticated) {
-    return NextResponse.json(
-      { detail: "GitHub CLI not authenticated. Run `gh auth login` in your terminal." },
-      { status: 400 }
-    );
-  }
-
   try {
+    const githubAuth = await getValidGitHubUserToken(currentUser.id);
+    const status = getGitStatus(gitDir);
+    const parsed = status.remote_url ? parseGitHubRemoteUrl(status.remote_url) : null;
+    if (!parsed) {
+      return NextResponse.json({ detail: "Remote URL is not a GitHub repository" }, { status: 400 });
+    }
+
     // Generate PR description using Claude
     const codeDiff = getWorktreeCodeDiff(gitDir);
     const reflectionMessages = wi.primary_conversation_id
@@ -69,7 +70,16 @@ export async function POST(
       reflectionMessages,
     });
 
-    const result = ghPrCreate(gitDir, wi.title, body);
+    const base = await getDefaultBranch({ owner: parsed.owner, repo: parsed.repo, token: githubAuth.token });
+    const result = await createPullRequest({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      title: wi.title,
+      body,
+      head: env.branch_name,
+      base,
+      token: githubAuth.token,
+    });
 
     if (!result.success) {
       return NextResponse.json({ detail: result.message }, { status: 422 });
@@ -85,6 +95,7 @@ export async function POST(
       metadata_json: JSON.stringify({
         pr_url: result.pr_url,
         pr_number: result.pr_number,
+        author_user_id: currentUser.id,
       }),
     });
 
@@ -100,6 +111,9 @@ export async function POST(
       pr_number: result.pr_number,
     });
   } catch (err) {
+    if (err instanceof GitHubAppError) {
+      return NextResponse.json({ detail: err.message }, { status: err.status });
+    }
     return NextResponse.json(
       { detail: err instanceof Error ? err.message : "Failed to create PR" },
       { status: 500 }

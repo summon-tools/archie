@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { ghPrEdit, ghAuthStatus } from "@/lib/server/gh";
 import { getConversationMessages } from "@/lib/server/conversation";
 import { getWorktreeCodeDiff } from "@/lib/server/demo";
 import { generatePRDescription } from "@/lib/server/pr-description";
+import { parseGitHubRemoteUrl, updatePullRequest } from "@/lib/server/github";
+import { getStatus as getGitStatus } from "@/lib/server/git";
+import { getValidGitHubUserToken, GitHubAppError } from "@/lib/server/github-app";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string; itemId: string }> }
 ) {
+  let currentUser: Awaited<ReturnType<typeof getAuthUser>>;
   try {
-    await getAuthUser(request);
+    currentUser = await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
@@ -52,16 +55,14 @@ export async function POST(
     );
   }
 
-  // Check gh auth
-  const auth = ghAuthStatus();
-  if (!auth.authenticated) {
-    return NextResponse.json(
-      { detail: "GitHub CLI not authenticated. Run `gh auth login` in your terminal." },
-      { status: 400 }
-    );
-  }
-
   try {
+    const githubAuth = await getValidGitHubUserToken(currentUser.id);
+    const status = getGitStatus(gitDir);
+    const parsed = status.remote_url ? parseGitHubRemoteUrl(status.remote_url) : null;
+    if (!parsed) {
+      return NextResponse.json({ detail: "Remote URL is not a GitHub repository" }, { status: 400 });
+    }
+
     // Gather context
     const codeDiff = getWorktreeCodeDiff(gitDir);
     const reflectionMessages = wi.primary_conversation_id
@@ -76,7 +77,13 @@ export async function POST(
     });
 
     // Update PR
-    const result = ghPrEdit(gitDir, prMeta.pr_number, { body });
+    const result = await updatePullRequest({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      pr_number: prMeta.pr_number,
+      body,
+      token: githubAuth.token,
+    });
 
     if (!result.success) {
       return NextResponse.json({ detail: result.message }, { status: 422 });
@@ -87,6 +94,9 @@ export async function POST(
       message: result.message,
     });
   } catch (err) {
+    if (err instanceof GitHubAppError) {
+      return NextResponse.json({ detail: err.message }, { status: err.status });
+    }
     return NextResponse.json(
       { detail: err instanceof Error ? err.message : "Failed to update PR" },
       { status: 500 }

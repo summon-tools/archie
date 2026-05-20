@@ -128,6 +128,23 @@ function initDb(db: Database.Database): void {
       FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS github_user_connections (
+      user_id INTEGER PRIMARY KEY,
+      github_user_id INTEGER NOT NULL,
+      github_login TEXT NOT NULL,
+      github_name TEXT DEFAULT NULL,
+      github_email TEXT DEFAULT NULL,
+      access_token_ciphertext TEXT NOT NULL,
+      refresh_token_ciphertext TEXT DEFAULT NULL,
+      access_token_expires_at TEXT DEFAULT NULL,
+      refresh_token_expires_at TEXT DEFAULT NULL,
+      connected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      revoked_at TEXT DEFAULT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_user_connections_login ON github_user_connections(github_login);
+
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id INTEGER NOT NULL,
