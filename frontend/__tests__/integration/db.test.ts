@@ -125,6 +125,8 @@ describe("Database initialization", () => {
     expect(cols).toContain("branch_name");
     expect(cols).toContain("worktree_dir");
     expect(cols).toContain("worktree_status");
+    expect(cols).toContain("branch_source");
+    expect(cols).toContain("delete_branch_on_remove");
     expect(cols).toContain("preview_port");
     expect(cols).toContain("preview_pid");
   });

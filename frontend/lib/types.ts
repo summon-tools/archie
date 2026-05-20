@@ -148,6 +148,8 @@ export interface WorkItemEnv {
   branch_name: string | null;
   worktree_dir: string | null;
   worktree_status: WorktreeStatus;
+  branch_source: "generated" | "imported" | "setup";
+  delete_branch_on_remove: number;
   preview_port: number | null;
   preview_pid: number | null;
 }
@@ -230,6 +232,8 @@ export type EnrichedWorkItem = WorkItem & {
   branch_name: string | null;
   worktree_dir: string | null;
   worktree_status: WorktreeStatus;
+  branch_source: "generated" | "imported" | "setup";
+  delete_branch_on_remove: number;
   preview_port: number | null;
   preview_pid: number | null;
   description: string;

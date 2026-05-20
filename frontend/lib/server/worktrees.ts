@@ -42,10 +42,20 @@ function stripEnvVar(directory: string, varName: string): void {
   }
 }
 
-function runGitSafe(directory: string, args: string[], timeout = 30000): { stdout: string; returncode: number } {
+function gitArgsWithGitHubToken(args: string[], token?: string | null): string[] {
+  if (!token) return args;
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return [
+    "-c",
+    `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`,
+    ...args,
+  ];
+}
+
+function runGitSafe(directory: string, args: string[], timeout = 30000, token?: string | null): { stdout: string; returncode: number } {
   const env = { ...process.env, HOME: os.homedir(), GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes" };
   try {
-    const stdout = execFileSync("git", args, {
+    const stdout = execFileSync("git", gitArgsWithGitHubToken(args, token), {
       cwd: directory,
       timeout,
       env,
@@ -65,6 +75,11 @@ function slugify(text: string, maxLen = 40): string {
   slug = slug.replace(/-+/g, "-");
   slug = slug.replace(/^-|-$/g, "");
   return slug.slice(0, maxLen);
+}
+
+function worktreeDirForTask(appDir: string, taskId: number): string {
+  const appBasename = path.basename(appDir.replace(/\/+$/, ""));
+  return path.join(path.dirname(appDir), `${appBasename}-task-${taskId}`);
 }
 
 // checkPort is imported from platform.ts as checkPortSync
@@ -286,6 +301,48 @@ function ensureDependencies(worktreeDir: string, stack?: TechStack): { ok: boole
 
 // --- Worktree Lifecycle ---
 
+function prepareWorktreeEnvironment(
+  appDir: string,
+  worktreeDir: string,
+  taskId: number,
+): { success: boolean; message: string; techStack?: TechStack } {
+  const stack = detectTechStack(worktreeDir);
+
+  if (stack.database === "postgresql" && stack.databaseName) {
+    const worktreeDbName = getWorktreeDatabaseName(stack.databaseName, taskId);
+    setupPostgresDatabase(stack.databaseName, worktreeDbName);
+    patchDatabaseYml(worktreeDir, worktreeDbName);
+  } else if (stack.database === "sqlite" || stack.database === "none") {
+    copyDatabases(appDir, worktreeDir);
+  }
+
+  stripEnvVar(worktreeDir, "PORT");
+
+  const depResult = ensureDependencies(worktreeDir, stack);
+  if (!depResult.ok) {
+    return {
+      success: true,
+      message: `Worktree created but dependency install had issues: ${depResult.message}`,
+      techStack: stack,
+    };
+  }
+
+  const venvDir = path.join(appDir, "venv");
+  if (fs.existsSync(venvDir) && !fs.existsSync(path.join(worktreeDir, "venv"))) {
+    try {
+      fs.symlinkSync(venvDir, path.join(worktreeDir, "venv"));
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    success: true,
+    message: "Worktree environment ready",
+    techStack: stack,
+  };
+}
+
 /** Creates a worktree. Accepts workItemId (or legacy taskId) + title. */
 export function createWorktree(
   appDir: string,
@@ -298,8 +355,7 @@ export function createWorktree(
 
   const slug = slugify(taskTitle);
   const branchName = `task/${taskId}-${slug}`;
-  const appBasename = path.basename(appDir.replace(/\/+$/, ""));
-  const worktreeDir = path.join(path.dirname(appDir), `${appBasename}-task-${taskId}`);
+  const worktreeDir = worktreeDirForTask(appDir, taskId);
 
   // A previous task may have removed its directory without removing Git's
   // worktree metadata. Prune first so a stale record cannot block this task ID.
@@ -339,43 +395,15 @@ export function createWorktree(
       }
     }
 
-    // Detect tech stack
-    const stack = detectTechStack(worktreeDir);
-
-    // Database setup based on stack
-    if (stack.database === "postgresql" && stack.databaseName) {
-      const worktreeDbName = getWorktreeDatabaseName(stack.databaseName, taskId);
-      setupPostgresDatabase(stack.databaseName, worktreeDbName);
-      patchDatabaseYml(worktreeDir, worktreeDbName);
-    } else if (stack.database === "sqlite" || stack.database === "none") {
-      // SQLite: copy .db files as before
-      copyDatabases(appDir, worktreeDir);
-    }
-
-    // Strip PORT from worktree .env — the runner sets it dynamically at start
-    // time, and a hardcoded PORT from the main app would override the preview port.
-    stripEnvVar(worktreeDir, "PORT");
-
-    // Install dependencies using stack-aware function
-    const depResult = ensureDependencies(worktreeDir, stack);
-    if (!depResult.ok) {
+    const prep = prepareWorktreeEnvironment(appDir, worktreeDir, taskId);
+    if (!prep.success || prep.message !== "Worktree environment ready") {
       return {
         success: true,
-        message: `Worktree created but dependency install had issues: ${depResult.message}`,
+        message: prep.message,
         branch_name: branchName,
         worktree_dir: worktreeDir,
-        techStack: stack,
+        techStack: prep.techStack,
       };
-    }
-
-    // Symlink Python venv if it exists
-    const venvDir = path.join(appDir, "venv");
-    if (fs.existsSync(venvDir) && !fs.existsSync(path.join(worktreeDir, "venv"))) {
-      try {
-        fs.symlinkSync(venvDir, path.join(worktreeDir, "venv"));
-      } catch {
-        // ignore
-      }
     }
 
     return {
@@ -383,7 +411,117 @@ export function createWorktree(
       message: `Worktree created on branch ${branchName}`,
       branch_name: branchName,
       worktree_dir: worktreeDir,
-      techStack: stack,
+      techStack: prep.techStack,
+    };
+  } catch (e: any) {
+    return { success: false, message: String(e), branch_name: branchName, worktree_dir: "" };
+  }
+}
+
+function normalizeExistingBranchName(value: string): string {
+  return value.trim().replace(/^refs\/heads\//, "").replace(/^origin\//, "");
+}
+
+function validateExistingBranchName(appDir: string, branchName: string): string | null {
+  if (!branchName || branchName.startsWith("-") || branchName.includes("..") || branchName.includes("\\")) {
+    return "Enter a valid branch name.";
+  }
+  const result = runGitSafe(appDir, ["check-ref-format", "--branch", branchName]);
+  return result.returncode === 0 ? null : "Enter a valid branch name.";
+}
+
+function localBranchExists(appDir: string, branchName: string): boolean {
+  return runGitSafe(appDir, ["rev-parse", "--verify", `refs/heads/${branchName}`]).returncode === 0;
+}
+
+export function createWorktreeFromBranch(
+  appDir: string,
+  taskId: number,
+  requestedBranchName: string,
+  options: { token?: string | null } = {},
+): { success: boolean; message: string; branch_name: string; worktree_dir: string; techStack?: TechStack } {
+  if (!fs.existsSync(path.join(appDir, ".git"))) {
+    return { success: false, message: "App directory is not a git repository. Initialize git first.", branch_name: "", worktree_dir: "" };
+  }
+
+  const branchName = normalizeExistingBranchName(requestedBranchName);
+  const validationError = validateExistingBranchName(appDir, branchName);
+  if (validationError) {
+    return { success: false, message: validationError, branch_name: branchName, worktree_dir: "" };
+  }
+
+  const worktreeDir = worktreeDirForTask(appDir, taskId);
+  runGitSafe(appDir, ["worktree", "prune"], 15000);
+
+  if (fs.existsSync(worktreeDir)) {
+    return { success: false, message: `Worktree directory already exists: ${worktreeDir}`, branch_name: branchName, worktree_dir: worktreeDir };
+  }
+
+  const remote = runGitSafe(appDir, ["remote", "get-url", "origin"]);
+  if (remote.returncode !== 0) {
+    return { success: false, message: "No remote configured. Connect the project to GitHub first.", branch_name: branchName, worktree_dir: "" };
+  }
+
+  const fetch = runGitSafe(
+    appDir,
+    ["fetch", "origin", `+refs/heads/${branchName}:refs/remotes/origin/${branchName}`],
+    30000,
+    options.token,
+  );
+  if (fetch.returncode !== 0) {
+    return {
+      success: false,
+      message: `Remote branch "${branchName}" could not be fetched. ${fetch.stdout.trim() || "Check that the branch exists and your GitHub account has access."}`,
+      branch_name: branchName,
+      worktree_dir: "",
+    };
+  }
+
+  try {
+    const hasLocalBranch = localBranchExists(appDir, branchName);
+    const worktreeArgs = hasLocalBranch
+      ? ["worktree", "add", worktreeDir, branchName]
+      : ["worktree", "add", "-b", branchName, worktreeDir, `origin/${branchName}`];
+
+    const add = runGitSafe(appDir, worktreeArgs, 30000);
+    if (add.returncode !== 0) {
+      return {
+        success: false,
+        message: `Failed to create worktree for "${branchName}": ${add.stdout.trim()}`,
+        branch_name: branchName,
+        worktree_dir: "",
+      };
+    }
+
+    runGitSafe(worktreeDir, ["branch", "--set-upstream-to", `origin/${branchName}`, branchName]);
+    const pull = runGitSafe(worktreeDir, ["pull", "--ff-only", "origin", branchName], 30000, options.token);
+    if (pull.returncode !== 0) {
+      removeWorktree(appDir, worktreeDir, "");
+      return {
+        success: false,
+        message: `Branch "${branchName}" could not be fast-forwarded from origin. ${pull.stdout.trim()}`,
+        branch_name: branchName,
+        worktree_dir: "",
+      };
+    }
+
+    const prep = prepareWorktreeEnvironment(appDir, worktreeDir, taskId);
+    if (!prep.success || prep.message !== "Worktree environment ready") {
+      return {
+        success: true,
+        message: prep.message,
+        branch_name: branchName,
+        worktree_dir: worktreeDir,
+        techStack: prep.techStack,
+      };
+    }
+
+    return {
+      success: true,
+      message: `Worktree created from branch ${branchName}`,
+      branch_name: branchName,
+      worktree_dir: worktreeDir,
+      techStack: prep.techStack,
     };
   } catch (e: any) {
     return { success: false, message: String(e), branch_name: branchName, worktree_dir: "" };

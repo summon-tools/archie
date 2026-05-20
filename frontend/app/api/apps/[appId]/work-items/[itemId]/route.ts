@@ -62,7 +62,7 @@ export async function DELETE(
           stopPreview(env.preview_pid, env.worktree_dir, env.preview_port, { appId: Number(appId), workItemId: wi.id });
         }
         if (env.worktree_dir && env.branch_name && app.directory) {
-          removeWorktree(app.directory, env.worktree_dir, env.branch_name);
+          removeWorktree(app.directory, env.worktree_dir, env.delete_branch_on_remove ? env.branch_name : "");
         }
       }
     } catch {}

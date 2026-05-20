@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { createWorkItem, type ModelConfig } from "@/lib/api";
+import { createWorkItem, importExistingBranch, type ModelConfig } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import ChatInput from "@/components/ChatInput";
 import { useSelectedModel } from "@/hooks/useSelectedModel";
 import { tools } from "@/tools/registry";
 import type { AppFile } from "@/lib/types";
+import { GitBranch, SpinnerGap } from "@phosphor-icons/react";
 
 interface NewChatViewProps {
   appId: number;
@@ -21,6 +22,8 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinnedToolId, setPinnedToolId] = useState<string | null>(null);
+  const [branchName, setBranchName] = useState("");
+  const [importingBranch, setImportingBranch] = useState(false);
   const { selectedModel, selectedProvider, handleModelChange } = useSelectedModel();
   const { data: modelConfig } = useSWR<ModelConfig>("/api/models/config", fetcher);
 
@@ -44,6 +47,22 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
 
   const handleChipClick = (text: string) => {
     setMessage(text);
+  };
+
+  const handleImportBranch = async () => {
+    const branch = branchName.trim();
+    if (!branch || importingBranch || sending) return;
+    setImportingBranch(true);
+    setError(null);
+    try {
+      const item = await importExistingBranch(appId, branch);
+      setBranchName("");
+      onItemCreated(item);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to open branch");
+    } finally {
+      setImportingBranch(false);
+    }
   };
 
   const taskShortcuts = [
@@ -102,6 +121,33 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
               ))}
             </div>
           </div>
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleImportBranch();
+            }}
+            className="max-w-xs mx-auto mt-8"
+          >
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-th-subtle border border-th">
+              <GitBranch size={15} className="text-th-muted flex-shrink-0" />
+              <input
+                type="text"
+                value={branchName}
+                onChange={(event) => setBranchName(event.target.value)}
+                placeholder="Open existing branch"
+                className="min-w-0 flex-1 bg-transparent text-sm text-th-primary placeholder:text-th-dimmed focus:outline-none"
+                disabled={importingBranch || sending}
+              />
+              <button
+                type="submit"
+                disabled={!branchName.trim() || importingBranch || sending}
+                className="px-2 py-1 rounded-md text-xs font-medium bg-btn-secondary text-btn-secondary hover:bg-btn-secondary-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {importingBranch ? <SpinnerGap size={13} className="animate-spin" /> : "Open"}
+              </button>
+            </div>
+          </form>
 
           {/* Error */}
           {error && (

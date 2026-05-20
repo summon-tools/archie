@@ -233,7 +233,11 @@ export async function POST(request: NextRequest) {
 
       // Store the branch name so the UI can show diff/PR controls
       dal.ensureWorkItemEnv(workItem.id);
-      dal.updateWorkItemEnv(workItem.id, { branch_name: SETUP_BRANCH });
+      dal.updateWorkItemEnv(workItem.id, {
+        branch_name: SETUP_BRANCH,
+        branch_source: "setup",
+        delete_branch_on_remove: 0,
+      });
 
       // Save the initial user message so it shows in the conversation
       dal.createMessage({
@@ -379,7 +383,11 @@ export async function POST(request: NextRequest) {
 
     // Store the branch name so the UI can show diff/PR controls
     dal.ensureWorkItemEnv(workItem.id);
-    dal.updateWorkItemEnv(workItem.id, { branch_name: SETUP_BRANCH });
+    dal.updateWorkItemEnv(workItem.id, {
+      branch_name: SETUP_BRANCH,
+      branch_source: "setup",
+      delete_branch_on_remove: 0,
+    });
 
     // Save the initial user message so it shows in the conversation
     dal.createMessage({

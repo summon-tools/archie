@@ -192,6 +192,13 @@ export async function createWorkItem(appId: number, message: string, taskType?: 
   });
 }
 
+export async function importExistingBranch(appId: number, branch: string): Promise<Task> {
+  return fetchJSON(`${BASE}/apps/${appId}/work-items/import-branch`, {
+    method: "POST",
+    body: JSON.stringify({ branch }),
+  });
+}
+
 export async function getWorkItem(appId: number, itemId: number): Promise<Task> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}`);
 }

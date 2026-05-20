@@ -367,6 +367,8 @@ export async function streamConversationMessage(
           dal.updateWorkItemEnv(workItem.id, {
             worktree_dir: wt.worktree_dir,
             branch_name: wt.branch_name,
+            branch_source: "generated",
+            delete_branch_on_remove: 1,
             worktree_status: "ready",
           });
           env = dal.getWorkItemEnv(workItem.id);

@@ -46,6 +46,8 @@ export async function POST(
     dal.updateWorkItemEnv(wi.id, {
       branch_name: result.branch_name,
       worktree_dir: result.worktree_dir,
+      branch_source: "generated",
+      delete_branch_on_remove: 1,
       worktree_status: "ready",
     });
 
