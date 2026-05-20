@@ -57,6 +57,10 @@ function requestOrigin(request: Pick<NextRequest, "headers" | "url">): string {
   return new URL(request.url).origin;
 }
 
+export function getPublicServerOrigin(request: Pick<NextRequest, "headers" | "url">): string {
+  return requestOrigin(request);
+}
+
 export function getGitHubAppSettings(): GitHubAppSettings {
   return {
     public_server_url: dal.getSetting("public_server_url") || "",
