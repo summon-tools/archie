@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
@@ -6,7 +6,7 @@ import { createTempGitRepo, type TempGitRepo } from "../helpers/temp-git";
 
 // Import the module under test — worktrees.ts uses child_process (not SQLite)
 // so it works without the vi.doMock dance.
-import { createWorktree, createWorktreeFromBranch, listRemoteBranches, removeWorktree } from "@/lib/server/worktrees";
+import { createWorktree, createWorktreeFromBranch, listRemoteBranches, listRemoteBranchesForApp, removeWorktree } from "@/lib/server/worktrees";
 
 let repos: TempGitRepo[] = [];
 
@@ -19,6 +19,7 @@ function makeRepo() {
 afterEach(() => {
   for (const r of repos) r.cleanup();
   repos = [];
+  vi.restoreAllMocks();
   // Also clean up any worktree dirs created beside the repo
 });
 
@@ -133,6 +134,32 @@ describe("createWorktreeFromBranch", () => {
 
     expect(result.success).toBe(true);
     expect(result.branches).toEqual(["feature/existing"]);
+  });
+
+  it("lists GitHub remote branches through the API when a token is available", async () => {
+    const repo = makeRepo();
+    execSync("git remote add origin git@github.com:owner/repo.git", { cwd: repo.dir, stdio: "ignore" });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        { name: "main" },
+        { name: "feature/api-branch" },
+      ],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listRemoteBranchesForApp(repo.dir, { token: "user-token" });
+
+    expect(result.success).toBe(true);
+    expect(result.branches).toEqual(["feature/api-branch", "main"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/branches?per_page=100&page=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer user-token",
+        }),
+      }),
+    );
   });
 
   it("creates a worktree from an existing remote branch without deleting the branch on cleanup", () => {

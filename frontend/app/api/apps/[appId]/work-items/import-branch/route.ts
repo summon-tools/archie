@@ -2,11 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
 import { createWorktreeFromBranch } from "@/lib/server/worktrees";
-import { getValidGitHubUserToken } from "@/lib/server/github-app";
+import { getValidGitHubUserToken, GitHubAppError } from "@/lib/server/github-app";
 import { handleRoomRouteError, readJsonBody, requireAppAccess } from "@/lib/server/room-route-utils";
 
 function normalizeTitle(branchName: string): string {
   return `Branch: ${branchName}`.slice(0, 80);
+}
+
+function githubBranchAuthMessage(error: GitHubAppError): string {
+  if (error.code === "github_user_not_connected") {
+    return "Connect your GitHub account before opening a remote branch.";
+  }
+  if (error.code === "github_user_reconnect_required") {
+    return "Reconnect your GitHub account before opening a remote branch.";
+  }
+  return error.message;
 }
 
 export async function POST(
@@ -30,10 +40,15 @@ export async function POST(
     }
 
     let githubToken: string | null = null;
+    let githubAuthError: string | null = null;
     try {
       githubToken = (await getValidGitHubUserToken(access.user.id)).token;
-    } catch {
-      githubToken = null;
+    } catch (error) {
+      if (error instanceof GitHubAppError) {
+        githubAuthError = githubBranchAuthMessage(error);
+      } else {
+        throw error;
+      }
     }
 
     const conversation = dal.createConversation({
@@ -67,7 +82,10 @@ export async function POST(
       dal.updateWorkItemEnv(workItem.id, { worktree_status: "failed" });
       dal.deleteWorkItem(workItem.id);
       try { dal.deleteConversation(conversation.id); } catch {}
-      return NextResponse.json({ detail: worktree.message }, { status: 422 });
+      const detail = githubAuthError
+        ? `${githubAuthError} Archie could not open the branch with local git credentials either: ${worktree.message}`
+        : worktree.message;
+      return NextResponse.json({ detail }, { status: 422 });
     }
 
     dal.updateWorkItemEnv(workItem.id, {

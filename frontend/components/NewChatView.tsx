@@ -40,6 +40,9 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
   const branchOptions = remoteBranches?.branches || [];
   const checkedOutBranchOptions = remoteBranches?.checked_out_branches || [];
   const branchesRefreshing = remoteBranchesLoading || remoteBranchesValidating;
+  const remoteBranchesErrorMessage = remoteBranchesError instanceof Error
+    ? remoteBranchesError.message
+    : null;
   const filteredBranches = useMemo(() => {
     const query = branchQuery.trim().toLowerCase();
     if (!query) return branchOptions;
@@ -194,6 +197,7 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
                   className="w-full min-w-0 flex items-center justify-between gap-2 bg-transparent text-left text-sm text-th-primary disabled:text-th-dimmed focus:outline-none"
                   aria-haspopup="listbox"
                   aria-expanded={branchPickerOpen}
+                  title={remoteBranchesErrorMessage || undefined}
                 >
                   <span className={`min-w-0 truncate ${branchName ? "text-th-primary" : "text-th-dimmed"}`}>
                     {remoteBranchesLoading && branchOptions.length === 0
@@ -251,7 +255,9 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
                     </div>
                     <div role="listbox" className="max-h-52 overflow-y-auto py-1">
                       {remoteBranchesError ? (
-                        <div className="px-3 py-2 text-xs text-th-dimmed">Could not load branches</div>
+                        <div className="px-3 py-2 text-xs text-th-dimmed break-words">
+                          {remoteBranchesErrorMessage || "Could not load branches"}
+                        </div>
                       ) : filteredBranches.length === 0 && filteredCheckedOutBranches.length === 0 ? (
                         <div className="px-3 py-2 text-xs text-th-dimmed">
                           {branchesRefreshing

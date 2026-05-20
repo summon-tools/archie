@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { killProcessOnPort } from "./process";
 import { checkPortSync } from "./platform";
+import { parseGitHubRemoteUrl } from "./github";
 import {
   type TechStack,
   detectTechStack,
@@ -17,6 +18,13 @@ import {
 import { readManifest, generateManifest } from "./manifest";
 import type { AppManifest } from "./manifest";
 import { runInstall, runStart, runStop as runnerStop, runHealthCheck, buildEnvPrefix, allocateFreePort } from "./runner";
+
+export interface RemoteBranchListResult {
+  success: boolean;
+  message: string;
+  branches: string[];
+  checked_out_branches: string[];
+}
 
 /**
  * Remove a specific variable from a .env file in the given directory.
@@ -449,10 +457,80 @@ function checkedOutBranches(appDir: string): Set<string> {
     .filter(Boolean));
 }
 
+function buildRemoteBranchListResult(
+  appDir: string,
+  branchNames: Iterable<string>,
+  options: { excludeCheckedOut?: boolean } = {},
+): RemoteBranchListResult {
+  const unavailableBranches = options.excludeCheckedOut ? checkedOutBranches(appDir) : new Set<string>();
+  const remoteBranches = new Set(Array.from(branchNames).filter(Boolean));
+  const checkedOutRemoteBranches = Array.from(unavailableBranches)
+    .filter((branch) => remoteBranches.has(branch))
+    .sort((a, b) => a.localeCompare(b));
+  const branches = Array.from(remoteBranches)
+    .filter((branch) => !unavailableBranches.has(branch))
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    success: true,
+    message: "Remote branches loaded",
+    branches,
+    checked_out_branches: checkedOutRemoteBranches,
+  };
+}
+
+async function listGitHubBranchesViaApi(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<{ success: true; branches: string[] } | { success: false; message: string }> {
+  const branches: string[] = [];
+
+  for (let page = 1; page <= 20; page += 1) {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=100&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      const detail = typeof body?.message === "string" ? body.message : `GitHub API error ${response.status}`;
+      return {
+        success: false,
+        message: `GitHub could not load branches for ${owner}/${repo}. ${detail}`,
+      };
+    }
+
+    const pageBranches = await response.json().catch(() => null);
+    if (!Array.isArray(pageBranches)) {
+      return {
+        success: false,
+        message: `GitHub returned an invalid branch list for ${owner}/${repo}.`,
+      };
+    }
+
+    branches.push(
+      ...pageBranches
+        .map((branch) => (typeof branch?.name === "string" ? branch.name : ""))
+        .filter(Boolean),
+    );
+
+    if (pageBranches.length < 100) break;
+  }
+
+  return { success: true, branches };
+}
+
 export function listRemoteBranches(
   appDir: string,
   options: { token?: string | null; excludeCheckedOut?: boolean } = {},
-): { success: boolean; message: string; branches: string[]; checked_out_branches: string[] } {
+): RemoteBranchListResult {
   if (!fs.existsSync(path.join(appDir, ".git"))) {
     return {
       success: false,
@@ -482,26 +560,56 @@ export function listRemoteBranches(
     };
   }
 
-  const unavailableBranches = options.excludeCheckedOut ? checkedOutBranches(appDir) : new Set<string>();
-  const remoteBranches = new Set(result.stdout
+  const remoteBranches = result.stdout
     .split("\n")
     .map((line) => line.trim().split(/\s+/)[1] || "")
     .filter((ref) => ref.startsWith("refs/heads/"))
     .map((ref) => ref.replace(/^refs\/heads\//, ""))
-    .filter(Boolean));
-  const checkedOutRemoteBranches = Array.from(unavailableBranches)
-    .filter((branch) => remoteBranches.has(branch))
-    .sort((a, b) => a.localeCompare(b));
-  const branches = Array.from(remoteBranches)
-    .filter((branch) => !unavailableBranches.has(branch))
-    .sort((a, b) => a.localeCompare(b));
+    .filter(Boolean);
 
-  return {
-    success: true,
-    message: "Remote branches loaded",
-    branches,
-    checked_out_branches: checkedOutRemoteBranches,
-  };
+  return buildRemoteBranchListResult(appDir, remoteBranches, options);
+}
+
+export async function listRemoteBranchesForApp(
+  appDir: string,
+  options: { token?: string | null; excludeCheckedOut?: boolean } = {},
+): Promise<RemoteBranchListResult> {
+  if (!fs.existsSync(path.join(appDir, ".git"))) {
+    return {
+      success: false,
+      message: "App directory is not a git repository. Initialize git first.",
+      branches: [],
+      checked_out_branches: [],
+    };
+  }
+
+  const remote = runGitSafe(appDir, ["remote", "get-url", "origin"]);
+  if (remote.returncode !== 0) {
+    return {
+      success: false,
+      message: "No remote configured. Connect the project to GitHub first.",
+      branches: [],
+      checked_out_branches: [],
+    };
+  }
+
+  const githubRemote = parseGitHubRemoteUrl(remote.stdout.trim());
+  if (githubRemote && options.token) {
+    const apiResult = await listGitHubBranchesViaApi(githubRemote.owner, githubRemote.repo, options.token);
+    if (apiResult.success) {
+      return buildRemoteBranchListResult(appDir, apiResult.branches, options);
+    }
+
+    const gitFallback = listRemoteBranches(appDir, options);
+    return gitFallback.success ? gitFallback : {
+      success: false,
+      message: apiResult.message,
+      branches: [],
+      checked_out_branches: [],
+    };
+  }
+
+  return listRemoteBranches(appDir, options);
 }
 
 export function createWorktreeFromBranch(

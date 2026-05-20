@@ -174,6 +174,11 @@ describe("branch import route", () => {
       handleRoomRouteError: vi.fn(() => null),
     }));
     vi.doMock("@/lib/server/github-app", () => ({
+      GitHubAppError: class GitHubAppError extends Error {
+        constructor(public readonly code: string, message: string, public readonly status = 400) {
+          super(message);
+        }
+      },
       getValidGitHubUserToken: vi.fn(async () => ({ token: "user-token" })),
     }));
     vi.doMock("@/lib/server/dal", () => ({
@@ -216,5 +221,48 @@ describe("branch import route", () => {
     expect(createWorktreeFromBranch).toHaveBeenCalledWith("/repo", 9, "feature/existing", {
       token: "user-token",
     });
+  });
+});
+
+describe("branch list route", () => {
+  it("surfaces GitHub connection errors when remote branch loading fails", async () => {
+    class GitHubAppError extends Error {
+      constructor(public readonly code: string, message: string, public readonly status = 400) {
+        super(message);
+      }
+    }
+    const listRemoteBranchesForApp = vi.fn(async () => ({
+      success: false,
+      message: "Permission denied (publickey).",
+      branches: [],
+      checked_out_branches: [],
+    }));
+
+    vi.doMock("@/lib/server/room-route-utils", () => ({
+      requireAppAccess: vi.fn(async () => ({
+        user: authUser,
+        appId: 1,
+        app: { id: 1, name: "Test App", directory: "/repo" },
+      })),
+      handleRoomRouteError: vi.fn(() => null),
+    }));
+    vi.doMock("@/lib/server/github-app", () => ({
+      GitHubAppError,
+      getValidGitHubUserToken: vi.fn(async () => {
+        throw new GitHubAppError("github_user_not_connected", "Connect your GitHub account before publishing.");
+      }),
+    }));
+    vi.doMock("@/lib/server/worktrees", () => ({ listRemoteBranchesForApp }));
+
+    const { GET } = await import("@/app/api/apps/[appId]/git/branches/route");
+
+    const response = await GET(new Request("http://test.local") as any, {
+      params: Promise.resolve({ appId: "1" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.detail).toContain("Connect your GitHub account before loading remote branches.");
+    expect(body.detail).toContain("local git credentials");
   });
 });
