@@ -1001,6 +1001,22 @@ export function getSchemaFiles(appDir: string, techStack: TechStack): string {
       } catch {}
       break;
 
+    case "fastapi":
+      patterns.push(
+        ["models.py"],
+        ["schemas.py"],
+        ["database.py"],
+        ["db.py"],
+        ["app/models.py"],
+        ["app/schemas.py"],
+        ["app/database.py"],
+        ["app/db.py"],
+      );
+      patterns.push(collectFiles(path.join(appDir, "app", "models"), ".py"));
+      patterns.push(collectFiles(path.join(appDir, "app", "schemas"), ".py"));
+      patterns.push(collectFiles(path.join(appDir, "src"), ".py"));
+      break;
+
     case "flask":
       patterns.push(
         ["models.py"],

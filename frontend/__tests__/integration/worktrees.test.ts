@@ -82,6 +82,65 @@ describe("createWorktree", () => {
     expect(result.success).toBe(true);
     removeWorktree(repo.dir, result.worktree_dir, result.branch_name);
   });
+
+  it("copies untracked FastAPI SQLite databases into the worktree", () => {
+    const repo = makeRepo();
+    fs.writeFileSync(path.join(repo.dir, "requirements.txt"), "fastapi\nuvicorn\naiosqlite\n");
+    fs.writeFileSync(path.join(repo.dir, "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n");
+    execSync("git add requirements.txt main.py", { cwd: repo.dir, stdio: "ignore" });
+    execSync('git commit -m "add fastapi app"', { cwd: repo.dir, stdio: "ignore" });
+
+    fs.writeFileSync(path.join(repo.dir, ".env"), "DATABASE_URL=sqlite:///./app.sqlite3\n");
+    fs.writeFileSync(path.join(repo.dir, "app.sqlite3"), "sqlite data");
+    fs.writeFileSync(path.join(repo.dir, "app.sqlite3-wal"), "sqlite wal");
+
+    const result = createWorktree(repo.dir, 5, "FastAPI sqlite task");
+
+    expect(result.success).toBe(true);
+    expect(result.techStack?.framework).toBe("fastapi");
+    expect(result.techStack?.database).toBe("sqlite");
+    expect(fs.existsSync(path.join(result.worktree_dir, ".env"))).toBe(true);
+    expect(fs.readFileSync(path.join(result.worktree_dir, "app.sqlite3"), "utf-8")).toBe("sqlite data");
+    expect(fs.readFileSync(path.join(result.worktree_dir, "app.sqlite3-wal"), "utf-8")).toBe("sqlite wal");
+
+    removeWorktree(repo.dir, result.worktree_dir, result.branch_name);
+  });
+
+  it("patches untracked FastAPI PostgreSQL env URLs for the worktree database", () => {
+    const repo = makeRepo();
+    fs.writeFileSync(path.join(repo.dir, "requirements.txt"), "fastapi\nuvicorn\nasyncpg\n");
+    fs.writeFileSync(path.join(repo.dir, "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n");
+    execSync("git add requirements.txt main.py", { cwd: repo.dir, stdio: "ignore" });
+    execSync('git commit -m "add fastapi postgres app"', { cwd: repo.dir, stdio: "ignore" });
+    fs.writeFileSync(path.join(repo.dir, ".env"), "DATABASE_URL=postgresql+asyncpg://archie:secret@localhost:5432/archie_dev\n");
+
+    const fakeBin = fs.mkdtempSync(path.join(path.dirname(repo.dir), "archie-fake-pg-"));
+    repos.push({
+      dir: fakeBin,
+      cleanup: () => fs.rmSync(fakeBin, { recursive: true, force: true }),
+    });
+    fs.writeFileSync(path.join(fakeBin, "psql"), "#!/bin/sh\nif [ \"$1\" = \"-lqt\" ]; then exit 1; fi\ncat >/dev/null\nexit 0\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(fakeBin, "createdb"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(fakeBin, "pg_dump"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${previousPath || ""}`;
+    let result: ReturnType<typeof createWorktree> | null = null;
+    try {
+      result = createWorktree(repo.dir, 6, "FastAPI postgres task");
+
+      expect(result.success).toBe(true);
+      expect(result.techStack?.framework).toBe("fastapi");
+      expect(result.techStack?.database).toBe("postgresql");
+      expect(result.techStack?.databaseName).toBe("archie_dev");
+      expect(fs.readFileSync(path.join(result.worktree_dir, ".env"), "utf-8")).toContain("archie_dev_task_6");
+    } finally {
+      if (result?.worktree_dir && result.branch_name) {
+        removeWorktree(repo.dir, result.worktree_dir, result.branch_name);
+      }
+      process.env.PATH = previousPath;
+    }
+  });
 });
 
 describe("createWorktreeFromBranch", () => {

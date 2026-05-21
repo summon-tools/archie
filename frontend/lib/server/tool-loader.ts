@@ -16,6 +16,7 @@ const FRAMEWORK_TO_TEMPLATE: Record<Framework, string> = {
   rails: "rails.md",
   nextjs: "nextjs.md",
   django: "django.md",
+  fastapi: "fastapi.md",
   flask: "flask.md",
   express: "express.md",
   vite: "vite.md",
