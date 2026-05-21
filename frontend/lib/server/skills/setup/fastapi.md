@@ -8,6 +8,11 @@ A runtime manifest has been generated at `.archie/app.yaml`:
 {{MANIFEST_YAML}}
 ```
 
+## Detected database
+- Adapter: {{DATABASE}}
+- Name: {{DATABASE_NAME}}
+{{DATABASE_SETUP_HINT}}
+
 ## Your job
 1. Read the project (README, requirements.txt, pyproject.toml, app entry point) to understand special requirements
 2. **Check that required tools are available** — do NOT install system-level tools
