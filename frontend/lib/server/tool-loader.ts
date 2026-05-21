@@ -16,6 +16,7 @@ const FRAMEWORK_TO_TEMPLATE: Record<Framework, string> = {
   rails: "rails.md",
   nextjs: "nextjs.md",
   django: "django.md",
+  fastapi: "fastapi.md",
   flask: "flask.md",
   express: "express.md",
   vite: "vite.md",
@@ -25,6 +26,18 @@ const FRAMEWORK_TO_TEMPLATE: Record<Framework, string> = {
 function formatProcesses(stack: TechStack): string {
   if (stack.processes.length === 0) return "none";
   return stack.processes.map((p) => `${p.name}: ${p.command}`).join(", ");
+}
+
+function databaseSetupHint(stack: TechStack): string {
+  if (stack.framework !== "fastapi" || stack.database !== "postgresql" || stack.databaseName) {
+    return "";
+  }
+
+  return `
+## Worktree database setup warning
+Archie detected PostgreSQL dependencies, but it could not find a concrete database URL or database name. Before finishing setup, create or copy a project \`.env\` file and make sure the app reads a full PostgreSQL URL from \`DATABASE_URL\` or the app's existing DB URL env var.
+
+Do not hardcode the database URL in \`.archie/app.yaml\` or the uvicorn command. Future task worktrees need the DB URL in env configuration before the worktree is created so Archie can clone it into an isolated per-task database.`;
 }
 
 export function buildSetupToolPrompt(ctx: SetupToolContext): string {
@@ -45,6 +58,7 @@ export function buildSetupToolPrompt(ctx: SetupToolContext): string {
     "{{PACKAGE_MANAGER}}": ctx.stack.packageManager || "none",
     "{{DATABASE}}": ctx.stack.database,
     "{{DATABASE_NAME}}": ctx.stack.databaseName || "none",
+    "{{DATABASE_SETUP_HINT}}": databaseSetupHint(ctx.stack),
     "{{HAS_PROCFILE}}": String(ctx.stack.hasProcfile),
     "{{PROCESSES}}": formatProcesses(ctx.stack),
     "{{MANIFEST_YAML}}": manifestYaml,

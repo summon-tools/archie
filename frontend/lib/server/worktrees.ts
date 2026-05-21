@@ -103,7 +103,6 @@ export function allocatePort(usedPorts: number[]): number | null {
 }
 
 function copyDatabases(sourceDir: string, destDir: string): void {
-  const patterns = ["**/*.db", "**/*.db-journal", "**/*.db-wal", "**/*.db-shm"];
   // Simple recursive scan for .db files
   function walk(dir: string, rel: string) {
     try {
@@ -113,12 +112,7 @@ function copyDatabases(sourceDir: string, destDir: string): void {
         const relPath = path.join(rel, entry.name);
         if (entry.isDirectory()) {
           walk(full, relPath);
-        } else if (
-          entry.name.endsWith(".db") ||
-          entry.name.endsWith(".db-journal") ||
-          entry.name.endsWith(".db-wal") ||
-          entry.name.endsWith(".db-shm")
-        ) {
+        } else if (/\.(db|sqlite|sqlite3)(-(journal|wal|shm))?$/.test(entry.name)) {
           const dest = path.join(destDir, relPath);
           fs.mkdirSync(path.dirname(dest), { recursive: true });
           fs.copyFileSync(full, dest);
@@ -213,6 +207,83 @@ function patchDatabaseYml(worktreeDir: string, newDbName: string): void {
   }
 
   fs.writeFileSync(dbYmlPath, result.join("\n"));
+}
+
+function updateDatabaseUrlName(rawValue: string, newDbName: string): string | null {
+  const schemeMatch = rawValue.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  if (!schemeMatch) return null;
+
+  const scheme = schemeMatch[1].toLowerCase();
+  if (!scheme.startsWith("postgres") && !scheme.startsWith("mysql")) return null;
+
+  try {
+    const parsed = new URL(rawValue);
+    parsed.pathname = `/${newDbName}`;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function patchDatabaseEnv(worktreeDir: string, newDbName: string): void {
+  for (const file of [".env", ".env.local", ".env.development", ".env.dev"]) {
+    const envPath = path.join(worktreeDir, file);
+    if (!fs.existsSync(envPath)) continue;
+
+    try {
+      const content = fs.readFileSync(envPath, "utf-8");
+      let changed = false;
+      const lines = content.split("\n").map((line) => {
+        const assignment = line.match(/^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*)(.*?)(\s*)$/);
+        if (!assignment) return line;
+
+        const [, prefix, rawValue, trailing] = assignment;
+        const quote = rawValue.match(/^(['"])(.*)\1$/);
+        const unquoted = quote ? quote[2] : rawValue.trim();
+        const updated = updateDatabaseUrlName(unquoted, newDbName);
+        if (!updated) return line;
+
+        changed = true;
+        return `${prefix}${quote ? `${quote[1]}${updated}${quote[1]}` : updated}${trailing}`;
+      });
+
+      if (changed) {
+        fs.writeFileSync(envPath, lines.join("\n"));
+      }
+    } catch {
+      // Non-fatal. The app may still source its database config elsewhere.
+    }
+  }
+}
+
+function linkPythonVirtualEnv(appDir: string, worktreeDir: string): void {
+  for (const name of [".venv", "venv"]) {
+    const source = path.join(appDir, name);
+    const dest = path.join(worktreeDir, name);
+    if (!fs.existsSync(source) || fs.existsSync(dest)) continue;
+    try {
+      fs.symlinkSync(source, dest);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function copyLocalEnvFiles(appDir: string, worktreeDir: string): void {
+  for (const file of [".env", ".env.local", ".env.development", ".env.dev"]) {
+    const source = path.join(appDir, file);
+    const dest = path.join(worktreeDir, file);
+    if (!fs.existsSync(source) || fs.existsSync(dest)) continue;
+    try {
+      fs.copyFileSync(source, dest);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function sourceEnvFileCommand(): string {
+  return `([ -f ".env" ] && set -a && source ".env" 2>/dev/null && set +a || true)`;
 }
 
 // --- Dependency Installation ---
@@ -310,12 +381,23 @@ function prepareWorktreeEnvironment(
   worktreeDir: string,
   taskId: number,
 ): { success: boolean; message: string; techStack?: TechStack } {
+  copyLocalEnvFiles(appDir, worktreeDir);
   const stack = detectTechStack(worktreeDir);
+  linkPythonVirtualEnv(appDir, worktreeDir);
 
   if (stack.database === "postgresql" && stack.databaseName) {
-    const worktreeDbName = getWorktreeDatabaseName(stack.databaseName, taskId);
-    setupPostgresDatabase(stack.databaseName, worktreeDbName);
+    const baseDbName = stack.databaseName.replace(/_task_\d+$/, "");
+    const worktreeDbName = getWorktreeDatabaseName(baseDbName, taskId);
+    const setup = setupPostgresDatabase(baseDbName, worktreeDbName);
+    if (!setup.success) {
+      return {
+        success: true,
+        message: `Worktree created but database setup failed: ${setup.message}`,
+        techStack: stack,
+      };
+    }
     patchDatabaseYml(worktreeDir, worktreeDbName);
+    patchDatabaseEnv(worktreeDir, worktreeDbName);
   } else if (stack.database === "sqlite" || stack.database === "none") {
     copyDatabases(appDir, worktreeDir);
   }
@@ -329,15 +411,6 @@ function prepareWorktreeEnvironment(
       message: `Worktree created but dependency install had issues: ${depResult.message}`,
       techStack: stack,
     };
-  }
-
-  const venvDir = path.join(appDir, "venv");
-  if (fs.existsSync(venvDir) && !fs.existsSync(path.join(worktreeDir, "venv"))) {
-    try {
-      fs.symlinkSync(venvDir, path.join(worktreeDir, "venv"));
-    } catch {
-      // ignore
-    }
   }
 
   return {
@@ -612,7 +685,8 @@ export function removeWorktree(
         const taskIdMatch = worktreeDir.match(/-task-(\d+)\/?$/);
         if (taskIdMatch) {
           const taskId = parseInt(taskIdMatch[1], 10);
-          const worktreeDbName = getWorktreeDatabaseName(stack.databaseName, taskId);
+          const baseDbName = stack.databaseName.replace(/_task_\d+$/, "");
+          const worktreeDbName = getWorktreeDatabaseName(baseDbName, taskId);
           teardownPostgresDatabase(worktreeDbName);
         }
       }
@@ -865,6 +939,14 @@ function runMigrations(
         run(`${envPrefix} && cd "${worktreeDir}" && python manage.py migrate 2>&1`);
         return { success: true, message: "Django migrations applied" };
       }
+      case "fastapi": {
+        const alembicConfig = path.join(worktreeDir, "alembic.ini");
+        if (fs.existsSync(alembicConfig)) {
+          run(`${envPrefix} && cd "${worktreeDir}" && ${sourceEnvFileCommand()} && alembic upgrade head 2>&1`);
+          return { success: true, message: "Alembic migrations applied" };
+        }
+        return { success: true, message: "No Alembic config found (skipped)" };
+      }
       case "nextjs":
       case "express": {
         // Prisma migrate
@@ -927,6 +1009,7 @@ export function resetWorktreeDatabase(
       }
       const setup = setupPostgresDatabase(baseName, worktreeDbName);
       if (!setup.success) return setup;
+      patchDatabaseEnv(worktreeDir, worktreeDbName);
     } else {
       copyDatabases(appDir, worktreeDir);
     }

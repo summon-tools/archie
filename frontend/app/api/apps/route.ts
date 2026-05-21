@@ -39,7 +39,7 @@ IMPORTANT REQUIREMENTS:
 The manifest format (create at .archie/app.yaml):
 \`\`\`yaml
 app:
-  framework: <detected_framework>  # e.g. nextjs, rails, express, vite, django, flask
+  framework: <detected_framework>  # e.g. nextjs, rails, express, vite, django, fastapi, flask
 install:
   command: <install_command>        # e.g. "npm install"
 dev:
@@ -61,6 +61,7 @@ CRITICAL RULES:
 - For Next.js: use "-p $PORT" in the dev command
 - For Express/Node: always use process.env.PORT, never hardcode
 - For Rails: set host_env to BINDING and host_value to 0.0.0.0
+- For FastAPI: use uvicorn with --host 0.0.0.0 --port $PORT
 
 Build a complete, working application based on the description provided.
 Initialize a git repository and make an initial commit.`;

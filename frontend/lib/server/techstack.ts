@@ -4,7 +4,7 @@ import { getScriptWritePath } from "./app-paths";
 
 // --- Types ---
 
-export type Framework = "rails" | "nextjs" | "express" | "django" | "flask" | "vite" | "unknown";
+export type Framework = "rails" | "nextjs" | "express" | "django" | "fastapi" | "flask" | "vite" | "unknown";
 export type PackageManager = "yarn" | "npm" | "pnpm" | "bun" | null;
 export type BundleManager = "bundle" | "pip" | null;
 export type DatabaseAdapter = "postgresql" | "sqlite" | "mysql" | "none";
@@ -140,6 +140,11 @@ function detectFramework(dir: string): Framework {
     } catch {}
   }
 
+  // FastAPI
+  if (hasPythonDependency(dir, ["fastapi"]) || hasFastAPIEntryPoint(dir)) {
+    return "fastapi";
+  }
+
   // Vite
   if (
     fs.existsSync(path.join(dir, "vite.config.js")) ||
@@ -180,7 +185,11 @@ function detectPackageManager(dir: string): PackageManager {
 
 function detectBundleManager(dir: string): BundleManager {
   if (fs.existsSync(path.join(dir, "Gemfile"))) return "bundle";
-  if (fs.existsSync(path.join(dir, "requirements.txt")) || fs.existsSync(path.join(dir, "Pipfile"))) return "pip";
+  if (
+    fs.existsSync(path.join(dir, "requirements.txt")) ||
+    fs.existsSync(path.join(dir, "Pipfile")) ||
+    fs.existsSync(path.join(dir, "pyproject.toml"))
+  ) return "pip";
   return null;
 }
 
@@ -203,7 +212,127 @@ function detectDatabase(dir: string, framework: Framework): { adapter: DatabaseA
     } catch {}
   }
 
+  if (isPythonFramework(framework)) {
+    const envResult = detectDatabaseFromEnv(dir);
+    if (envResult.adapter !== "none") return envResult;
+
+    const sqliteResult = detectSqliteDatabaseFile(dir);
+    if (sqliteResult.adapter !== "none") return sqliteResult;
+
+    if (hasPythonDependency(dir, ["psycopg", "psycopg2", "psycopg2-binary", "asyncpg"])) {
+      return { adapter: "postgresql", database: null };
+    }
+    if (hasPythonDependency(dir, ["mysqlclient", "pymysql", "aiomysql"])) {
+      return { adapter: "mysql", database: null };
+    }
+    if (hasPythonDependency(dir, ["aiosqlite"])) {
+      return { adapter: "sqlite", database: null };
+    }
+  }
+
   return { adapter: "none", database: null };
+}
+
+function isPythonFramework(framework: Framework): boolean {
+  return framework === "django" || framework === "fastapi" || framework === "flask";
+}
+
+function readIfExists(filePath: string): string {
+  try {
+    return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
+  } catch {
+    return "";
+  }
+}
+
+function pythonDependencyText(dir: string): string {
+  return [
+    "requirements.txt",
+    "requirements-dev.txt",
+    "pyproject.toml",
+    "Pipfile",
+  ].map((file) => readIfExists(path.join(dir, file))).join("\n").toLowerCase();
+}
+
+function hasPythonDependency(dir: string, names: string[]): boolean {
+  const content = pythonDependencyText(dir);
+  if (!content) return false;
+  return names.some((name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9_-])${escaped}([^a-z0-9_-]|$)`, "i").test(content);
+  });
+}
+
+function hasFastAPIEntryPoint(dir: string): boolean {
+  const candidates = [
+    "main.py",
+    "app.py",
+    "api.py",
+    path.join("app", "main.py"),
+    path.join("app", "api.py"),
+    path.join("src", "main.py"),
+    path.join("src", "app", "main.py"),
+  ];
+
+  return candidates.some((candidate) => {
+    const content = readIfExists(path.join(dir, candidate));
+    return /\bfrom\s+fastapi\s+import\b/i.test(content) || /\bFastAPI\s*\(/.test(content);
+  });
+}
+
+function parseDatabaseUrl(rawValue: string): { adapter: DatabaseAdapter; database: string | null } | null {
+  const unquoted = rawValue.trim().replace(/^['"]|['"]$/g, "");
+  const schemeMatch = unquoted.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  if (!schemeMatch) return null;
+
+  const scheme = schemeMatch[1].toLowerCase();
+  let adapter: DatabaseAdapter = "none";
+  if (scheme.startsWith("postgres")) adapter = "postgresql";
+  else if (scheme.startsWith("sqlite")) adapter = "sqlite";
+  else if (scheme.startsWith("mysql")) adapter = "mysql";
+  if (adapter === "none") return null;
+
+  try {
+    const parsed = new URL(unquoted);
+    const pathname = decodeURIComponent(parsed.pathname || "");
+    const database = adapter === "sqlite"
+      ? pathname.replace(/^\/+/, "") || null
+      : pathname.replace(/^\/+/, "").split("/")[0] || null;
+    return { adapter, database };
+  } catch {
+    return { adapter, database: null };
+  }
+}
+
+function detectDatabaseFromEnv(dir: string): { adapter: DatabaseAdapter; database: string | null } {
+  for (const file of [".env", ".env.local", ".env.development", ".env.dev"]) {
+    const content = readIfExists(path.join(dir, file));
+    if (!content) continue;
+
+    for (const line of content.split("\n")) {
+      const match = line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.+?)\s*$/);
+      if (!match) continue;
+      const result = parseDatabaseUrl(match[1]);
+      if (result) return result;
+    }
+  }
+
+  return { adapter: "none", database: null };
+}
+
+function detectSqliteDatabaseFile(dir: string): { adapter: DatabaseAdapter; database: string | null } {
+  const candidates = [
+    "app.db",
+    "database.db",
+    "db.sqlite",
+    "db.sqlite3",
+    "database.sqlite",
+    "database.sqlite3",
+    path.join("data", "app.db"),
+    path.join("data", "database.db"),
+  ];
+  const found = candidates.find((candidate) => fs.existsSync(path.join(dir, candidate)));
+  return found ? { adapter: "sqlite", database: found } : { adapter: "none", database: null };
 }
 
 // --- Script Generation ---
@@ -394,4 +523,3 @@ fi
 rm -f tmp/pids/server.pid 2>/dev/null
 `;
 }
-

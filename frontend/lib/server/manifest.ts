@@ -89,6 +89,49 @@ function hasFlaskMigrations(directory: string): boolean {
   return fs.existsSync(path.join(directory, "migrations"));
 }
 
+function hasAlembic(directory: string): boolean {
+  return fs.existsSync(path.join(directory, "alembic.ini"));
+}
+
+function detectFastAPIAppTarget(directory?: string): string {
+  if (!directory) return "main:app";
+
+  const candidates = [
+    { file: "main.py", target: "main:app" },
+    { file: path.join("app", "main.py"), target: "app.main:app" },
+    { file: path.join("src", "main.py"), target: "src.main:app" },
+    { file: path.join("src", "app", "main.py"), target: "src.app.main:app" },
+    { file: "app.py", target: "app:app" },
+    { file: "api.py", target: "api:app" },
+  ];
+
+  for (const candidate of candidates) {
+    const fullPath = path.join(directory, candidate.file);
+    if (!fs.existsSync(fullPath)) continue;
+    try {
+      const content = fs.readFileSync(fullPath, "utf-8");
+      if (/\bFastAPI\s*\(/.test(content) || /\bfrom\s+fastapi\s+import\b/i.test(content)) {
+        return candidate.target;
+      }
+    } catch {}
+  }
+
+  return "main:app";
+}
+
+function pythonInstallCommand(directory?: string): string {
+  if (directory && fs.existsSync(path.join(directory, "requirements.txt"))) {
+    return "pip install -r requirements.txt";
+  }
+  if (directory && fs.existsSync(path.join(directory, "pyproject.toml"))) {
+    return "pip install -e .";
+  }
+  if (directory && fs.existsSync(path.join(directory, "Pipfile"))) {
+    return "pip install pipenv && pipenv install --dev";
+  }
+  return "pip install -r requirements.txt";
+}
+
 export function generateManifest(stack: TechStack, port: number, directory?: string): AppManifest {
   const pm = stack.packageManager;
 
@@ -162,7 +205,7 @@ export function generateManifest(stack: TechStack, port: number, directory?: str
     case "django":
       return {
         app: { framework: "django" },
-        install: { command: "pip install -r requirements.txt" },
+        install: { command: pythonInstallCommand(directory) },
         dev: {
           command: "python manage.py runserver 0.0.0.0:$PORT",
           port_env: "PORT",
@@ -172,10 +215,23 @@ export function generateManifest(stack: TechStack, port: number, directory?: str
         worktree: { prepare_command: "python manage.py migrate" },
       };
 
+    case "fastapi":
+      return {
+        app: { framework: "fastapi" },
+        install: { command: pythonInstallCommand(directory) },
+        dev: {
+          command: `uvicorn ${detectFastAPIAppTarget(directory)} --host 0.0.0.0 --port $PORT`,
+          port_env: "PORT",
+          strict_port: true,
+          health_path: "/",
+        },
+        worktree: directory && hasAlembic(directory) ? { prepare_command: "alembic upgrade head" } : undefined,
+      };
+
     case "flask":
       return {
         app: { framework: "flask" },
-        install: { command: "pip install -r requirements.txt" },
+        install: { command: pythonInstallCommand(directory) },
         dev: {
           command: "flask run --host 0.0.0.0 --port $PORT",
           port_env: "FLASK_RUN_PORT",

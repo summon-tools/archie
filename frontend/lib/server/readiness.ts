@@ -137,6 +137,7 @@ export function checkAppReadiness(framework: string): AppReadinessCheck[] {
       );
       break;
     case "django":
+    case "fastapi":
     case "flask":
       checks.push(
         checkAppTool("python3", "python3", getInstallHint("python3")),
