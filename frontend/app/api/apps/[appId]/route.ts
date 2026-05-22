@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { execSync } from "child_process";
 import fs from "fs";
 
-import { getAuthUser, requireAdmin, AuthError, ForbiddenError } from "@/lib/server/auth";
+import { getAuthUser, AuthError } from "@/lib/server/auth";
 import { checkPortSync, stopApp } from "@/lib/server/apps";
 import { detectTechStack } from "@/lib/server/techstack";
 import * as dal from "@/lib/server/dal";
@@ -49,18 +49,59 @@ export async function GET(
   }
 }
 
-export async function DELETE(
+export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ appId: string }> }
 ) {
   try {
-    await requireAdmin(request);
+    await getAuthUser(request);
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ detail: e.message }, { status: 401 });
     }
-    if (e instanceof ForbiddenError) {
-      return NextResponse.json({ detail: e.message }, { status: 403 });
+    throw e;
+  }
+
+  try {
+    const { appId } = await params;
+    const id = parseInt(appId, 10);
+    if (isNaN(id)) {
+      return NextResponse.json({ detail: "Invalid app ID" }, { status: 400 });
+    }
+
+    const app = dal.getApp(id);
+    if (!app) {
+      return NextResponse.json({ detail: "App not found" }, { status: 404 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const fields: { description?: string } = {};
+    if (typeof body.description === "string") {
+      fields.description = body.description.slice(0, 2000);
+    }
+
+    dal.updateApp(id, fields);
+
+    const updated = dal.getApp(id);
+    return NextResponse.json(dal.buildAppResponse(updated!));
+  } catch (e: any) {
+    return NextResponse.json(
+      { detail: e.message || "Failed to update app" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ appId: string }> }
+) {
+  let user;
+  try {
+    user = await getAuthUser(request);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ detail: e.message }, { status: 401 });
     }
     throw e;
   }
@@ -84,6 +125,17 @@ export async function DELETE(
       return NextResponse.json(
         { detail: "App not found" },
         { status: 404 }
+      );
+    }
+
+    const isAdmin = user.role === "admin";
+    const isOwner =
+      app.project_owner_user_id != null &&
+      app.project_owner_user_id === user.id;
+    if (!isAdmin && !isOwner) {
+      return NextResponse.json(
+        { detail: "Only the project owner or an admin can delete this app" },
+        { status: 403 }
       );
     }
 

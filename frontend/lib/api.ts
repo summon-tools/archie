@@ -86,6 +86,16 @@ export async function getApp(id: number): Promise<App> {
   return fetchJSON<App>(`${BASE}/apps/${id}`);
 }
 
+export async function updateApp(
+  id: number,
+  fields: { description?: string }
+): Promise<App> {
+  return fetchJSON<App>(`${BASE}/apps/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(fields),
+  });
+}
+
 export async function startApp(appId: number): Promise<{ success: boolean; message: string }> {
   return fetchJSON(`${BASE}/apps/${appId}/start`, { method: "POST" });
 }
@@ -697,7 +707,7 @@ export async function deleteAppFile(appId: number, fileId: number): Promise<AppF
 
 // --- User management endpoints ---
 
-export interface MeResponse { name: string; role: "admin" | "member"; email: string; color: string | null; }
+export interface MeResponse { id: number; name: string; role: "admin" | "member"; email: string; color: string | null; }
 
 export async function getMe(): Promise<MeResponse> {
   return fetchJSON<MeResponse>(`${BASE}/auth/me`);

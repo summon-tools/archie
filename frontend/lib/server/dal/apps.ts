@@ -2,6 +2,7 @@ import { getDb } from "../db";
 import { checkPortSync } from "../apps";
 import type { AppRow, AppResponse, WorkItemCounts } from "../types";
 import { getWorkItemCounts } from "./work-items";
+import { getConversationStats } from "./conversations";
 
 export function getApp(appId: number): AppRow | undefined {
   return getDb().prepare("SELECT * FROM apps WHERE id = ?").get(appId) as AppRow | undefined;
@@ -34,13 +35,20 @@ export function createApp(data: {
   return db.prepare("SELECT * FROM apps WHERE id = ?").get(result.lastInsertRowid) as AppRow;
 }
 
-export function updateApp(appId: number, fields: { project_owner_user_id?: number | null }): void {
+export function updateApp(
+  appId: number,
+  fields: { project_owner_user_id?: number | null; description?: string }
+): void {
   const db = getDb();
   const setParts: string[] = [];
   const values: unknown[] = [];
   if (fields.project_owner_user_id !== undefined) {
     setParts.push("project_owner_user_id = ?");
     values.push(fields.project_owner_user_id);
+  }
+  if (fields.description !== undefined) {
+    setParts.push("description = ?");
+    values.push(fields.description);
   }
   if (setParts.length === 0) return;
   values.push(appId);
@@ -75,6 +83,12 @@ export function buildAppResponse(app: AppRow): AppResponse {
   const counts = getWorkItemCounts(app.id);
   const isRunning = app.port ? checkPortSync(app.port) : false;
 
+  const stats = getConversationStats(app.id);
+  let previewsRunning = 0;
+  for (const port of stats.previewPorts) {
+    if (checkPortSync(port)) previewsRunning += 1;
+  }
+
   // Get seed_script from app_tool_configs
   const seedConfig = getAppToolConfig(app.id, "seed");
   let seedScript: string | null = null;
@@ -95,6 +109,11 @@ export function buildAppResponse(app: AppRow): AppResponse {
     project_owner_user_id: app.project_owner_user_id ?? null,
     is_running: isRunning,
     work_item_counts: counts,
+    conversation_stats: {
+      total: stats.total,
+      open: stats.open,
+      previews_running: previewsRunning,
+    },
     seed_script: seedScript,
     created_at: app.created_at,
   };

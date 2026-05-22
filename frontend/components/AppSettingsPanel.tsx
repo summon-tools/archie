@@ -1,11 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SpinnerGap, Play, Stop, ArrowsClockwise, CaretDown, Robot } from "@phosphor-icons/react";
+import { SpinnerGap, Play, Stop, ArrowsClockwise, CaretDown, Robot, Trash } from "@phosphor-icons/react";
 import GitHubSection from "./GitHubSection";
 import EnvVarsSection from "./EnvVarsSection";
 
-import { getAutomationConfigs, updateAutomationConfig, runAutomationNow, updateProjectOwner, type AutomationConfig } from "@/lib/api";
+import {
+  getAutomationConfigs,
+  updateAutomationConfig,
+  runAutomationNow,
+  updateProjectOwner,
+  updateApp,
+  deleteApp,
+  getMe,
+  type AutomationConfig,
+} from "@/lib/api";
 
 interface ProjectPanelProps {
   appId: number;
@@ -14,10 +23,13 @@ interface ProjectPanelProps {
     name: string;
     is_running: boolean;
     port: number;
+    description?: string;
+    directory?: string;
   };
   githubRepo: string;
   onAppAction: (action: "start" | "stop" | "restart") => void;
   actionLoading: string | null;
+  onDeleted?: () => void;
 }
 
 export default function AppSettingsPanel({
@@ -26,6 +38,7 @@ export default function AppSettingsPanel({
   githubRepo,
   onAppAction,
   actionLoading,
+  onDeleted,
 }: ProjectPanelProps) {
   const [showGit, setShowGit] = useState(false);
   const [showEnv, setShowEnv] = useState(false);
@@ -38,6 +51,61 @@ export default function AppSettingsPanel({
   const [teamUsers, setTeamUsers] = useState<{ id: number; name: string }[]>([]);
   const [cronDrafts, setCronDrafts] = useState<Record<string, string>>({});
   const [cronErrors, setCronErrors] = useState<Record<string, string>>({});
+
+  const [descriptionDraft, setDescriptionDraft] = useState(app.description ?? "");
+  const [descriptionSavedAt, setDescriptionSavedAt] = useState<number | null>(null);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
+  const [descriptionSaving, setDescriptionSaving] = useState(false);
+
+  const [me, setMe] = useState<{ id: number; role: "admin" | "member" } | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getMe()
+      .then((m) => setMe({ id: m.id, role: m.role }))
+      .catch(() => {});
+  }, []);
+
+  const canDelete =
+    me !== null &&
+    (me.role === "admin" ||
+      (projectOwner !== null && projectOwner === me.id));
+
+  const handleDelete = async (deleteFiles: boolean) => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteApp(appId, deleteFiles);
+      setShowDeleteModal(false);
+      if (onDeleted) onDeleted();
+    } catch (err: any) {
+      setDeleteError(err?.message || "Failed to delete app");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  useEffect(() => {
+    setDescriptionDraft(app.description ?? "");
+  }, [app.description]);
+
+  const handleSaveDescription = async () => {
+    const next = descriptionDraft.trim();
+    const current = (app.description ?? "").trim();
+    if (next === current) return;
+    setDescriptionSaving(true);
+    setDescriptionError(null);
+    try {
+      await updateApp(appId, { description: next });
+      setDescriptionSavedAt(Date.now());
+    } catch (err: any) {
+      setDescriptionError(err?.message || "Failed to save");
+    } finally {
+      setDescriptionSaving(false);
+    }
+  };
 
   useEffect(() => {
     getAutomationConfigs(appId)
@@ -131,6 +199,44 @@ export default function AppSettingsPanel({
               <span className="text-th-muted">Stopped</span>
             )}
           </p>
+
+          <div>
+            <label className="block text-xs font-medium text-th-secondary mb-1.5">
+              Description
+            </label>
+            <p className="text-meta text-th-dimmed mb-2">
+              Shown on the home page card so the team knows what this app does.
+            </p>
+            <textarea
+              value={descriptionDraft}
+              onChange={(e) => setDescriptionDraft(e.target.value)}
+              onBlur={handleSaveDescription}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  handleSaveDescription();
+                }
+              }}
+              placeholder="What does this app do?"
+              maxLength={2000}
+              rows={3}
+              className="w-full text-xs bg-transparent text-th-secondary border border-th rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-400 resize-y"
+            />
+            <div className="flex items-center justify-between mt-1 min-h-[14px]">
+              {descriptionError ? (
+                <span className="text-meta text-st-red">{descriptionError}</span>
+              ) : descriptionSaving ? (
+                <span className="text-meta text-th-dimmed">Saving…</span>
+              ) : descriptionSavedAt ? (
+                <span className="text-meta text-th-dimmed">Saved</span>
+              ) : (
+                <span />
+              )}
+              <span className="text-meta text-th-dimmed">
+                {descriptionDraft.length}/2000
+              </span>
+            </div>
+          </div>
 
           <div className="flex flex-wrap gap-1.5">
             {!app.is_running ? (
@@ -326,6 +432,80 @@ export default function AppSettingsPanel({
         )}
       </div>
 
+      {canDelete && (
+        <div className="border-t border-st-red pt-4">
+          <h4 className="text-xs font-semibold text-st-red uppercase tracking-wider mb-2">
+            Danger zone
+          </h4>
+          <p className="text-xs text-th-dimmed mb-3">
+            Deleting an app removes its conversations, messages, and history.
+            {me?.role !== "admin" && " Only the project owner or an admin can do this."}
+          </p>
+          <button
+            onClick={() => {
+              setDeleteError(null);
+              setShowDeleteModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-st-red text-st-red-strong hover:bg-st-red-hover transition-colors"
+          >
+            <Trash size={12} weight="bold" />
+            Delete app…
+          </button>
+        </div>
+      )}
+
+      {showDeleteModal && (
+        <div
+          className="fixed inset-0 bg-overlay-heavy flex items-center justify-center z-50"
+          onClick={() => !deleting && setShowDeleteModal(false)}
+        >
+          <div
+            className="bg-th-elevated border border-th rounded-2xl p-6 max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-th-primary mb-2">
+              Delete {app.name}?
+            </h3>
+            <p className="text-sm text-th-muted mb-1">
+              This will remove the app from the dashboard and delete all its
+              tasks, messages, and chat history.
+            </p>
+            {app.directory && (
+              <p className="text-xs text-th-dimmed mb-4 font-mono break-all">
+                {app.directory}
+              </p>
+            )}
+
+            {deleteError && (
+              <p className="text-xs text-st-red mb-3">{deleteError}</p>
+            )}
+
+            <div className="space-y-2">
+              <button
+                onClick={() => handleDelete(false)}
+                disabled={deleting}
+                className="w-full px-4 py-2.5 bg-st-red text-st-red-strong border border-st-red rounded-lg hover:bg-st-red-hover text-sm font-medium transition disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Remove from dashboard only"}
+              </button>
+              <button
+                onClick={() => handleDelete(true)}
+                disabled={deleting}
+                className="w-full px-4 py-2.5 bg-st-red text-st-red border border-st-red rounded-lg hover:bg-st-red-hover text-sm font-medium transition disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete project folder too"}
+              </button>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+                className="w-full px-4 py-2 text-th-muted hover:text-th-primary text-sm transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

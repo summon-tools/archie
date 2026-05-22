@@ -15,8 +15,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Archie",
-  description: "AI DevOps dashboard with Kanban boards",
+  title: "Archie — Your team AI coding environment",
+  description: "Your team AI coding environment",
 };
 
 const themeScript = `
