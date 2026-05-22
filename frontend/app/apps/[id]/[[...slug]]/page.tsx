@@ -451,10 +451,13 @@ export default function AppPage() {
                 name: app.name,
                 is_running: app.is_running,
                 port: app.port,
+                description: app.description,
+                directory: app.directory,
               }}
               githubRepo={app.github_repo}
               onAppAction={handleAppAction}
               actionLoading={actionLoading}
+              onDeleted={() => router.push("/")}
             />
           </div>
         </div>

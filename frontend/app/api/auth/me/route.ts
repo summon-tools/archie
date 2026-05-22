@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getAuthUser(request);
     return NextResponse.json({
+      id: user.id,
       name: user.name,
       role: user.role,
       email: user.email,

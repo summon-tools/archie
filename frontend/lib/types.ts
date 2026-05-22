@@ -10,6 +10,12 @@ export interface WorkItemCounts {
   done: number;
 }
 
+export interface ConversationStats {
+  total: number;
+  open: number;
+  previews_running: number;
+}
+
 export interface App {
   id: number;
   name: string;
@@ -20,6 +26,7 @@ export interface App {
   project_owner_user_id: number | null;
   is_running: boolean;
   work_item_counts: WorkItemCounts;
+  conversation_stats: ConversationStats;
   seed_script: string | null;
   created_at: string;
 }

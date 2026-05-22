@@ -5,6 +5,35 @@ export function getConversation(conversationId: number): ConversationRow | undef
   return getDb().prepare("SELECT * FROM conversations WHERE id = ?").get(conversationId) as ConversationRow | undefined;
 }
 
+export function getConversationStats(appId: number): {
+  total: number;
+  open: number;
+  previewPorts: number[];
+} {
+  const db = getDb();
+  const totalRow = db
+    .prepare("SELECT COUNT(*) as n FROM conversations WHERE app_id = ?")
+    .get(appId) as { n: number };
+  const openRow = db
+    .prepare(
+      "SELECT COUNT(*) as n FROM conversations WHERE app_id = ? AND status = 'open'"
+    )
+    .get(appId) as { n: number };
+  const portRows = db
+    .prepare(
+      `SELECT env.preview_port
+       FROM work_item_env env
+       JOIN work_items wi ON wi.id = env.work_item_id
+       WHERE wi.app_id = ? AND env.preview_port IS NOT NULL`
+    )
+    .all(appId) as { preview_port: number }[];
+  return {
+    total: totalRow.n,
+    open: openRow.n,
+    previewPorts: portRows.map((r) => r.preview_port),
+  };
+}
+
 export function getConversationsByApp(appId: number, kind?: ConversationKind): ConversationRow[] {
   if (kind) {
     return getDb().prepare(
