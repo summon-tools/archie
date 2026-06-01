@@ -1200,6 +1200,11 @@ describe("outcome learning reports", () => {
     expect(report.report?.recommendations[0]).toMatchObject({
       id: "create_team_skill_from_strong_examples",
       action: expect.stringContaining("Draft a Codex/Archie skill"),
+      artifact: {
+        title: "Draft team skill",
+        language: "markdown",
+        body: expect.stringContaining("# Skill: High-quality Archie implementation prompt"),
+      },
     });
     const stored = db.prepare("SELECT * FROM llm_outcome_reports").all() as any[];
     expect(stored).toHaveLength(1);

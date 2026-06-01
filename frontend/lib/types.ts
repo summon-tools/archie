@@ -731,6 +731,11 @@ export interface OutcomeLearningReportRecommendation {
   title: string;
   summary: string;
   action: string;
+  artifact?: {
+    title: string;
+    language: string;
+    body: string;
+  };
   evidence: OutcomeLearningReportExample[];
 }
 

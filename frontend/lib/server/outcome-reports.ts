@@ -118,12 +118,14 @@ function buildRecommendation(
   action: string,
   rows: OutcomeRow[],
   promptExcerpts: Map<number, string>,
+  artifact?: OutcomeLearningReportRecommendation["artifact"],
 ): OutcomeLearningReportRecommendation {
   return {
     id,
     title,
     summary,
     action,
+    artifact,
     evidence: rows.slice(0, 3).map((row) => toExample(row, promptExcerpts)),
   };
 }
@@ -158,6 +160,67 @@ function promptSignals(rows: OutcomeRow[], promptExcerpts: Map<number, string>):
 function summarizeSignals(rows: OutcomeRow[], promptExcerpts: Map<number, string>, fallback: string): string {
   const signals = promptSignals(rows, promptExcerpts);
   return signals.length > 0 ? signals.join(", ") : fallback;
+}
+
+function exampleLines(rows: OutcomeRow[], promptExcerpts: Map<number, string>): string[] {
+  return rows.slice(0, 5).map((row) => {
+    const prompt = row.conversation_id ? truncate(promptExcerpts.get(row.conversation_id), 180) : null;
+    const pr = row.pr_number ? `PR #${row.pr_number}` : "no PR number";
+    const cost = row.known_cost_usd === null ? "unknown cost" : `$${row.known_cost_usd.toFixed(2)}`;
+    const promptText = prompt ? ` Prompt: "${prompt}"` : "";
+    return `- ${row.work_item_title} (${row.app_name}, ${pr}, ${cost}).${promptText}`;
+  });
+}
+
+function buildTeamSkillDefinition(rows: OutcomeRow[], promptExcerpts: Map<number, string>, signals: string): string {
+  return [
+    "# Skill: High-quality Archie implementation prompt",
+    "",
+    "Use this skill when asking Archie to implement product or engineering work that should become a mergeable PR.",
+    "",
+    "## Prompt pattern",
+    "- Name the exact user-facing outcome and the code area likely to change.",
+    "- Keep the requested scope explicit; say what should stay unchanged.",
+    "- Ask for tests or verification steps when behavior can regress.",
+    "- Ask Archie to follow existing patterns before inventing new structure.",
+    "- Ask Archie to summarize risk before opening the PR.",
+    "",
+    "## Validation checklist",
+    "- The PR should include the intended behavior, not broad unrelated cleanup.",
+    "- The PR should include or preserve tests for the changed behavior.",
+    "- The PR description should name the verification performed.",
+    "- If review asks for clarification, answer with evidence before adding code.",
+    "- If a reviewer identifies correction work, update the prompt pattern here.",
+    "",
+    "## Signals found in strong examples",
+    signals,
+    "",
+    "## Evidence examples",
+    ...exampleLines(rows, promptExcerpts),
+  ].join("\n");
+}
+
+function buildGuardrailDefinition(rows: OutcomeRow[], promptExcerpts: Map<number, string>): string {
+  return [
+    "# Agent Guardrail: Prevent costly rework and post-merge fixes",
+    "",
+    "Use this checklist before Archie opens a PR in areas that previously caused correction work, regressions, or follow-up fixes.",
+    "",
+    "## Required before PR",
+    "- Identify the behavior most likely to regress.",
+    "- Add or update the smallest test that covers that behavior.",
+    "- Check changed files against the source task; remove unrelated edits.",
+    "- Explain any schema, migration, auth, payment, or background-job risk in the PR description.",
+    "- Include the exact manual verification command or browser flow used.",
+    "",
+    "## Reviewer response rule",
+    "- Clarification questions should be answered with code references or test evidence.",
+    "- Requested changes should be separated from unrelated follow-up work.",
+    "- If a fix is needed after merge, link it back to the source PR and update this guardrail.",
+    "",
+    "## Evidence examples",
+    ...exampleLines(rows, promptExcerpts),
+  ].join("\n");
 }
 
 function buildReportContent(input: {
@@ -274,6 +337,11 @@ function buildReportContent(input: {
       "Draft a Codex/Archie skill with the observed prompt structure, validation checklist, and example constraints from the linked sessions.",
       strongRows,
       promptExcerpts,
+      {
+        title: "Draft team skill",
+        language: "markdown",
+        body: buildTeamSkillDefinition(strongRows, promptExcerpts, strongPromptSignals),
+      },
     ));
   }
   if (costlyRows.length > 0 || postMergeFixRows.length > 0) {
@@ -284,6 +352,11 @@ function buildReportContent(input: {
       "Create or update an agent-facing doc/checklist that names the recurring failure mode, required tests, and review evidence expected before opening the PR.",
       costlyRows.length > 0 ? costlyRows : postMergeFixRows,
       promptExcerpts,
+      {
+        title: "Draft regression guardrail",
+        language: "markdown",
+        body: buildGuardrailDefinition(costlyRows.length > 0 ? costlyRows : postMergeFixRows, promptExcerpts),
+      },
     ));
   }
   if (lowConfidenceRows.length > 0) {
