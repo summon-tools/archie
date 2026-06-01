@@ -675,6 +675,196 @@ describe("outcome snapshot recompute", () => {
   });
 });
 
+describe("outcome evidence assessment", () => {
+  it("can downgrade deterministic rework when review evidence is clarification and expected iteration", async () => {
+    setSetting("github_bot_username", "archie-bot");
+    setSetting("github_bot_display_name", "Archie");
+    setSetting("github_bot_email", "bot@example.com");
+    const work = createWorkItem({ appName: "Clarification App" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/31",
+      pr_number: 31,
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: work.appId,
+        work_item_id: work.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 31,
+        pr_url: "https://github.com/acme/repo/pull/31",
+        title: "Clarification PR",
+        state: "MERGED",
+        commits_count: 3,
+        issue_comments_count: 1,
+        review_comments_count: 5,
+        reviews_count: 1,
+      },
+      issue_comments: [{ id: 901, body: "Can you explain the migration path?", user: { login: "reviewer" } }],
+      review_comments: [1, 2, 3, 4, 5].map((index) => ({
+        id: 910 + index,
+        body: `Question ${index}: can you explain why this branch handles the fallback?`,
+        path: "app.ts",
+        user: { login: "reviewer" },
+      })),
+      reviews: [{ id: 930, state: "COMMENTED", body: "Mostly questions before approval.", user: { login: "reviewer" } }],
+      commits: [
+        {
+          sha: "agent-clarify",
+          author: { login: "archie-bot" },
+          committer: { login: "archie-bot" },
+          commit: {
+            message: "Implement initial fallback",
+            author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
+            committer: { date: "2026-05-31T09:01:00Z" },
+          },
+        },
+        {
+          sha: "human-context-a",
+          author: { login: "engineer" },
+          committer: { login: "engineer" },
+          commit: {
+            message: "Add explanation comments",
+            author: { name: "Engineer", email: "engineer@example.com", date: "2026-05-31T10:00:00Z" },
+            committer: { date: "2026-05-31T10:01:00Z" },
+          },
+        },
+        {
+          sha: "human-context-b",
+          author: { login: "engineer" },
+          committer: { login: "engineer" },
+          commit: {
+            message: "Clarify test naming",
+            author: { name: "Engineer", email: "engineer@example.com", date: "2026-05-31T11:00:00Z" },
+            committer: { date: "2026-05-31T11:01:00Z" },
+          },
+        },
+      ],
+    });
+    const { runOutcomeEvidenceAssessment } = await import("@/lib/server/outcome-assessments");
+
+    const result = await runOutcomeEvidenceAssessment({
+      apps: getAppRows(),
+      assessor: async (packet) => {
+        expect(packet.comments.length).toBe(6);
+        return {
+          review_pressure: "medium",
+          comment_categories: {
+            clarification: 6,
+            requested_change: 0,
+            bug_or_regression: 0,
+            nit: 0,
+            approval_or_positive: 0,
+            other: 0,
+          },
+          human_followup_type: "expected_iteration",
+          agent_correction_commit_count: 0,
+          confidence: "high",
+          evidence_ids: ["issue-901", "review-911", "commit-human-context-a"],
+          summary: "Review traffic was clarification-oriented, not correction work.",
+        };
+      },
+    });
+
+    expect(result.assessed_count).toBe(1);
+    expect(result.failed_count).toBe(0);
+    const snapshot = db.prepare("SELECT * FROM llm_outcome_snapshots WHERE work_item_id = ?").get(work.workItemId) as any;
+    expect(snapshot.quality_band).toBe("useful");
+    const evidence = JSON.parse(snapshot.evidence_json || "{}");
+    expect(evidence.deterministic_quality_band).toBe("costly_reworked");
+    expect(evidence.llm_assessment).toMatchObject({
+      human_followup_type: "expected_iteration",
+      confidence: "high",
+    });
+    expect(evidence.quality_reason).toContain("classified them as clarification");
+  });
+
+  it("can upgrade moderate deterministic evidence to costly rework when assessment finds agent correction", async () => {
+    setSetting("github_bot_username", "archie-bot");
+    setSetting("github_bot_display_name", "Archie");
+    setSetting("github_bot_email", "bot@example.com");
+    const work = createWorkItem({ appName: "Correction App" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/32",
+      pr_number: 32,
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: work.appId,
+        work_item_id: work.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 32,
+        pr_url: "https://github.com/acme/repo/pull/32",
+        title: "Correction PR",
+        state: "MERGED",
+        commits_count: 2,
+        issue_comments_count: 0,
+        review_comments_count: 1,
+        reviews_count: 1,
+      },
+      issue_comments: [],
+      review_comments: [{ id: 1001, body: "This breaks checkout totals; please fix the generated branch.", path: "checkout.ts", user: { login: "reviewer" } }],
+      reviews: [{ id: 1002, state: "COMMENTED", body: "Needs fix before merge.", user: { login: "reviewer" } }],
+      commits: [
+        {
+          sha: "agent-correction",
+          author: { login: "archie-bot" },
+          committer: { login: "archie-bot" },
+          commit: {
+            message: "Implement checkout totals",
+            author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
+            committer: { date: "2026-05-31T09:01:00Z" },
+          },
+        },
+        {
+          sha: "human-correction",
+          author: { login: "engineer" },
+          committer: { login: "engineer" },
+          commit: {
+            message: "Fix checkout totals from generated implementation",
+            author: { name: "Engineer", email: "engineer@example.com", date: "2026-05-31T10:00:00Z" },
+            committer: { date: "2026-05-31T10:01:00Z" },
+          },
+        },
+      ],
+    });
+    const { runOutcomeEvidenceAssessment } = await import("@/lib/server/outcome-assessments");
+
+    const result = await runOutcomeEvidenceAssessment({
+      apps: getAppRows(),
+      assessor: async () => ({
+        review_pressure: "high",
+        comment_categories: {
+          clarification: 0,
+          requested_change: 1,
+          bug_or_regression: 1,
+          nit: 0,
+          approval_or_positive: 0,
+          other: 0,
+        },
+        human_followup_type: "agent_correction",
+        agent_correction_commit_count: 1,
+        confidence: "high",
+        evidence_ids: ["review-1001", "commit-human-correction"],
+        summary: "Reviewer and follow-up commit point to correcting generated behavior.",
+      }),
+    });
+
+    expect(result.assessed_count).toBe(1);
+    const snapshot = db.prepare("SELECT * FROM llm_outcome_snapshots WHERE work_item_id = ?").get(work.workItemId) as any;
+    expect(snapshot.quality_band).toBe("costly_reworked");
+    const evidence = JSON.parse(snapshot.evidence_json || "{}");
+    expect(evidence.deterministic_quality_band).toBe("useful");
+    expect(evidence.llm_assessment).toMatchObject({
+      human_followup_type: "agent_correction",
+      agent_correction_commit_count: 1,
+    });
+  });
+});
+
 describe("GET /api/outcomes/summary", () => {
   it("requires authentication", async () => {
     const { GET } = await import("@/app/api/outcomes/summary/route");
@@ -738,6 +928,33 @@ describe("POST /api/outcomes/snapshots/recompute", () => {
     expect(response.status).toBe(200);
     expect(body.recomputed_count).toBe(1);
     expect(body.snapshot_ids).toHaveLength(1);
+  });
+});
+
+describe("POST /api/outcomes/assessments/run", () => {
+  it("requires authentication", async () => {
+    const { POST } = await import("@/app/api/outcomes/assessments/run/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/assessments/run"));
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns assessment metadata for authenticated users without eligible snapshots", async () => {
+    const token = await createAuthToken();
+    const { POST } = await import("@/app/api/outcomes/assessments/run/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/assessments/run", token, { range_days: 14 }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      assessed_count: 0,
+      skipped_count: 0,
+      failed_count: 0,
+      assessment_ids: [],
+      recomputed_snapshots: 0,
+    });
   });
 });
 

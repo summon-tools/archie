@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
-import { getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
+import { getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
 import type { OutcomeAttributionClassification, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
@@ -92,6 +92,17 @@ function commitClassificationLabel(value: string): string {
   }
 }
 
+function followupTypeLabel(value: string): string {
+  switch (value) {
+    case "none": return "None";
+    case "clarification": return "Clarification";
+    case "expected_iteration": return "Expected iteration";
+    case "agent_correction": return "Agent correction";
+    case "unrelated_extension": return "Unrelated extension";
+    default: return "Unknown";
+  }
+}
+
 function StatCard({
   label,
   value,
@@ -134,8 +145,10 @@ export default function OutcomesPage() {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
+  const [assessing, setAssessing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
+  const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
   const [syncRangeDays, setSyncRangeDays] = useState("14");
   const [snapshotRangeDays, setSnapshotRangeDays] = useState("14");
   const [appFilter, setAppFilter] = useState("all");
@@ -169,6 +182,10 @@ export default function OutcomesPage() {
 
   const computedSnapshotRows = useMemo(() => {
     return data?.rows.filter((row) => row.snapshot_computed_at).length || 0;
+  }, [data?.rows]);
+
+  const assessedEvidenceRows = useMemo(() => {
+    return data?.rows.filter((row) => row.assessment_status === "completed").length || 0;
   }, [data?.rows]);
 
   const qualityCounts = useMemo(() => {
@@ -225,6 +242,23 @@ export default function OutcomesPage() {
       setSnapshotMessage(err instanceof Error ? err.message : "Outcome snapshot recompute failed");
     } finally {
       setRecomputing(false);
+    }
+  }
+
+  async function handleAssessEvidence() {
+    const days = Number(snapshotRangeDays);
+    if (!Number.isInteger(days) || days < 1) return;
+    setAssessing(true);
+    setAssessmentMessage(null);
+    try {
+      const result = await runOutcomesEvidenceAssessment({ range_days: days, max_items: 25 });
+      setAssessmentMessage(`Assessed ${result.assessed_count} PR${result.assessed_count === 1 ? "" : "s"}, skipped ${result.skipped_count}, failed ${result.failed_count}. Recomputed ${result.recomputed_snapshots} snapshot${result.recomputed_snapshots === 1 ? "" : "s"}.`);
+      const summary = await getOutcomesSummary();
+      setData(summary);
+    } catch (err) {
+      setAssessmentMessage(err instanceof Error ? err.message : "Outcome evidence assessment failed");
+    } finally {
+      setAssessing(false);
     }
   }
 
@@ -372,7 +406,7 @@ export default function OutcomesPage() {
                 <div>
                   <h2 className="text-sm font-semibold text-th-primary">Outcome snapshots</h2>
                   <div className="mt-1 text-xs text-th-muted">
-                    {computedSnapshotRows} computed. Strong {qualityCounts.get("strong") || 0}, useful {qualityCounts.get("useful") || 0}, costly rework {qualityCounts.get("costly_reworked") || 0}, pending {qualityCounts.get("pending") || 0}.
+                    {computedSnapshotRows} computed, {assessedEvidenceRows} LLM-assessed. Strong {qualityCounts.get("strong") || 0}, useful {qualityCounts.get("useful") || 0}, costly rework {qualityCounts.get("costly_reworked") || 0}, pending {qualityCounts.get("pending") || 0}.
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -390,15 +424,25 @@ export default function OutcomesPage() {
                   />
                   <button
                     onClick={handleRecomputeSnapshots}
-                    disabled={recomputing}
+                    disabled={recomputing || assessing}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
                     {recomputing ? "Computing..." : "Recompute"}
+                  </button>
+                  <button
+                    onClick={handleAssessEvidence}
+                    disabled={assessing || recomputing}
+                    className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+                  >
+                    {assessing ? "Assessing..." : "Assess evidence"}
                   </button>
                 </div>
               </div>
               {snapshotMessage && (
                 <div className="mt-3 text-xs text-th-muted">{snapshotMessage}</div>
+              )}
+              {assessmentMessage && (
+                <div className="mt-2 text-xs text-th-muted">{assessmentMessage}</div>
               )}
             </section>
 
@@ -593,6 +637,11 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                   {row.correction_burden_score !== null && (
                     <div className="mt-1 text-xs text-th-muted">Burden {row.correction_burden_score}</div>
                   )}
+                  {row.assessment_status && (
+                    <div className="mt-1 text-xs text-th-muted">
+                      LLM {row.assessment_status}{row.assessment_confidence ? `, ${row.assessment_confidence}` : ""}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3 align-top text-th-secondary">
                   {row.snapshot_computed_at ? (
@@ -637,6 +686,9 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                   {row.snapshot_computed_at && (
                     <div className="mt-1 text-xs text-th-muted">Snapshot {formatDate(row.snapshot_computed_at)}</div>
                   )}
+                  {row.assessment_created_at && (
+                    <div className="mt-1 text-xs text-th-muted">Assessment {formatDate(row.assessment_created_at)}</div>
+                  )}
                   {row.snapshot_evidence && (
                     <button
                       onClick={() => toggleRow(row.id)}
@@ -673,12 +725,21 @@ function OutcomeEvidenceDetails({ row }: { row: OutcomeRow }) {
   if (!evidence) return null;
   const commits = evidence.commit_classifications.slice(0, 8);
   const hiddenCommitCount = Math.max(0, evidence.commit_classifications.length - commits.length);
+  const assessment = evidence.llm_assessment;
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Quality rule</div>
         <div className="mt-2 text-sm text-th-secondary">{evidence.quality_reason || "No quality reason recorded."}</div>
+        {evidence.deterministic_quality_band && evidence.deterministic_quality_band !== row.quality_band && (
+          <div className="mt-2 text-xs text-th-muted">
+            Deterministic: {qualityLabel(evidence.deterministic_quality_band)}
+          </div>
+        )}
+        {evidence.assessment_quality_reason && (
+          <div className="mt-2 text-xs text-th-muted">{evidence.assessment_quality_reason}</div>
+        )}
         <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-th-muted">
           <div>Review comments: {evidence.correction_burden_inputs.review_comment_count}</div>
           <div>Changes requested: {evidence.correction_burden_inputs.changes_requested_count}</div>
@@ -696,6 +757,30 @@ function OutcomeEvidenceDetails({ row }: { row: OutcomeRow }) {
         </div>
         {evidence.pr_artifact_warnings.length > 0 && (
           <div className="mt-2 text-xs text-st-yellow">{evidence.pr_artifact_warnings[0]}</div>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">LLM assessment</div>
+        {assessment ? (
+          <>
+            <div className="mt-2 text-sm text-th-secondary">{assessment.summary || row.assessment_summary || "No assessment summary recorded."}</div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-th-muted">
+              <div>Pressure: {assessment.review_pressure}</div>
+              <div>Follow-up: {followupTypeLabel(assessment.human_followup_type)}</div>
+              <div>Requested: {assessment.comment_categories.requested_change}</div>
+              <div>Regression: {assessment.comment_categories.bug_or_regression}</div>
+              <div>Clarification: {assessment.comment_categories.clarification}</div>
+              <div>Correction commits: {assessment.agent_correction_commit_count}</div>
+            </div>
+            {assessment.evidence_ids.length > 0 && (
+              <div className="mt-2 text-xs text-th-dimmed">Evidence IDs: {assessment.evidence_ids.slice(0, 6).join(", ")}</div>
+            )}
+          </>
+        ) : (
+          <div className="mt-2 text-sm text-th-muted">
+            {row.assessment_status === "failed" ? "Assessment failed for this snapshot." : "No LLM assessment recorded."}
+          </div>
         )}
       </div>
 

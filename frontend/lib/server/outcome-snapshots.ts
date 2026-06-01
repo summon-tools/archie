@@ -1,6 +1,7 @@
 import * as dal from "@/lib/server/dal";
 import { getDb } from "@/lib/server/db";
 import { getGitHubAppSettings } from "@/lib/server/github-app";
+import { applyOutcomeEvidenceAssessment, parseOutcomeEvidenceAssessment } from "@/lib/server/outcome-assessment-rules";
 import { parsePullRequestMetadata } from "@/lib/server/github-pr-utils";
 import type {
   AppRow,
@@ -520,6 +521,9 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
     .map((candidate) => candidate.pr_snapshot_id)
     .filter((id): id is number => typeof id === "number");
   const runsByWorkItem = groupRunsByWorkItem(workItemIds);
+  const assessmentsByWorkItem = new Map(
+    dal.listLatestLlmOutcomeAssessmentsForWorkItems(workItemIds).map((assessment) => [assessment.work_item_id, assessment]),
+  );
   const actors = getActorSignals();
 
   const commentsBySnapshot = snapshotIds.length
@@ -575,6 +579,15 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
       changesRequestedCount,
       humanAfterAgentCommitCount: attribution.humanAfterAgentCommitCount,
     });
+    const assessmentRow = assessmentsByWorkItem.get(candidate.work_item_id) || null;
+    const assessment = assessmentRow?.status === "completed"
+      ? parseOutcomeEvidenceAssessment(assessmentRow.assessment_json)
+      : null;
+    const appliedQuality = applyOutcomeEvidenceAssessment({
+      outcomeState,
+      deterministic: quality,
+      assessment,
+    });
     const attributionConfidence = computeAttributionConfidence({
       hasValidPrArtifact,
       prAuthorConfidence: prAuthor.confidence,
@@ -591,13 +604,14 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
       conversation_id: candidate.conversation_id,
       session_id: candidate.session_id,
       pr_snapshot_id: candidate.pr_snapshot_id,
+      assessment_id: assessmentRow?.id ?? null,
       pr_author_login: candidate.evidence_author_login,
       pr_author_classification: prAuthor.classification,
       pr_author_confidence: prAuthor.confidence,
       attribution_confidence: attributionConfidence.confidence,
       outcome_state: outcomeState,
-      quality_band: quality.qualityBand,
-      confidence: quality.confidence,
+      quality_band: appliedQuality.qualityBand,
+      confidence: appliedQuality.confidence,
       known_cost_usd: cost.knownCost,
       unknown_cost_runs: cost.unknownCostRuns,
       issue_comment_count: issueCommentCount,
@@ -609,10 +623,14 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
       coauthored_commit_count: attribution.coauthoredCommitCount,
       unknown_commit_count: attribution.unknownCommitCount,
       human_after_agent_commit_count: attribution.humanAfterAgentCommitCount,
-      correction_burden_score: quality.correctionBurdenScore,
+      correction_burden_score: appliedQuality.correctionBurdenScore,
       evidence_json: JSON.stringify({
-        rules_version: 1,
-        quality_reason: quality.reason,
+        rules_version: 2,
+        quality_reason: appliedQuality.reason,
+        deterministic_quality_band: appliedQuality.deterministicQualityBand,
+        deterministic_quality_reason: appliedQuality.deterministicQualityReason,
+        assessment_quality_reason: appliedQuality.assessmentQualityReason,
+        llm_assessment: assessment,
         attribution_reason: attributionConfidence.reason,
         changes_requested_count: changesRequestedCount,
         correction_burden_inputs: {

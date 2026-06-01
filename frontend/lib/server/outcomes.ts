@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/server/db";
 import { getPullRequest } from "@/lib/server/github";
+import { normalizeOutcomeEvidenceAssessment, parseOutcomeEvidenceAssessment } from "@/lib/server/outcome-assessment-rules";
 import { parsePullRequestMetadata, resolvePullRequestRepo } from "@/lib/server/github-pr-utils";
 import type { AppRow, RunRow } from "@/lib/server/types";
 import type {
@@ -58,6 +59,7 @@ type OutcomeRecord = {
   evidence_deletions: number | null;
   evidence_changed_files: number | null;
   snapshot_id: number | null;
+  snapshot_assessment_id: number | null;
   snapshot_outcome_state: string | null;
   snapshot_quality_band: string | null;
   snapshot_confidence: string | null;
@@ -73,6 +75,13 @@ type OutcomeRecord = {
   snapshot_coauthored_commit_count: number | null;
   snapshot_unknown_commit_count: number | null;
   snapshot_human_after_agent_commit_count: number | null;
+  assessment_id: number | null;
+  assessment_status: string | null;
+  assessment_confidence: string | null;
+  assessment_provider_id: string | null;
+  assessment_model_id: string | null;
+  assessment_json: string | null;
+  assessment_created_at: string | null;
 };
 
 type MatchedRun = RunRow & { matched_work_item_id: number };
@@ -205,6 +214,14 @@ function parseSnapshotEvidence(value: string | null): OutcomeRow["snapshot_evide
     return {
       rules_version: Number(parsed.rules_version) || 1,
       quality_reason: String(parsed.quality_reason || parsed.reason || ""),
+      deterministic_quality_band: parsed.deterministic_quality_band === "pending" || parsed.deterministic_quality_band === "strong" || parsed.deterministic_quality_band === "useful" || parsed.deterministic_quality_band === "costly_reworked" || parsed.deterministic_quality_band === "abandoned" || parsed.deterministic_quality_band === "unknown"
+        ? parsed.deterministic_quality_band
+        : null,
+      deterministic_quality_reason: typeof parsed.deterministic_quality_reason === "string" ? parsed.deterministic_quality_reason : null,
+      assessment_quality_reason: typeof parsed.assessment_quality_reason === "string" ? parsed.assessment_quality_reason : null,
+      llm_assessment: parsed.llm_assessment && typeof parsed.llm_assessment === "object"
+        ? normalizeOutcomeEvidenceAssessment(parsed.llm_assessment)
+        : null,
       attribution_reason: String(parsed.attribution_reason || ""),
       changes_requested_count: Number(parsed.changes_requested_count) || 0,
       correction_burden_inputs: {
@@ -242,6 +259,11 @@ function parseSnapshotEvidence(value: string | null): OutcomeRow["snapshot_evide
   } catch {
     return null;
   }
+}
+
+function parseAssessmentSummary(value: string | null): string | null {
+  const assessment = parseOutcomeEvidenceAssessment(value);
+  return assessment?.summary || null;
 }
 
 function costBucketForState(state: OutcomeState): keyof OutcomeCostBuckets | null {
@@ -320,6 +342,7 @@ export async function buildOutcomesSummary({
       evidence.deletions AS evidence_deletions,
       evidence.changed_files AS evidence_changed_files,
       snapshot.id AS snapshot_id,
+      snapshot.assessment_id AS snapshot_assessment_id,
       snapshot.outcome_state AS snapshot_outcome_state,
       snapshot.quality_band AS snapshot_quality_band,
       snapshot.confidence AS snapshot_confidence,
@@ -334,7 +357,14 @@ export async function buildOutcomesSummary({
       snapshot.agent_commit_count AS snapshot_agent_commit_count,
       snapshot.coauthored_commit_count AS snapshot_coauthored_commit_count,
       snapshot.unknown_commit_count AS snapshot_unknown_commit_count,
-      snapshot.human_after_agent_commit_count AS snapshot_human_after_agent_commit_count
+      snapshot.human_after_agent_commit_count AS snapshot_human_after_agent_commit_count,
+      assessment.id AS assessment_id,
+      assessment.status AS assessment_status,
+      assessment.confidence AS assessment_confidence,
+      assessment.provider_id AS assessment_provider_id,
+      assessment.model_id AS assessment_model_id,
+      assessment.assessment_json AS assessment_json,
+      assessment.created_at AS assessment_created_at
     FROM work_items wi
     JOIN apps app ON app.id = wi.app_id
     LEFT JOIN conversations c ON c.id = wi.primary_conversation_id
@@ -358,6 +388,15 @@ export async function buildOutcomesSummary({
       LIMIT 1
     )
     LEFT JOIN llm_outcome_snapshots snapshot ON snapshot.work_item_id = wi.id
+    LEFT JOIN llm_outcome_assessments assessment ON assessment.id = COALESCE(
+      snapshot.assessment_id,
+      (
+        SELECT id FROM llm_outcome_assessments
+        WHERE work_item_id = wi.id
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      )
+    )
     WHERE wi.app_id IN (${placeholders(appIds.length)})
     ORDER BY wi.updated_at DESC, wi.id DESC
   `).all(...appIds) as OutcomeRecord[];
@@ -432,6 +471,17 @@ export async function buildOutcomesSummary({
       quality_confidence: record.snapshot_confidence === "low" || record.snapshot_confidence === "medium" || record.snapshot_confidence === "high"
         ? record.snapshot_confidence
         : null,
+      assessment_id: record.assessment_id || record.snapshot_assessment_id,
+      assessment_status: record.assessment_status === "completed" || record.assessment_status === "failed"
+        ? record.assessment_status
+        : null,
+      assessment_confidence: record.assessment_confidence === "unknown" || record.assessment_confidence === "low" || record.assessment_confidence === "medium" || record.assessment_confidence === "high"
+        ? record.assessment_confidence
+        : null,
+      assessment_provider_id: record.assessment_provider_id,
+      assessment_model_id: record.assessment_model_id,
+      assessment_summary: parseAssessmentSummary(record.assessment_json),
+      assessment_created_at: record.assessment_created_at,
       pr_author_login: record.snapshot_pr_author_login,
       pr_author_classification: record.snapshot_pr_author_classification === "agent" || record.snapshot_pr_author_classification === "known_user" || record.snapshot_pr_author_classification === "human" || record.snapshot_pr_author_classification === "unknown"
         ? record.snapshot_pr_author_classification

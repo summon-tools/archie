@@ -14,6 +14,7 @@ export interface UpsertLlmOutcomeSnapshotInput {
   conversation_id?: number | null;
   session_id?: number | null;
   pr_snapshot_id?: number | null;
+  assessment_id?: number | null;
   pr_author_login?: string | null;
   pr_author_classification?: LlmAttributionClassification;
   pr_author_confidence?: LlmAttributionConfidence;
@@ -46,18 +47,19 @@ export function upsertLlmOutcomeSnapshot(input: UpsertLlmOutcomeSnapshotInput): 
   getDb().prepare(
     `INSERT INTO llm_outcome_snapshots (
       app_id, work_item_id, conversation_id, session_id, pr_snapshot_id, pr_author_login,
-      pr_author_classification, pr_author_confidence, attribution_confidence, outcome_state,
+      assessment_id, pr_author_classification, pr_author_confidence, attribution_confidence, outcome_state,
       quality_band, confidence, known_cost_usd, unknown_cost_runs, issue_comment_count,
       review_comment_count, review_count, commit_count, human_commit_count,
       agent_commit_count, coauthored_commit_count, unknown_commit_count,
       human_after_agent_commit_count, correction_burden_score, evidence_json, computed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(work_item_id) DO UPDATE SET
       app_id = excluded.app_id,
       conversation_id = excluded.conversation_id,
       session_id = excluded.session_id,
       pr_snapshot_id = excluded.pr_snapshot_id,
       pr_author_login = excluded.pr_author_login,
+      assessment_id = excluded.assessment_id,
       pr_author_classification = excluded.pr_author_classification,
       pr_author_confidence = excluded.pr_author_confidence,
       attribution_confidence = excluded.attribution_confidence,
@@ -85,6 +87,7 @@ export function upsertLlmOutcomeSnapshot(input: UpsertLlmOutcomeSnapshotInput): 
     input.session_id ?? null,
     input.pr_snapshot_id ?? null,
     input.pr_author_login ?? null,
+    input.assessment_id ?? null,
     input.pr_author_classification ?? "unknown",
     input.pr_author_confidence ?? "unknown",
     input.attribution_confidence ?? "unknown",

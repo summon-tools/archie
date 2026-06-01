@@ -22,7 +22,14 @@ const DEFAULT_MOCK_CONFIG = {
   CLAUDE_DANGEROUS_PERMISSIONS: true,
   getProjectsDir: () => "/tmp",
   getDefaultModel: () => "claude-sonnet-4-6",
+  getDefaultProvider: () => "claude",
   getBackgroundModel: () => "claude-sonnet-4-6",
+  getBackgroundProvider: () => "claude",
+  getQuickModel: () => "claude-sonnet-4-6",
+  getQuickProvider: () => "claude",
+  getDemoModel: () => "claude-sonnet-4-6",
+  getDemoProvider: () => "claude",
+  getModelForCategory: () => ({ model: "claude-sonnet-4-6", provider: "claude" }),
 };
 
 export interface TestContext {

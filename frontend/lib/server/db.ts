@@ -336,6 +336,7 @@ function initDb(db: Database.Database): void {
       conversation_id INTEGER DEFAULT NULL,
       session_id INTEGER DEFAULT NULL,
       pr_snapshot_id INTEGER DEFAULT NULL,
+      assessment_id INTEGER DEFAULT NULL,
       pr_author_login TEXT DEFAULT NULL,
       pr_author_classification TEXT NOT NULL DEFAULT 'unknown' CHECK(pr_author_classification IN ('agent', 'known_user', 'human', 'unknown')),
       pr_author_confidence TEXT NOT NULL DEFAULT 'unknown' CHECK(pr_author_confidence IN ('unknown', 'low', 'medium', 'high')),
@@ -368,6 +369,29 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_snapshots_app_id ON llm_outcome_snapshots(app_id);
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_snapshots_quality_band ON llm_outcome_snapshots(quality_band);
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_snapshots_computed_at ON llm_outcome_snapshots(computed_at);
+
+    CREATE TABLE IF NOT EXISTS llm_outcome_assessments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      work_item_id INTEGER NOT NULL,
+      snapshot_id INTEGER NOT NULL,
+      pr_snapshot_id INTEGER DEFAULT NULL,
+      provider_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      input_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed', 'failed')),
+      assessment_json TEXT DEFAULT NULL,
+      confidence TEXT NOT NULL DEFAULT 'unknown' CHECK(confidence IN ('unknown', 'low', 'medium', 'high')),
+      error_text TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (snapshot_id) REFERENCES llm_outcome_snapshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (pr_snapshot_id) REFERENCES github_pr_snapshots(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_assessments_work_item_id ON llm_outcome_assessments(work_item_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_assessments_created_at ON llm_outcome_assessments(created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_assessments_input_hash ON llm_outcome_assessments(input_hash);
 
     CREATE TABLE IF NOT EXISTS app_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -648,6 +672,7 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "work_item_env", "delete_branch_on_remove", "INTEGER NOT NULL DEFAULT 1");
 
   addColumnIfMissing(db, "llm_outcome_snapshots", "pr_author_login", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "llm_outcome_snapshots", "assessment_id", "INTEGER DEFAULT NULL");
   addColumnIfMissing(db, "llm_outcome_snapshots", "pr_author_classification", "TEXT NOT NULL DEFAULT 'unknown'");
   addColumnIfMissing(db, "llm_outcome_snapshots", "pr_author_confidence", "TEXT NOT NULL DEFAULT 'unknown'");
   addColumnIfMissing(db, "llm_outcome_snapshots", "attribution_confidence", "TEXT NOT NULL DEFAULT 'unknown'");

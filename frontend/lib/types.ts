@@ -417,6 +417,8 @@ export type OutcomeQualityBand = "pending" | "strong" | "useful" | "costly_rewor
 export type OutcomeConfidence = "low" | "medium" | "high";
 export type OutcomeAttributionClassification = "agent" | "known_user" | "human" | "unknown";
 export type OutcomeAttributionConfidence = "unknown" | "low" | "medium" | "high";
+export type OutcomeReviewPressure = "low" | "medium" | "high" | "unknown";
+export type OutcomeHumanFollowupType = "none" | "clarification" | "expected_iteration" | "agent_correction" | "unrelated_extension" | "unknown";
 
 export interface OutcomeCommitClassification {
   sha: string;
@@ -428,9 +430,30 @@ export interface OutcomeCommitClassification {
   authored_at: string | null;
 }
 
+export interface OutcomeEvidenceAssessment {
+  review_pressure: OutcomeReviewPressure;
+  comment_categories: {
+    clarification: number;
+    requested_change: number;
+    bug_or_regression: number;
+    nit: number;
+    approval_or_positive: number;
+    other: number;
+  };
+  human_followup_type: OutcomeHumanFollowupType;
+  agent_correction_commit_count: number;
+  confidence: OutcomeAttributionConfidence;
+  evidence_ids: string[];
+  summary: string;
+}
+
 export interface OutcomeSnapshotEvidence {
   rules_version: number;
   quality_reason: string;
+  deterministic_quality_band?: OutcomeQualityBand | null;
+  deterministic_quality_reason?: string | null;
+  assessment_quality_reason?: string | null;
+  llm_assessment?: OutcomeEvidenceAssessment | null;
   attribution_reason: string;
   changes_requested_count: number;
   correction_burden_inputs: {
@@ -501,6 +524,13 @@ export interface OutcomeRow {
   snapshot_id: number | null;
   quality_band: OutcomeQualityBand | null;
   quality_confidence: OutcomeConfidence | null;
+  assessment_id: number | null;
+  assessment_status: "completed" | "failed" | null;
+  assessment_confidence: OutcomeAttributionConfidence | null;
+  assessment_provider_id: string | null;
+  assessment_model_id: string | null;
+  assessment_summary: string | null;
+  assessment_created_at: string | null;
   pr_author_login: string | null;
   pr_author_classification: OutcomeAttributionClassification | null;
   pr_author_confidence: OutcomeAttributionConfidence | null;
@@ -575,4 +605,14 @@ export interface OutcomesSnapshotRecomputeResponse {
   recomputed_count: number;
   snapshot_ids: number[];
   generated_at: string;
+}
+
+export interface OutcomesAssessmentRunResponse {
+  assessed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  assessment_ids: number[];
+  recomputed_snapshots: number;
+  generated_at: string;
+  warnings: string[];
 }

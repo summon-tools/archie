@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings, OutcomesSnapshotRecomputeResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings, OutcomesSnapshotRecomputeResponse, OutcomesAssessmentRunResponse } from "./types";
 
 const BASE = "/api";
 
@@ -143,6 +143,20 @@ export async function recomputeOutcomeSnapshots(data: {
   range_end?: string;
 } = {}): Promise<OutcomesSnapshotRecomputeResponse> {
   return fetchJSON(`${BASE}/outcomes/snapshots/recompute`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function runOutcomesEvidenceAssessment(data: {
+  work_item_ids?: number[];
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+  max_items?: number;
+  force?: boolean;
+} = {}): Promise<OutcomesAssessmentRunResponse> {
+  return fetchJSON(`${BASE}/outcomes/assessments/run`, {
     method: "POST",
     body: JSON.stringify(data),
   });

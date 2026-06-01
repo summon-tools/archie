@@ -252,6 +252,7 @@ export interface LlmOutcomeSnapshotRow {
   conversation_id: number | null;
   session_id: number | null;
   pr_snapshot_id: number | null;
+  assessment_id: number | null;
   pr_author_login: string | null;
   pr_author_classification: LlmAttributionClassification;
   pr_author_confidence: LlmAttributionConfidence;
@@ -273,6 +274,22 @@ export interface LlmOutcomeSnapshotRow {
   correction_burden_score: number;
   evidence_json: string | null;
   computed_at: string;
+  created_at: string;
+}
+
+export interface LlmOutcomeAssessmentRow {
+  id: number;
+  app_id: number;
+  work_item_id: number;
+  snapshot_id: number;
+  pr_snapshot_id: number | null;
+  provider_id: string;
+  model_id: string;
+  input_hash: string;
+  status: "completed" | "failed";
+  assessment_json: string | null;
+  confidence: LlmAttributionConfidence;
+  error_text: string | null;
   created_at: string;
 }
 
