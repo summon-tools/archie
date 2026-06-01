@@ -224,6 +224,108 @@ export async function getPullRequest({
   };
 }
 
+async function fetchAllGitHubPages<T>(url: string, token: string): Promise<T[]> {
+  const results: T[] = [];
+  let nextUrl: string | null = url;
+  while (nextUrl) {
+    const currentUrl: string = nextUrl;
+    const res: Response = await fetch(currentUrl, { headers: githubHeaders(token) });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `GitHub API error ${res.status}`);
+    }
+    const page = await res.json();
+    if (Array.isArray(page)) results.push(...page);
+    const link: string = res.headers.get("link") || "";
+    const nextMatch: RegExpMatchArray | null = link.match(/<([^>]+)>;\s*rel="next"/);
+    nextUrl = nextMatch ? nextMatch[1] : null;
+  }
+  return results;
+}
+
+export interface PullRequestEvidencePayload {
+  pr: Record<string, any>;
+  issue_comments: Array<Record<string, any>>;
+  review_comments: Array<Record<string, any>>;
+  reviews: Array<Record<string, any>>;
+  commits: Array<Record<string, any>>;
+}
+
+export async function listRepositoryPullRequests({
+  owner,
+  repo,
+  token,
+  maxPages = 3,
+}: {
+  owner: string;
+  repo: string;
+  token: string;
+  maxPages?: number;
+}): Promise<Array<Record<string, any>>> {
+  const results: Array<Record<string, any>> = [];
+  const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const res = await fetch(`${apiBase}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`, {
+      headers: githubHeaders(token),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `GitHub API error ${res.status}`);
+    }
+    const pulls = await res.json();
+    if (!Array.isArray(pulls) || pulls.length === 0) break;
+    results.push(...pulls);
+    if (pulls.length < 100) break;
+  }
+  return results;
+}
+
+export async function getPullRequestFiles({
+  owner,
+  repo,
+  pr_number,
+  token,
+}: {
+  owner: string;
+  repo: string;
+  pr_number: number;
+  token: string;
+}): Promise<Array<Record<string, any>>> {
+  return fetchAllGitHubPages<Record<string, any>>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pr_number}/files?per_page=100`,
+    token,
+  );
+}
+
+export async function getPullRequestEvidence({
+  owner,
+  repo,
+  pr_number,
+  token,
+}: {
+  owner: string;
+  repo: string;
+  pr_number: number;
+  token: string;
+}): Promise<PullRequestEvidencePayload> {
+  const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
+  const prRes = await fetch(`${apiBase}/pulls/${pr_number}`, { headers: githubHeaders(token) });
+  if (!prRes.ok) {
+    const body = await prRes.json().catch(() => ({}));
+    throw new Error(body.message || `GitHub API error ${prRes.status}`);
+  }
+
+  const pr = await prRes.json();
+  const [issue_comments, review_comments, reviews, commits] = await Promise.all([
+    fetchAllGitHubPages<Record<string, any>>(`${apiBase}/issues/${pr_number}/comments?per_page=100`, token),
+    fetchAllGitHubPages<Record<string, any>>(`${apiBase}/pulls/${pr_number}/comments?per_page=100`, token),
+    fetchAllGitHubPages<Record<string, any>>(`${apiBase}/pulls/${pr_number}/reviews?per_page=100`, token),
+    fetchAllGitHubPages<Record<string, any>>(`${apiBase}/pulls/${pr_number}/commits?per_page=100`, token),
+  ]);
+
+  return { pr, issue_comments, review_comments, reviews, commits };
+}
+
 /**
  * Upload a video as a GitHub release asset.
  * Creates/reuses a `demo-assets` release, then uploads the file.

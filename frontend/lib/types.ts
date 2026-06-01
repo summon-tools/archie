@@ -415,3 +415,332 @@ export interface Notification {
   read_at: string | null;
   created_at: string;
 }
+
+// ── Global LLM Outcomes ───────────────────────────────────────────
+
+export type OutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged" | "unknown";
+export type OutcomeEvidenceCompleteness = "no_pr_artifact" | "local_pr_artifact" | "github_enriched" | "incomplete";
+export type OutcomeQualityBand = "pending" | "strong" | "useful" | "costly_reworked" | "abandoned" | "unknown";
+export type OutcomeConfidence = "low" | "medium" | "high";
+export type OutcomeAttributionClassification = "agent" | "known_user" | "human" | "unknown";
+export type OutcomeAttributionConfidence = "unknown" | "low" | "medium" | "high";
+export type OutcomeReviewPressure = "low" | "medium" | "high" | "unknown";
+export type OutcomeHumanFollowupType = "none" | "clarification" | "expected_iteration" | "agent_correction" | "unrelated_extension" | "unknown";
+export type OutcomeFollowupRelation = "no_relation" | "expected_iteration" | "routine_followup" | "agent_correction" | "regression_fix" | "revert" | "unknown";
+
+export interface OutcomeCommitClassification {
+  sha: string;
+  classification: "agent_authored" | "agent_coauthored" | "human_authored" | "unknown";
+  signals: string[];
+  author_login: string | null;
+  author_email: string | null;
+  committer_login: string | null;
+  authored_at: string | null;
+}
+
+export interface OutcomeEvidenceAssessment {
+  review_pressure: OutcomeReviewPressure;
+  comment_categories: {
+    clarification: number;
+    requested_change: number;
+    bug_or_regression: number;
+    nit: number;
+    approval_or_positive: number;
+    other: number;
+  };
+  human_followup_type: OutcomeHumanFollowupType;
+  agent_correction_commit_count: number;
+  confidence: OutcomeAttributionConfidence;
+  evidence_ids: string[];
+  summary: string;
+}
+
+export interface OutcomeSnapshotEvidence {
+  rules_version: number;
+  quality_reason: string;
+  deterministic_quality_band?: OutcomeQualityBand | null;
+  deterministic_quality_reason?: string | null;
+  assessment_quality_reason?: string | null;
+  llm_assessment?: OutcomeEvidenceAssessment | null;
+  attribution_reason: string;
+  changes_requested_count: number;
+  correction_burden_inputs: {
+    review_comment_count: number;
+    changes_requested_count: number;
+    human_after_agent_commit_count: number;
+    extra_issue_comment_count: number;
+  };
+  pr_author: {
+    login: string | null;
+    classification: OutcomeAttributionClassification;
+    confidence: OutcomeAttributionConfidence;
+  };
+  pr_artifact_warnings: string[];
+  commit_classifications: OutcomeCommitClassification[];
+}
+
+export interface OutcomeFollowupEvidence {
+  id: number;
+  relation_type: OutcomeFollowupRelation;
+  confidence: OutcomeAttributionConfidence;
+  deterministic_score: number;
+  deterministic_signals: string[];
+  summary: string | null;
+  followup_pr_number: number;
+  followup_pr_url: string | null;
+  followup_title: string | null;
+  detected_at: string;
+}
+
+export interface OutcomeSummaryCounts {
+  total_work_items: number;
+  total_sessions: number;
+  pr_linked_work: number;
+  pending_prs: number;
+  merged_prs: number;
+  closed_unmerged_prs: number;
+  no_pr_work: number;
+  unknown_outcome: number;
+  rows_with_unknown_cost: number;
+  unknown_cost_runs: number;
+}
+
+export interface OutcomeCostBuckets {
+  total_known_cost_usd: number;
+  pending_pr_cost_usd: number;
+  merged_pr_cost_usd: number;
+  closed_unmerged_cost_usd: number;
+  no_pr_cost_usd: number;
+  unknown_outcome_cost_usd: number;
+}
+
+export interface OutcomeRow {
+  id: string;
+  app_id: number;
+  app_name: string;
+  app_github_repo: string | null;
+  work_item_id: number;
+  work_item_title: string;
+  work_item_status: string;
+  conversation_id: number | null;
+  conversation_title: string | null;
+  branch_name: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  session_id: number | null;
+  external_session_id: string | null;
+  session_status: string | null;
+  latest_run_id: number | null;
+  latest_run_status: string | null;
+  latest_run_workflow_key: string | null;
+  run_count: number;
+  known_cost_usd: number | null;
+  unknown_cost_runs: number;
+  pr_number: number | null;
+  pr_url: string | null;
+  pr_title: string | null;
+  pr_state: "OPEN" | "CLOSED" | "MERGED" | "UNKNOWN" | null;
+  outcome_state: OutcomeState;
+  evidence_completeness: OutcomeEvidenceCompleteness;
+  snapshot_id: number | null;
+  quality_band: OutcomeQualityBand | null;
+  quality_confidence: OutcomeConfidence | null;
+  assessment_id: number | null;
+  assessment_status: "completed" | "failed" | null;
+  assessment_confidence: OutcomeAttributionConfidence | null;
+  assessment_provider_id: string | null;
+  assessment_model_id: string | null;
+  assessment_summary: string | null;
+  assessment_created_at: string | null;
+  pr_author_login: string | null;
+  pr_author_classification: OutcomeAttributionClassification | null;
+  pr_author_confidence: OutcomeAttributionConfidence | null;
+  attribution_confidence: OutcomeAttributionConfidence | null;
+  snapshot_computed_at: string | null;
+  snapshot_evidence: OutcomeSnapshotEvidence | null;
+  correction_burden_score: number | null;
+  human_commit_count: number | null;
+  agent_commit_count: number | null;
+  coauthored_commit_count: number | null;
+  unknown_commit_count: number | null;
+  human_after_agent_commit_count: number | null;
+  followup_count: number;
+  regression_followup_count: number;
+  followup_evidence: OutcomeFollowupEvidence[];
+  github_evidence_synced_at: string | null;
+  github_issue_comments_count: number | null;
+  github_review_comments_count: number | null;
+  github_reviews_count: number | null;
+  github_commits_count: number | null;
+  github_additions: number | null;
+  github_deletions: number | null;
+  github_changed_files: number | null;
+  warnings: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutcomesSummaryResponse {
+  generated_at: string;
+  counts: OutcomeSummaryCounts;
+  costs: OutcomeCostBuckets;
+  rows: OutcomeRow[];
+  filters: {
+    apps: { id: number; name: string }[];
+    providers: string[];
+    models: string[];
+    run_statuses: string[];
+    outcome_states: OutcomeState[];
+  };
+  warnings: string[];
+}
+
+export interface OutcomesGitHubSyncSettings {
+  observation_window_days: number;
+  daily_sync_enabled: boolean;
+  daily_sync_hour_utc: number;
+  sync_user_id: number | null;
+  last_scheduled_sync_at: string | null;
+}
+
+export interface GitHubOutcomeSyncRun {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "running" | "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  scanned_count: number;
+  synced_count: number;
+  failed_count: number;
+  warnings_json: string | null;
+  error_text: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface OutcomesGitHubSyncResponse {
+  run: GitHubOutcomeSyncRun;
+  warnings: string[];
+  recomputed_snapshots?: number;
+}
+
+export interface OutcomesSnapshotRecomputeResponse {
+  recomputed_count: number;
+  snapshot_ids: number[];
+  generated_at: string;
+}
+
+export interface OutcomesAssessmentRunResponse {
+  assessed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  assessment_ids: number[];
+  recomputed_snapshots: number;
+  generated_at: string;
+  warnings: string[];
+}
+
+export interface OutcomeLearningReportExample {
+  app_id: number;
+  app_name: string;
+  work_item_id: number;
+  work_item_title: string;
+  conversation_id: number | null;
+  provider_id: string | null;
+  model_id: string | null;
+  outcome_state: OutcomeState;
+  quality_band: OutcomeQualityBand | null;
+  known_cost_usd: number | null;
+  unknown_cost_runs: number;
+  pr_number: number | null;
+  pr_url: string | null;
+  assessment_summary: string | null;
+  assessment_confidence: OutcomeAttributionConfidence | null;
+  followup_count: number;
+  regression_followup_count: number;
+  prompt_excerpt: string | null;
+  evidence_ids: string[];
+}
+
+export interface OutcomeLearningReportInsight {
+  id: string;
+  title: string;
+  summary: string;
+  evidence: OutcomeLearningReportExample[];
+}
+
+export interface OutcomeLearningReportContent {
+  version: number;
+  generated_at: string;
+  range: {
+    start: string | null;
+    end: string | null;
+    days: number | null;
+  };
+  counts: {
+    total_work_items: number;
+    resolved_prs: number;
+    merged_prs: number;
+    closed_unmerged_prs: number;
+    pending_prs_excluded: number;
+    no_pr_excluded: number;
+    unknown_excluded: number;
+    assessed_resolved_prs: number;
+    post_merge_followups: number;
+    likely_regression_followups: number;
+  };
+  costs: {
+    resolved_known_cost_usd: number;
+    merged_known_cost_usd: number;
+    costly_rework_known_cost_usd: number;
+    unknown_cost_rows: number;
+  };
+  summary_bullets: string[];
+  insights: OutcomeLearningReportInsight[];
+  sections: {
+    strong_examples: OutcomeLearningReportExample[];
+    costly_rework_examples: OutcomeLearningReportExample[];
+    clarification_examples: OutcomeLearningReportExample[];
+    post_merge_fix_examples: OutcomeLearningReportExample[];
+    abandoned_examples: OutcomeLearningReportExample[];
+    low_confidence_examples: OutcomeLearningReportExample[];
+  };
+  warnings: string[];
+}
+
+export interface OutcomeLearningReportRun {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  range_days: number | null;
+  total_work_items: number;
+  resolved_pr_count: number;
+  report: OutcomeLearningReportContent | null;
+  warnings: string[];
+  error_text: string | null;
+  generated_at: string;
+  created_at: string;
+}
+
+export interface OutcomesLearningReportResponse {
+  report: OutcomeLearningReportRun | null;
+}
+
+export interface OutcomesLearningReportRunResponse {
+  report: OutcomeLearningReportRun;
+}
+
+export interface OutcomesFollowupDetectionResponse {
+  scanned_source_prs: number;
+  indexed_repo_prs: number;
+  candidate_count: number;
+  detected_count: number;
+  regression_count: number;
+  followup_ids: number[];
+  generated_at: string;
+  warnings: string[];
+}

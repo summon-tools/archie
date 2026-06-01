@@ -17,5 +17,8 @@ export async function register() {
     // RFC 23: Start the automation scheduler
     const { startScheduler } = await import("./lib/server/automations/scheduler");
     startScheduler();
+
+    const { startOutcomesGitHubSyncScheduler } = await import("./lib/server/outcomes-github-sync");
+    startOutcomesGitHubSyncScheduler();
   }
 }

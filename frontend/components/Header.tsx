@@ -3,18 +3,27 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { MeResponse } from "@/lib/api";
 import { fetcher } from "@/lib/swr";
 import { CaretDown, User, Gear, SignOut } from "@phosphor-icons/react";
 
 export default function Header() {
+  const pathname = usePathname();
   const { data: me } = useSWR<MeResponse>("/api/auth/me", fetcher);
   const role = me?.role ?? null;
   const name = me?.name ?? null;
   const color = me?.color ?? null;
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const navLinkClass = (active: boolean) =>
+    [
+      "px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors",
+      active
+        ? "bg-th-muted text-th-primary"
+        : "text-th-muted hover:text-th-primary hover:bg-th-subtle",
+    ].join(" ");
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -42,6 +51,14 @@ export default function Header() {
             <Image src="/logo-light.svg" alt="Archie" width={120} height={34} className="logo-light" priority />
             <Image src="/logo-dark.svg" alt="Archie" width={120} height={34} className="logo-dark" priority />
           </Link>
+          <nav className="hidden sm:flex items-center gap-1" aria-label="Primary navigation">
+            <Link href="/" className={navLinkClass(pathname === "/")}>
+              Projects
+            </Link>
+            <Link href="/outcomes" className={navLinkClass(pathname === "/outcomes")}>
+              Outcomes
+            </Link>
+          </nav>
         </div>
 
         <div className="relative" ref={menuRef}>

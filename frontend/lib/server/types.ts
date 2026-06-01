@@ -146,6 +146,231 @@ export interface ArtifactRow {
   created_at: string;
 }
 
+export interface GitHubPrSnapshotRow {
+  id: number;
+  app_id: number;
+  work_item_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  pr_url: string;
+  title: string;
+  state: string;
+  author_login: string | null;
+  head_ref: string | null;
+  base_ref: string | null;
+  merged_at: string | null;
+  closed_at: string | null;
+  github_created_at: string | null;
+  github_updated_at: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changed_files: number | null;
+  commits_count: number | null;
+  issue_comments_count: number | null;
+  review_comments_count: number | null;
+  reviews_count: number | null;
+  raw_json: string | null;
+  synced_at: string;
+  created_at: string;
+}
+
+export interface GitHubPrCommentRow {
+  id: number;
+  pr_snapshot_id: number;
+  app_id: number;
+  work_item_id: number;
+  github_id: number;
+  comment_type: "issue" | "review";
+  author_login: string | null;
+  body: string;
+  path: string | null;
+  commit_id: string | null;
+  github_created_at: string | null;
+  github_updated_at: string | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface GitHubPrReviewRow {
+  id: number;
+  pr_snapshot_id: number;
+  app_id: number;
+  work_item_id: number;
+  github_id: number;
+  author_login: string | null;
+  state: string | null;
+  body: string;
+  submitted_at: string | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface GitHubPrCommitRow {
+  id: number;
+  pr_snapshot_id: number;
+  app_id: number;
+  work_item_id: number;
+  sha: string;
+  author_login: string | null;
+  author_name: string | null;
+  author_email: string | null;
+  committer_login: string | null;
+  message: string;
+  authored_at: string | null;
+  committed_at: string | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface GitHubOutcomeSyncRunRow {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "running" | "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  scanned_count: number;
+  synced_count: number;
+  failed_count: number;
+  warnings_json: string | null;
+  error_text: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export type LlmOutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged" | "unknown";
+export type LlmOutcomeQualityBand = "pending" | "strong" | "useful" | "costly_reworked" | "abandoned" | "unknown";
+export type LlmOutcomeConfidence = "low" | "medium" | "high";
+export type LlmAttributionClassification = "agent" | "known_user" | "human" | "unknown";
+export type LlmAttributionConfidence = "unknown" | "low" | "medium" | "high";
+export type LlmOutcomeFollowupRelation = "no_relation" | "expected_iteration" | "routine_followup" | "agent_correction" | "regression_fix" | "revert" | "unknown";
+
+export interface LlmOutcomeSnapshotRow {
+  id: number;
+  app_id: number;
+  work_item_id: number;
+  conversation_id: number | null;
+  session_id: number | null;
+  pr_snapshot_id: number | null;
+  assessment_id: number | null;
+  pr_author_login: string | null;
+  pr_author_classification: LlmAttributionClassification;
+  pr_author_confidence: LlmAttributionConfidence;
+  attribution_confidence: LlmAttributionConfidence;
+  outcome_state: LlmOutcomeState;
+  quality_band: LlmOutcomeQualityBand;
+  confidence: LlmOutcomeConfidence;
+  known_cost_usd: number | null;
+  unknown_cost_runs: number;
+  issue_comment_count: number;
+  review_comment_count: number;
+  review_count: number;
+  commit_count: number;
+  human_commit_count: number;
+  agent_commit_count: number;
+  coauthored_commit_count: number;
+  unknown_commit_count: number;
+  human_after_agent_commit_count: number;
+  correction_burden_score: number;
+  evidence_json: string | null;
+  computed_at: string;
+  created_at: string;
+}
+
+export interface LlmOutcomeAssessmentRow {
+  id: number;
+  app_id: number;
+  work_item_id: number;
+  snapshot_id: number;
+  pr_snapshot_id: number | null;
+  provider_id: string;
+  model_id: string;
+  input_hash: string;
+  status: "completed" | "failed";
+  assessment_json: string | null;
+  confidence: LlmAttributionConfidence;
+  error_text: string | null;
+  created_at: string;
+}
+
+export interface LlmOutcomeReportRow {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  range_days: number | null;
+  total_work_items: number;
+  resolved_pr_count: number;
+  report_json: string | null;
+  warnings_json: string | null;
+  error_text: string | null;
+  generated_at: string;
+  created_at: string;
+}
+
+export interface GitHubRepoPullRequestRow {
+  id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  pr_url: string;
+  title: string;
+  body: string;
+  state: string;
+  author_login: string | null;
+  head_ref: string | null;
+  base_ref: string | null;
+  merged_at: string | null;
+  closed_at: string | null;
+  github_created_at: string | null;
+  github_updated_at: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changed_files: number | null;
+  raw_json: string | null;
+  synced_at: string;
+  created_at: string;
+}
+
+export interface GitHubRepoPullRequestFileRow {
+  id: number;
+  repo_pr_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  filename: string;
+  status: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changes: number | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface LlmOutcomeFollowupRow {
+  id: number;
+  app_id: number;
+  source_work_item_id: number;
+  source_snapshot_id: number;
+  source_pr_snapshot_id: number;
+  followup_repo_pr_id: number;
+  owner: string;
+  repo: string;
+  source_pr_number: number;
+  followup_pr_number: number;
+  relation_type: LlmOutcomeFollowupRelation;
+  confidence: LlmAttributionConfidence;
+  deterministic_score: number;
+  deterministic_signals_json: string | null;
+  assessment_json: string | null;
+  evidence_json: string | null;
+  detected_at: string;
+  created_at: string;
+}
+
 export type AppFileStatus = "uploading" | "available" | "deleted";
 export type AppFileLinkType = "attachment" | "context";
 

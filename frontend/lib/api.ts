@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings, OutcomesSnapshotRecomputeResponse, OutcomesAssessmentRunResponse, OutcomesLearningReportResponse, OutcomesLearningReportRunResponse, OutcomesFollowupDetectionResponse } from "./types";
 
 const BASE = "/api";
 
@@ -110,6 +110,94 @@ export async function restartApp(appId: number): Promise<{ success: boolean; mes
 
 export async function deleteApp(appId: number, deleteFiles = false): Promise<{ success: boolean; message: string; files_deleted: boolean }> {
   return fetchJSON(`${BASE}/apps/${appId}?delete_files=${deleteFiles}`, { method: "DELETE" });
+}
+
+// --- Global outcomes ---
+
+export async function getOutcomesSummary(): Promise<OutcomesSummaryResponse> {
+  return fetchJSON(`${BASE}/outcomes/summary`);
+}
+
+export async function getOutcomesSettings(): Promise<OutcomesGitHubSyncSettings> {
+  const data = await fetchJSON<{ settings: OutcomesGitHubSyncSettings }>(`${BASE}/outcomes/settings`);
+  return data.settings;
+}
+
+export async function updateOutcomesSettings(data: {
+  observation_window_days?: number;
+  daily_sync_enabled?: boolean;
+  daily_sync_hour_utc?: number;
+}): Promise<OutcomesGitHubSyncSettings> {
+  const response = await fetchJSON<{ settings: OutcomesGitHubSyncSettings }>(`${BASE}/outcomes/settings`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return response.settings;
+}
+
+export async function syncOutcomesGitHubEvidence(data: {
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+}): Promise<OutcomesGitHubSyncResponse> {
+  return fetchJSON(`${BASE}/outcomes/github/sync`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function recomputeOutcomeSnapshots(data: {
+  work_item_ids?: number[];
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+} = {}): Promise<OutcomesSnapshotRecomputeResponse> {
+  return fetchJSON(`${BASE}/outcomes/snapshots/recompute`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function runOutcomesEvidenceAssessment(data: {
+  work_item_ids?: number[];
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+  max_items?: number;
+  force?: boolean;
+} = {}): Promise<OutcomesAssessmentRunResponse> {
+  return fetchJSON(`${BASE}/outcomes/assessments/run`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getLatestOutcomeLearningReport(): Promise<OutcomesLearningReportResponse> {
+  return fetchJSON(`${BASE}/outcomes/reports/latest`);
+}
+
+export async function runOutcomeLearningReport(data: {
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+} = {}): Promise<OutcomesLearningReportRunResponse> {
+  return fetchJSON(`${BASE}/outcomes/reports/run`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function detectOutcomeFollowups(data: {
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+  observation_days?: number;
+  max_candidates?: number;
+} = {}): Promise<OutcomesFollowupDetectionResponse> {
+  return fetchJSON(`${BASE}/outcomes/followups/detect`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 // --- Conversation endpoints ---
