@@ -484,6 +484,21 @@ function paginateRows(rows: OutcomeRow[], totalRows: number, pagination: Outcome
   rows: OutcomeRow[];
   pagination: OutcomesSummaryResponse["pagination"];
 } {
+  if (!pagination) {
+    const pageSize = Math.max(1, rows.length || 25);
+    return {
+      rows,
+      pagination: {
+        page: 1,
+        page_size: pageSize,
+        total_rows: totalRows,
+        filtered_rows: rows.length,
+        page_count: rows.length === 0 ? 0 : 1,
+        has_previous: false,
+        has_next: false,
+      },
+    };
+  }
   return paginateOutcomeRows(rows, totalRows, pagination?.pageSize, pagination?.page);
 }
 

@@ -726,6 +726,14 @@ export interface OutcomeLearningReportInsight {
   evidence: OutcomeLearningReportExample[];
 }
 
+export interface OutcomeLearningReportRecommendation {
+  id: string;
+  title: string;
+  summary: string;
+  action: string;
+  evidence: OutcomeLearningReportExample[];
+}
+
 export interface OutcomeLearningReportContent {
   version: number;
   generated_at: string;
@@ -750,10 +758,14 @@ export interface OutcomeLearningReportContent {
     resolved_known_cost_usd: number;
     merged_known_cost_usd: number;
     costly_rework_known_cost_usd: number;
+    strong_known_cost_usd: number;
+    post_merge_followup_known_cost_usd: number;
+    likely_regression_known_cost_usd: number;
     unknown_cost_rows: number;
   };
   summary_bullets: string[];
   insights: OutcomeLearningReportInsight[];
+  recommendations: OutcomeLearningReportRecommendation[];
   sections: {
     strong_examples: OutcomeLearningReportExample[];
     costly_rework_examples: OutcomeLearningReportExample[];

@@ -893,9 +893,9 @@ function LearningReportPreview({ report }: { report: OutcomeLearningReportRun | 
           <div className="mt-1 text-xs text-th-muted">resolved PRs</div>
         </div>
         <div className="bg-th-subtle rounded-lg p-3">
-          <div className="text-xs text-th-muted">Likely fixes</div>
-          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.likely_regression_followups}</div>
-          <div className="mt-1 text-xs text-th-muted">{content.counts.post_merge_followups} follow-ups</div>
+          <div className="text-xs text-th-muted">At-risk cost</div>
+          <div className="mt-1 text-lg font-semibold text-th-primary">{formatCurrency(content.costs.likely_regression_known_cost_usd ?? 0)}</div>
+          <div className="mt-1 text-xs text-th-muted">{content.counts.likely_regression_followups} likely fixes</div>
         </div>
       </div>
 
@@ -927,6 +927,17 @@ function LearningReportPreview({ report }: { report: OutcomeLearningReportRun | 
           <ReportInsight key={insight.id} insight={insight} />
         ))}
       </div>
+
+      {(content.recommendations || []).length > 0 && (
+        <div className="mt-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Recommended next actions</div>
+          <div className="mt-2 space-y-3">
+            {(content.recommendations || []).map((recommendation) => (
+              <ReportRecommendation key={recommendation.id} recommendation={recommendation} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -940,6 +951,23 @@ function ReportInsight({ insight }: { insight: OutcomeLearningReportInsight }) {
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
           {insight.evidence.map((example) => (
             <ReportExample key={`${insight.id}-${example.work_item_id}`} example={example} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportRecommendation({ recommendation }: { recommendation: NonNullable<OutcomeLearningReportRun["report"]>["recommendations"][number] }) {
+  return (
+    <div className="rounded-lg border border-th bg-th-surface p-3">
+      <div className="text-sm font-semibold text-th-primary">{recommendation.title}</div>
+      <div className="mt-1 text-sm text-th-secondary">{recommendation.summary}</div>
+      <div className="mt-2 text-sm text-th-muted">{recommendation.action}</div>
+      {recommendation.evidence.length > 0 && (
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+          {recommendation.evidence.map((example) => (
+            <ReportExample key={`${recommendation.id}-${example.work_item_id}`} example={example} />
           ))}
         </div>
       )}
