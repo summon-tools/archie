@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { runOutcomeEvidenceAssessment } from "@/lib/server/outcome-assessments";
+import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
 
 function parseWorkItemIds(value: unknown): number[] | undefined {
@@ -87,16 +87,20 @@ export async function POST(request: NextRequest) {
 
   try {
     const apps = filterAppsForUser(user, dal.getApps());
-    const result = await runOutcomeEvidenceAssessment({
+    const job = enqueueOutcomeJob({
+      kind: "evidence_assessment",
+      userId: user.id,
       apps,
-      workItemIds,
-      rangeDays: range.rangeStart ? null : range.rangeDays,
-      rangeStart: range.rangeStart,
-      rangeEnd: range.rangeEnd,
-      maxItems,
-      force: body.force === true,
+      input: {
+        workItemIds,
+        rangeDays: range.rangeStart ? null : range.rangeDays,
+        rangeStart: range.rangeStart,
+        rangeEnd: range.rangeEnd,
+        maxItems,
+        force: body.force === true,
+      },
     });
-    return NextResponse.json(result);
+    return NextResponse.json({ job: serializeOutcomeJob(job) }, { status: 202 });
   } catch (error) {
     return NextResponse.json(
       { detail: error instanceof Error ? error.message : "Outcome evidence assessment failed" },

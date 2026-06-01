@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { runOutcomeLearningReport } from "@/lib/server/outcome-reports";
+import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
 
 function parseRange(body: Record<string, unknown>): {
@@ -59,13 +59,15 @@ export async function POST(request: NextRequest) {
   }
 
   const apps = filterAppsForUser(user, dal.getApps());
-  const report = await runOutcomeLearningReport({
-    apps,
+  const job = enqueueOutcomeJob({
+    kind: "learning_report",
     userId: user.id,
-    mode: "manual",
-    rangeDays: range.rangeStart ? null : range.rangeDays,
-    rangeStart: range.rangeStart,
-    rangeEnd: range.rangeEnd,
+    apps,
+    input: {
+      rangeDays: range.rangeStart ? null : range.rangeDays,
+      rangeStart: range.rangeStart,
+      rangeEnd: range.rangeEnd,
+    },
   });
-  return NextResponse.json({ report });
+  return NextResponse.json({ job: serializeOutcomeJob(job) }, { status: 202 });
 }

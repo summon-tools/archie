@@ -489,6 +489,25 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_reports_generated_at ON llm_outcome_reports(generated_at);
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_reports_status ON llm_outcome_reports(status);
 
+    CREATE TABLE IF NOT EXISTS llm_outcome_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL CHECK(kind IN ('github_sync', 'snapshot_recompute', 'evidence_assessment', 'learning_report', 'followup_detection')),
+      requested_by_user_id INTEGER DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'completed', 'failed')),
+      input_json TEXT DEFAULT NULL,
+      result_json TEXT DEFAULT NULL,
+      progress_text TEXT DEFAULT NULL,
+      error_text TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      started_at TEXT DEFAULT NULL,
+      completed_at TEXT DEFAULT NULL,
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (requested_by_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_jobs_kind ON llm_outcome_jobs(kind);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_jobs_status ON llm_outcome_jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_jobs_created_at ON llm_outcome_jobs(created_at);
+
     CREATE TABLE IF NOT EXISTS app_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL,

@@ -1,13 +1,14 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
-import { detectOutcomeFollowups, getLatestOutcomeLearningReport, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import { detectOutcomeFollowups, getLatestOutcomeLearningReport, getOutcomeJob, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
+import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeJob, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
+const PAGE_SIZE_OPTIONS = ["25", "50", "100", "200"];
 
 function formatCurrency(value: number): string {
   const maximumFractionDigits = value > 0 && value < 1 ? 4 : 2;
@@ -115,6 +116,19 @@ function followupRelationLabel(value: OutcomeFollowupRelation | string): string 
   }
 }
 
+function isJobActive(job: OutcomeJob | null): boolean {
+  return job?.status === "queued" || job?.status === "running";
+}
+
+function jobButtonLabel(job: OutcomeJob | null, idle: string, active: string): string {
+  if (!job || job.status === "completed" || job.status === "failed") return idle;
+  return job.status === "queued" ? "Queued..." : active;
+}
+
+function jobResult(job: OutcomeJob): any {
+  return job.result && typeof job.result === "object" ? job.result as any : {};
+}
+
 function StatCard({
   label,
   value,
@@ -156,11 +170,11 @@ export default function OutcomesPage() {
   const [latestReport, setLatestReport] = useState<OutcomeLearningReportRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [recomputing, setRecomputing] = useState(false);
-  const [assessing, setAssessing] = useState(false);
-  const [generatingReport, setGeneratingReport] = useState(false);
-  const [detectingFollowups, setDetectingFollowups] = useState(false);
+  const [syncJob, setSyncJob] = useState<OutcomeJob | null>(null);
+  const [snapshotJob, setSnapshotJob] = useState<OutcomeJob | null>(null);
+  const [assessmentJob, setAssessmentJob] = useState<OutcomeJob | null>(null);
+  const [reportJob, setReportJob] = useState<OutcomeJob | null>(null);
+  const [followupJob, setFollowupJob] = useState<OutcomeJob | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
   const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
@@ -176,54 +190,168 @@ export default function OutcomesPage() {
   const [modelFilter, setModelFilter] = useState("all");
   const [runStatusFilter, setRunStatusFilter] = useState("all");
   const [prStateFilter, setPrStateFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState("25");
+  const initializedSettingsRef = useRef(false);
+  const syncing = isJobActive(syncJob);
+  const recomputing = isJobActive(snapshotJob);
+  const assessing = isJobActive(assessmentJob);
+  const generatingReport = isJobActive(reportJob);
+  const detectingFollowups = isJobActive(followupJob);
+
+  const summaryQuery = useMemo(() => ({
+    page,
+    page_size: Number(pageSize),
+    app_id: appFilter,
+    outcome_state: outcomeFilter,
+    provider: providerFilter,
+    model: modelFilter,
+    run_status: runStatusFilter,
+    pr_state: prStateFilter,
+  }), [appFilter, modelFilter, outcomeFilter, page, pageSize, prStateFilter, providerFilter, runStatusFilter]);
 
   const loadData = useCallback(() => {
     setLoading(true);
-    Promise.all([getOutcomesSummary(), getOutcomesSettings(), getLatestOutcomeLearningReport()])
+    Promise.all([getOutcomesSummary(summaryQuery), getOutcomesSettings(), getLatestOutcomeLearningReport()])
       .then(([summary, loadedSettings, reportResponse]) => {
         setData(summary);
         setSettings(loadedSettings);
         setLatestReport(reportResponse.report);
-        setSyncRangeDays(String(loadedSettings.observation_window_days));
-        setSnapshotRangeDays(String(loadedSettings.observation_window_days));
+        if (!initializedSettingsRef.current) {
+          setSyncRangeDays(String(loadedSettings.observation_window_days));
+          setSnapshotRangeDays(String(loadedSettings.observation_window_days));
+          initializedSettingsRef.current = true;
+        }
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load outcomes"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [summaryQuery]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  const refreshDashboardData = useCallback(async () => {
+    const [summary, reportResponse] = await Promise.all([
+      getOutcomesSummary(summaryQuery),
+      getLatestOutcomeLearningReport(),
+    ]);
+    setData(summary);
+    setLatestReport(reportResponse.report);
+  }, [summaryQuery]);
+
+  const setJobForKind = useCallback((job: OutcomeJob) => {
+    if (job.kind === "github_sync") setSyncJob(job);
+    if (job.kind === "snapshot_recompute") setSnapshotJob(job);
+    if (job.kind === "evidence_assessment") setAssessmentJob(job);
+    if (job.kind === "learning_report") setReportJob(job);
+    if (job.kind === "followup_detection") setFollowupJob(job);
+  }, []);
+
+  const setMessageForJob = useCallback((job: OutcomeJob) => {
+    if (job.status === "failed") {
+      const message = job.error_text || "Background job failed";
+      if (job.kind === "github_sync") setSyncMessage(message);
+      if (job.kind === "snapshot_recompute") setSnapshotMessage(message);
+      if (job.kind === "evidence_assessment") setAssessmentMessage(message);
+      if (job.kind === "learning_report") setReportMessage(message);
+      if (job.kind === "followup_detection") setFollowupMessage(message);
+      return;
+    }
+    if (job.status !== "completed") return;
+    const result = jobResult(job);
+    if (job.kind === "github_sync") {
+      setSyncMessage(`Synced ${result.run?.synced_count ?? 0} of ${result.run?.scanned_count ?? 0} PRs${result.run?.failed_count ? `, ${result.run.failed_count} failed` : ""}. Recomputed ${result.recomputed_snapshots ?? 0} snapshots.`);
+    }
+    if (job.kind === "snapshot_recompute") {
+      setSnapshotMessage(`Recomputed ${result.recomputed_count ?? 0} outcome snapshot${result.recomputed_count === 1 ? "" : "s"}.`);
+    }
+    if (job.kind === "evidence_assessment") {
+      setAssessmentMessage(`Assessed ${result.assessed_count ?? 0} PR${result.assessed_count === 1 ? "" : "s"}, skipped ${result.skipped_count ?? 0}, failed ${result.failed_count ?? 0}. Recomputed ${result.recomputed_snapshots ?? 0} snapshot${result.recomputed_snapshots === 1 ? "" : "s"}.`);
+    }
+    if (job.kind === "learning_report") {
+      const report = result.report?.report;
+      setReportMessage(`Generated report with ${report?.counts?.resolved_prs ?? 0} resolved PR${report?.counts?.resolved_prs === 1 ? "" : "s"} and ${report?.insights?.length ?? 0} insight${report?.insights?.length === 1 ? "" : "s"}.`);
+    }
+    if (job.kind === "followup_detection") {
+      setFollowupMessage(`Scanned ${result.scanned_source_prs ?? 0} merged PR${result.scanned_source_prs === 1 ? "" : "s"}, checked ${result.candidate_count ?? 0} candidate${result.candidate_count === 1 ? "" : "s"}, detected ${result.detected_count ?? 0} follow-up${result.detected_count === 1 ? "" : "s"} including ${result.regression_count ?? 0} likely fix${result.regression_count === 1 ? "" : "es"}.`);
+    }
+  }, []);
+
+  useEffect(() => {
+    const activeJobs = [syncJob, snapshotJob, assessmentJob, reportJob, followupJob].filter(isJobActive);
+    if (activeJobs.length === 0) return;
+    let cancelled = false;
+
+    async function pollJobs() {
+      const updates = await Promise.all(activeJobs.map(async (job) => {
+        try {
+          return (await getOutcomeJob(job!.id)).job;
+        } catch {
+          return null;
+        }
+      }));
+      if (cancelled) return;
+      let shouldRefresh = false;
+      for (const job of updates) {
+        if (!job) continue;
+        setJobForKind(job);
+        if (job.status === "completed" || job.status === "failed") {
+          setMessageForJob(job);
+          shouldRefresh = true;
+        }
+      }
+      if (shouldRefresh) {
+        await refreshDashboardData().catch((err) => setError(err instanceof Error ? err.message : "Failed to refresh outcomes"));
+      }
+    }
+
+    pollJobs();
+    const timer = window.setInterval(() => {
+      pollJobs();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [assessmentJob, followupJob, refreshDashboardData, reportJob, setJobForKind, setMessageForJob, snapshotJob, syncJob]);
+
   const syncedEvidenceRows = useMemo(() => {
-    return data?.rows.filter((row) => row.github_evidence_synced_at).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.github_evidence_synced_rows || 0;
+  }, [data?.coverage.github_evidence_synced_rows]);
 
   const computedSnapshotRows = useMemo(() => {
-    return data?.rows.filter((row) => row.snapshot_computed_at).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.computed_snapshot_rows || 0;
+  }, [data?.coverage.computed_snapshot_rows]);
 
   const assessedEvidenceRows = useMemo(() => {
-    return data?.rows.filter((row) => row.assessment_status === "completed").length || 0;
-  }, [data?.rows]);
+    return data?.coverage.assessed_evidence_rows || 0;
+  }, [data?.coverage.assessed_evidence_rows]);
 
   const followupRows = useMemo(() => {
-    return data?.rows.filter((row) => row.followup_count > 0).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.followup_rows || 0;
+  }, [data?.coverage.followup_rows]);
 
   const regressionFollowupRows = useMemo(() => {
-    return data?.rows.filter((row) => row.regression_followup_count > 0).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.regression_followup_rows || 0;
+  }, [data?.coverage.regression_followup_rows]);
 
   const qualityCounts = useMemo(() => {
-    const counts = new Map<OutcomeQualityBand, number>();
-    for (const row of data?.rows || []) {
-      if (!row.quality_band) continue;
-      counts.set(row.quality_band, (counts.get(row.quality_band) || 0) + 1);
-    }
-    return counts;
-  }, [data?.rows]);
+    return data?.coverage.quality_counts || {};
+  }, [data?.coverage.quality_counts]);
+
+  function updatePagedFilter(setter: (value: string) => void) {
+    return (value: string) => {
+      setter(value);
+      setPage(1);
+    };
+  }
+
+  function handlePageSizeChange(value: string) {
+    setPageSize(value);
+    setPage(1);
+  }
 
   async function handleRangeChange(value: string) {
     setSyncRangeDays(value);
@@ -241,116 +369,73 @@ export default function OutcomesPage() {
   async function handleSyncNow() {
     const days = Number(syncRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setSyncing(true);
     setSyncMessage(null);
     try {
       const result = await syncOutcomesGitHubEvidence({ range_days: days });
-      setSyncMessage(`Synced ${result.run.synced_count} of ${result.run.scanned_count} PRs${result.run.failed_count ? `, ${result.run.failed_count} failed` : ""}. Recomputed ${result.recomputed_snapshots ?? 0} snapshots.`);
-      const [summary, loadedSettings] = await Promise.all([getOutcomesSummary(), getOutcomesSettings()]);
-      setData(summary);
-      setSettings(loadedSettings);
+      setSyncJob(result.job);
+      setSyncMessage("Queued GitHub evidence sync. The dashboard will refresh when it finishes.");
     } catch (err) {
       setSyncMessage(err instanceof Error ? err.message : "GitHub evidence sync failed");
-    } finally {
-      setSyncing(false);
     }
   }
 
   async function handleRecomputeSnapshots() {
     const days = Number(snapshotRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setRecomputing(true);
     setSnapshotMessage(null);
     try {
       const result = await recomputeOutcomeSnapshots({ range_days: days });
-      setSnapshotMessage(`Recomputed ${result.recomputed_count} outcome snapshot${result.recomputed_count === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary();
-      setData(summary);
+      setSnapshotJob(result.job);
+      setSnapshotMessage("Queued snapshot recompute. The dashboard will refresh when it finishes.");
     } catch (err) {
       setSnapshotMessage(err instanceof Error ? err.message : "Outcome snapshot recompute failed");
-    } finally {
-      setRecomputing(false);
     }
   }
 
   async function handleAssessEvidence() {
     const days = Number(snapshotRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setAssessing(true);
     setAssessmentMessage(null);
     try {
       const result = await runOutcomesEvidenceAssessment({ range_days: days, max_items: 25 });
-      setAssessmentMessage(`Assessed ${result.assessed_count} PR${result.assessed_count === 1 ? "" : "s"}, skipped ${result.skipped_count}, failed ${result.failed_count}. Recomputed ${result.recomputed_snapshots} snapshot${result.recomputed_snapshots === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary();
-      setData(summary);
+      setAssessmentJob(result.job);
+      setAssessmentMessage("Queued evidence assessment. The dashboard will refresh when it finishes.");
     } catch (err) {
       setAssessmentMessage(err instanceof Error ? err.message : "Outcome evidence assessment failed");
-    } finally {
-      setAssessing(false);
     }
   }
 
   async function handleRunReport() {
     const days = Number(reportRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setGeneratingReport(true);
     setReportMessage(null);
     try {
       const result = await runOutcomeLearningReport({ range_days: days });
-      setLatestReport(result.report);
-      const report = result.report.report;
-      setReportMessage(`Generated report with ${report?.counts.resolved_prs ?? 0} resolved PR${report?.counts.resolved_prs === 1 ? "" : "s"} and ${report?.insights.length ?? 0} insight${report?.insights.length === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary();
-      setData(summary);
+      setReportJob(result.job);
+      setReportMessage("Queued learning report generation. The report panel will refresh when it finishes.");
     } catch (err) {
       setReportMessage(err instanceof Error ? err.message : "Outcome learning report failed");
-    } finally {
-      setGeneratingReport(false);
     }
   }
 
   async function handleDetectFollowups() {
     const days = Number(followupRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setDetectingFollowups(true);
     setFollowupMessage(null);
     try {
       const result = await detectOutcomeFollowups({ range_days: days, max_candidates: 40 });
-      setFollowupMessage(`Scanned ${result.scanned_source_prs} merged PR${result.scanned_source_prs === 1 ? "" : "s"}, checked ${result.candidate_count} candidate${result.candidate_count === 1 ? "" : "s"}, detected ${result.detected_count} follow-up${result.detected_count === 1 ? "" : "s"} including ${result.regression_count} likely fix${result.regression_count === 1 ? "" : "es"}.`);
-      const [summary, reportResponse] = await Promise.all([getOutcomesSummary(), getLatestOutcomeLearningReport()]);
-      setData(summary);
-      setLatestReport(reportResponse.report);
+      setFollowupJob(result.job);
+      setFollowupMessage("Queued follow-up detection. The dashboard will refresh when it finishes.");
     } catch (err) {
       setFollowupMessage(err instanceof Error ? err.message : "Follow-up detection failed");
-    } finally {
-      setDetectingFollowups(false);
     }
   }
-
-  const filteredRows = useMemo(() => {
-    const rows = data?.rows || [];
-    return rows.filter((row) => {
-      if (appFilter !== "all" && String(row.app_id) !== appFilter) return false;
-      if (outcomeFilter !== "all" && row.outcome_state !== outcomeFilter) return false;
-      if (providerFilter !== "all" && row.provider_id !== providerFilter) return false;
-      if (modelFilter !== "all" && row.model_id !== modelFilter) return false;
-      if (runStatusFilter !== "all" && row.latest_run_status !== runStatusFilter) return false;
-      if (prStateFilter !== "all" && (row.pr_state || "NO_PR") !== prStateFilter) return false;
-      return true;
-    });
-  }, [appFilter, data?.rows, modelFilter, outcomeFilter, prStateFilter, providerFilter, runStatusFilter]);
 
   const groupedRows = useMemo(() => {
     return OUTCOME_ORDER.map((state) => ({
       state,
-      rows: filteredRows.filter((row) => row.outcome_state === state),
+      rows: (data?.rows || []).filter((row) => row.outcome_state === state),
     })).filter((group) => group.rows.length > 0);
-  }, [filteredRows]);
-
-  const prStates = useMemo(() => {
-    const values = new Set<string>();
-    for (const row of data?.rows || []) values.add(row.pr_state || "NO_PR");
-    return Array.from(values).sort();
   }, [data?.rows]);
 
   const resetFilters = () => {
@@ -360,6 +445,7 @@ export default function OutcomesPage() {
     setModelFilter("all");
     setRunStatusFilter("all");
     setPrStateFilter("all");
+    setPage(1);
   };
 
   return (
@@ -457,7 +543,7 @@ export default function OutcomesPage() {
                     disabled={syncing}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {syncing ? "Syncing..." : "Sync now"}
+                    {jobButtonLabel(syncJob, "Sync now", "Syncing...")}
                   </button>
                 </div>
               </div>
@@ -471,7 +557,7 @@ export default function OutcomesPage() {
                 <div>
                   <h2 className="text-sm font-semibold text-th-primary">Outcome snapshots</h2>
                   <div className="mt-1 text-xs text-th-muted">
-                    {computedSnapshotRows} computed, {assessedEvidenceRows} LLM-assessed. Strong {qualityCounts.get("strong") || 0}, useful {qualityCounts.get("useful") || 0}, costly rework {qualityCounts.get("costly_reworked") || 0}, pending {qualityCounts.get("pending") || 0}.
+                    {computedSnapshotRows} computed, {assessedEvidenceRows} LLM-assessed. Strong {qualityCounts.strong || 0}, useful {qualityCounts.useful || 0}, costly rework {qualityCounts.costly_reworked || 0}, pending {qualityCounts.pending || 0}.
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -492,14 +578,14 @@ export default function OutcomesPage() {
                     disabled={recomputing || assessing}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {recomputing ? "Computing..." : "Recompute"}
+                    {jobButtonLabel(snapshotJob, "Recompute", "Computing...")}
                   </button>
                   <button
                     onClick={handleAssessEvidence}
                     disabled={assessing || recomputing}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {assessing ? "Assessing..." : "Assess evidence"}
+                    {jobButtonLabel(assessmentJob, "Assess evidence", "Assessing...")}
                   </button>
                 </div>
               </div>
@@ -537,7 +623,7 @@ export default function OutcomesPage() {
                     disabled={detectingFollowups}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {detectingFollowups ? "Detecting..." : "Detect follow-ups"}
+                    {jobButtonLabel(followupJob, "Detect follow-ups", "Detecting...")}
                   </button>
                 </div>
               </div>
@@ -574,7 +660,7 @@ export default function OutcomesPage() {
                     disabled={generatingReport}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {generatingReport ? "Generating..." : "Generate report"}
+                    {jobButtonLabel(reportJob, "Generate report", "Generating...")}
                   </button>
                 </div>
               </div>
@@ -597,7 +683,7 @@ export default function OutcomesPage() {
               </div>
             </section>
 
-            {data.rows.length === 0 ? (
+            {data.pagination.total_rows === 0 ? (
               <div className="mt-6">
                 <EmptyState />
               </div>
@@ -605,12 +691,13 @@ export default function OutcomesPage() {
               <>
                 <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-                    <FilterSelect label="App" value={appFilter} onChange={setAppFilter} options={data.filters.apps.map((app) => ({ value: String(app.id), label: app.name }))} />
-                    <FilterSelect label="Outcome" value={outcomeFilter} onChange={setOutcomeFilter} options={OUTCOME_ORDER.map((state) => ({ value: state, label: outcomeLabel(state) }))} />
-                    <FilterSelect label="Provider" value={providerFilter} onChange={setProviderFilter} options={data.filters.providers.map((provider) => ({ value: provider, label: provider }))} />
-                    <FilterSelect label="Model" value={modelFilter} onChange={setModelFilter} options={data.filters.models.map((model) => ({ value: model, label: model }))} />
-                    <FilterSelect label="Run status" value={runStatusFilter} onChange={setRunStatusFilter} options={data.filters.run_statuses.map((status) => ({ value: status, label: status }))} />
-                    <FilterSelect label="PR state" value={prStateFilter} onChange={setPrStateFilter} options={prStates.map((state) => ({ value: state, label: state === "NO_PR" ? "No PR" : state }))} />
+                    <FilterSelect label="App" value={appFilter} onChange={updatePagedFilter(setAppFilter)} options={data.filters.apps.map((app) => ({ value: String(app.id), label: app.name }))} />
+                    <FilterSelect label="Outcome" value={outcomeFilter} onChange={updatePagedFilter(setOutcomeFilter)} options={OUTCOME_ORDER.map((state) => ({ value: state, label: outcomeLabel(state) }))} />
+                    <FilterSelect label="Provider" value={providerFilter} onChange={updatePagedFilter(setProviderFilter)} options={data.filters.providers.map((provider) => ({ value: provider, label: provider }))} />
+                    <FilterSelect label="Model" value={modelFilter} onChange={updatePagedFilter(setModelFilter)} options={data.filters.models.map((model) => ({ value: model, label: model }))} />
+                    <FilterSelect label="Run status" value={runStatusFilter} onChange={updatePagedFilter(setRunStatusFilter)} options={data.filters.run_statuses.map((status) => ({ value: status, label: status }))} />
+                    <FilterSelect label="PR state" value={prStateFilter} onChange={updatePagedFilter(setPrStateFilter)} options={data.filters.pr_states.map((state) => ({ value: state, label: state === "NO_PR" ? "No PR" : state }))} />
+                    <FilterSelect label="Page size" value={pageSize} onChange={handlePageSizeChange} includeAll={false} options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: `${size} rows` }))} />
                     <button
                       onClick={resetFilters}
                       className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover transition-colors"
@@ -619,7 +706,7 @@ export default function OutcomesPage() {
                     </button>
                   </div>
                   <div className="mt-3 text-xs text-th-muted">
-                    Showing {filteredRows.length} of {data.rows.length} rows.
+                    Showing {data.rows.length} of {data.pagination.filtered_rows} matching rows across {data.pagination.total_rows} total.
                   </div>
                 </section>
 
@@ -633,6 +720,11 @@ export default function OutcomesPage() {
                     </div>
                   )}
                 </div>
+                <PaginationControls
+                  pagination={data.pagination}
+                  onPrevious={() => setPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setPage((current) => current + 1)}
+                />
               </>
             )}
           </>
@@ -685,6 +777,43 @@ function FilterSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function PaginationControls({
+  pagination,
+  onPrevious,
+  onNext,
+}: {
+  pagination: OutcomesSummaryResponse["pagination"];
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (pagination.page_count <= 1) return null;
+  const start = (pagination.page - 1) * pagination.page_size + 1;
+  const end = Math.min(pagination.filtered_rows, pagination.page * pagination.page_size);
+  return (
+    <div className="mt-4 flex flex-col gap-3 border border-th rounded-xl bg-th-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-xs text-th-muted">
+        Rows {start}-{end} of {pagination.filtered_rows}. Page {pagination.page} of {pagination.page_count}.
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onPrevious}
+          disabled={!pagination.has_previous}
+          className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+        >
+          Previous
+        </button>
+        <button
+          onClick={onNext}
+          disabled={!pagination.has_next}
+          className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+        >
+          Next
+        </button>
+      </div>
+    </div>
   );
 }
 

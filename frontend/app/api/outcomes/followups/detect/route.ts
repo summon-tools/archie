@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { GitHubAppError, getValidGitHubUserToken } from "@/lib/server/github-app";
+import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { getOutcomesGitHubSyncSettings } from "@/lib/server/outcomes-github-sync";
-import { runOutcomeFollowupDetection } from "@/lib/server/outcome-followups";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
 
 function parsePositiveInt(value: unknown, label: string, fallback: number, max: number): number {
@@ -64,16 +63,6 @@ export async function POST(request: NextRequest) {
     body = {};
   }
 
-  let githubAuth;
-  try {
-    githubAuth = await getValidGitHubUserToken(user.id);
-  } catch (error) {
-    if (error instanceof GitHubAppError) {
-      return NextResponse.json({ detail: error.message }, { status: error.status });
-    }
-    throw error;
-  }
-
   let range;
   let observationDays: number;
   let maxCandidates: number;
@@ -90,14 +79,17 @@ export async function POST(request: NextRequest) {
   }
 
   const apps = filterAppsForUser(user, dal.getApps());
-  const result = await runOutcomeFollowupDetection({
+  const job = enqueueOutcomeJob({
+    kind: "followup_detection",
+    userId: user.id,
     apps,
-    githubToken: githubAuth.token,
-    observationDays,
-    rangeDays: range.rangeStart ? null : range.rangeDays,
-    rangeStart: range.rangeStart,
-    rangeEnd: range.rangeEnd,
-    maxCandidates,
+    input: {
+      observationDays,
+      rangeDays: range.rangeStart ? null : range.rangeDays,
+      rangeStart: range.rangeStart,
+      rangeEnd: range.rangeEnd,
+      maxCandidates,
+    },
   });
-  return NextResponse.json(result);
+  return NextResponse.json({ job: serializeOutcomeJob(job) }, { status: 202 });
 }

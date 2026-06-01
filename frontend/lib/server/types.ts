@@ -311,6 +311,24 @@ export interface LlmOutcomeReportRow {
   created_at: string;
 }
 
+export type LlmOutcomeJobKind = "github_sync" | "snapshot_recompute" | "evidence_assessment" | "learning_report" | "followup_detection";
+export type LlmOutcomeJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface LlmOutcomeJobRow {
+  id: number;
+  kind: LlmOutcomeJobKind;
+  requested_by_user_id: number | null;
+  status: LlmOutcomeJobStatus;
+  input_json: string | null;
+  result_json: string | null;
+  progress_text: string | null;
+  error_text: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+}
+
 export interface GitHubRepoPullRequestRow {
   id: number;
   owner: string;

@@ -298,6 +298,59 @@ describe("outcomes summary aggregation", () => {
     expect(summary.costs.total_known_cost_usd).toBe(0.1);
   });
 
+  it("paginates filtered rows while preserving global summary totals", async () => {
+    const first = createWorkItem({ appName: "Pagination App", title: "First Codex Work" });
+    addRun({
+      appId: first.appId,
+      workItemId: first.workItemId,
+      conversationId: first.conversationId,
+      provider: "codex",
+      resultJson: JSON.stringify({ cost: 1 }),
+    });
+    const otherProvider = createWorkItem({ appName: "Pagination App", title: "Anthropic Work" });
+    addRun({
+      appId: otherProvider.appId,
+      workItemId: otherProvider.workItemId,
+      conversationId: otherProvider.conversationId,
+      provider: "claude",
+      resultJson: JSON.stringify({ cost: 2 }),
+    });
+    const latest = createWorkItem({ appName: "Pagination App", title: "Latest Codex Work" });
+    addRun({
+      appId: latest.appId,
+      workItemId: latest.workItemId,
+      conversationId: latest.conversationId,
+      provider: "codex",
+      resultJson: JSON.stringify({ cost: 3 }),
+    });
+    const { buildOutcomesSummary } = await loadOutcomes();
+
+    const summary = await buildOutcomesSummary({
+      apps: getAppRows(),
+      refreshGitHubState: false,
+      rowFilters: { providerId: "codex" },
+      pagination: { page: 2, pageSize: 1 },
+    });
+
+    expect(summary.counts.total_work_items).toBe(3);
+    expect(summary.costs.total_known_cost_usd).toBe(6);
+    expect(summary.pagination).toMatchObject({
+      page: 2,
+      page_size: 1,
+      total_rows: 3,
+      filtered_rows: 2,
+      page_count: 2,
+      has_previous: true,
+      has_next: false,
+    });
+    expect(summary.rows).toHaveLength(1);
+    expect(summary.rows[0]).toMatchObject({
+      work_item_title: "First Codex Work",
+      provider_id: "codex",
+    });
+    expect(summary.filters.providers).toEqual(["claude", "codex"]);
+  });
+
   it("uses persisted GitHub evidence snapshots for PR outcome and evidence counts", async () => {
     const user = seedUser(db, { username: "sync-user", email: "sync@example.com" });
     const work = createWorkItem({ appName: "Synced App" });
@@ -382,6 +435,54 @@ describe("outcomes summary aggregation", () => {
       github_deletions: 4,
       github_changed_files: 2,
     });
+  });
+
+  it("syncs all PR candidates in range when no explicit sync limit is provided", async () => {
+    const user = seedUser(db, { username: "sync-all-user", email: "sync-all@example.com" });
+    const works = [1, 2, 3].map((index) => {
+      const work = createWorkItem({ appName: "Sync All App", title: `Sync All Work ${index}` });
+      addPullRequestArtifact(work.appId, work.workItemId, {
+        pr_url: `https://github.com/acme/repo/pull/${50 + index}`,
+        pr_number: 50 + index,
+      });
+      return work;
+    });
+    const { runGitHubEvidenceSync } = await import("@/lib/server/outcomes-github-sync");
+
+    const result = await runGitHubEvidenceSync({
+      apps: getAppRows(),
+      userId: user.id,
+      githubToken: "token",
+      mode: "manual",
+      fetchEvidence: async (params) => ({
+        pr: {
+          number: params.pr_number,
+          html_url: `https://github.com/acme/repo/pull/${params.pr_number}`,
+          title: `Synced PR ${params.pr_number}`,
+          state: "open",
+          merged_at: null,
+          closed_at: null,
+          created_at: "2026-05-30T12:00:00Z",
+          updated_at: "2026-05-31T12:00:00Z",
+          additions: 1,
+          deletions: 0,
+          changed_files: 1,
+          commits: 1,
+          user: { login: "archie-bot" },
+          head: { ref: "feature/sync-all" },
+          base: { ref: "main" },
+        },
+        issue_comments: [],
+        review_comments: [],
+        reviews: [],
+        commits: [],
+      }),
+    });
+
+    expect(result.run.status).toBe("completed");
+    expect(result.run.scanned_count).toBe(works.length);
+    expect(result.run.synced_count).toBe(works.length);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM github_pr_snapshots").get()).toEqual({ count: works.length });
   });
 });
 
@@ -1148,7 +1249,7 @@ describe("POST /api/outcomes/snapshots/recompute", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns recompute metadata for authenticated users", async () => {
+  it("queues recompute work and stores result metadata when the job runs", async () => {
     const token = await createAuthToken();
     const work = createWorkItem({ appName: "Snapshot API App" });
     addRun({
@@ -1162,9 +1263,18 @@ describe("POST /api/outcomes/snapshots/recompute", () => {
     const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/snapshots/recompute", token));
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.recomputed_count).toBe(1);
-    expect(body.snapshot_ids).toHaveLength(1);
+    expect(response.status).toBe(202);
+    expect(body.job).toMatchObject({
+      kind: "snapshot_recompute",
+      status: "queued",
+    });
+
+    const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
+    const completed = await runOutcomeJobNow(body.job.id);
+    const result = JSON.parse(completed.result_json || "{}");
+    expect(completed.status).toBe("completed");
+    expect(result.recomputed_count).toBe(1);
+    expect(result.snapshot_ids).toHaveLength(1);
   });
 });
 
@@ -1177,15 +1287,24 @@ describe("POST /api/outcomes/assessments/run", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns assessment metadata for authenticated users without eligible snapshots", async () => {
+  it("queues assessment work and stores result metadata when the job runs", async () => {
     const token = await createAuthToken();
     const { POST } = await import("@/app/api/outcomes/assessments/run/route");
 
     const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/assessments/run", token, { range_days: 14 }));
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
+    expect(response.status).toBe(202);
+    expect(body.job).toMatchObject({
+      kind: "evidence_assessment",
+      status: "queued",
+    });
+
+    const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
+    const completed = await runOutcomeJobNow(body.job.id);
+    const result = JSON.parse(completed.result_json || "{}");
+    expect(completed.status).toBe("completed");
+    expect(result).toMatchObject({
       assessed_count: 0,
       skipped_count: 0,
       failed_count: 0,
@@ -1212,7 +1331,7 @@ describe("outcome report APIs", () => {
     expect(response.status).toBe(401);
   });
 
-  it("generates and returns the latest authenticated report", async () => {
+  it("queues report generation and exposes the latest report after the job runs", async () => {
     const token = await createAuthToken();
     const work = createWorkItem({ appName: "Report API App" });
     addRun({
@@ -1226,19 +1345,62 @@ describe("outcome report APIs", () => {
 
     const runResponse = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/reports/run", token, { range_days: 30 }));
     const runBody = await runResponse.json();
+    const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
+    const completed = await runOutcomeJobNow(runBody.job.id);
+    const jobResult = JSON.parse(completed.result_json || "{}");
     const latestResponse = await GET(makeRequest("http://localhost:8080/api/outcomes/reports/latest", token));
     const latestBody = await latestResponse.json();
 
-    expect(runResponse.status).toBe(200);
-    expect(runBody.report).toMatchObject({
+    expect(runResponse.status).toBe(202);
+    expect(runBody.job).toMatchObject({
+      kind: "learning_report",
+      status: "queued",
+    });
+    expect(completed.status).toBe("completed");
+    expect(jobResult.report).toMatchObject({
       status: "completed",
       range_days: 30,
       total_work_items: 1,
       resolved_pr_count: 0,
     });
     expect(latestResponse.status).toBe(200);
-    expect(latestBody.report.id).toBe(runBody.report.id);
+    expect(latestBody.report.id).toBe(jobResult.report.id);
     expect(latestBody.report.report.counts.no_pr_excluded).toBe(1);
+  });
+});
+
+describe("GET /api/outcomes/jobs/[jobId]", () => {
+  it("requires authentication", async () => {
+    const { GET } = await import("@/app/api/outcomes/jobs/[jobId]/route");
+
+    const response = await GET(
+      makeRequest("http://localhost:8080/api/outcomes/jobs/1"),
+      { params: Promise.resolve({ jobId: "1" }) },
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns queued job status for the requesting user", async () => {
+    const token = await createAuthToken();
+    const work = createWorkItem({ appName: "Job API App" });
+    const apps = getAppRows().filter((app) => app.id === work.appId);
+    const { enqueueOutcomeJob } = await import("@/lib/server/outcome-jobs");
+    const job = enqueueOutcomeJob({ kind: "snapshot_recompute", userId: 1, apps });
+    const { GET } = await import("@/app/api/outcomes/jobs/[jobId]/route");
+
+    const response = await GET(
+      makeRequest(`http://localhost:8080/api/outcomes/jobs/${job.id}`, token),
+      { params: Promise.resolve({ jobId: String(job.id) }) },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.job).toMatchObject({
+      id: job.id,
+      kind: "snapshot_recompute",
+      status: "queued",
+    });
   });
 });
 

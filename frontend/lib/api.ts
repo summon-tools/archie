@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings, OutcomesSnapshotRecomputeResponse, OutcomesAssessmentRunResponse, OutcomesLearningReportResponse, OutcomesLearningReportRunResponse, OutcomesFollowupDetectionResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
 
 const BASE = "/api";
 
@@ -114,8 +114,25 @@ export async function deleteApp(appId: number, deleteFiles = false): Promise<{ s
 
 // --- Global outcomes ---
 
-export async function getOutcomesSummary(): Promise<OutcomesSummaryResponse> {
-  return fetchJSON(`${BASE}/outcomes/summary`);
+export interface OutcomesSummaryQuery {
+  page?: number;
+  page_size?: number;
+  app_id?: string;
+  outcome_state?: string;
+  provider?: string;
+  model?: string;
+  run_status?: string;
+  pr_state?: string;
+}
+
+export async function getOutcomesSummary(query: OutcomesSummaryQuery = {}): Promise<OutcomesSummaryResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "" || value === "all") continue;
+    params.set(key, String(value));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJSON(`${BASE}/outcomes/summary${suffix}`);
 }
 
 export async function getOutcomesSettings(): Promise<OutcomesGitHubSyncSettings> {
@@ -139,7 +156,7 @@ export async function syncOutcomesGitHubEvidence(data: {
   range_days?: number;
   range_start?: string;
   range_end?: string;
-}): Promise<OutcomesGitHubSyncResponse> {
+}): Promise<OutcomesJobEnqueueResponse> {
   return fetchJSON(`${BASE}/outcomes/github/sync`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -151,7 +168,7 @@ export async function recomputeOutcomeSnapshots(data: {
   range_days?: number;
   range_start?: string;
   range_end?: string;
-} = {}): Promise<OutcomesSnapshotRecomputeResponse> {
+} = {}): Promise<OutcomesJobEnqueueResponse> {
   return fetchJSON(`${BASE}/outcomes/snapshots/recompute`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -165,7 +182,7 @@ export async function runOutcomesEvidenceAssessment(data: {
   range_end?: string;
   max_items?: number;
   force?: boolean;
-} = {}): Promise<OutcomesAssessmentRunResponse> {
+} = {}): Promise<OutcomesJobEnqueueResponse> {
   return fetchJSON(`${BASE}/outcomes/assessments/run`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -180,7 +197,7 @@ export async function runOutcomeLearningReport(data: {
   range_days?: number;
   range_start?: string;
   range_end?: string;
-} = {}): Promise<OutcomesLearningReportRunResponse> {
+} = {}): Promise<OutcomesJobEnqueueResponse> {
   return fetchJSON(`${BASE}/outcomes/reports/run`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -193,11 +210,15 @@ export async function detectOutcomeFollowups(data: {
   range_end?: string;
   observation_days?: number;
   max_candidates?: number;
-} = {}): Promise<OutcomesFollowupDetectionResponse> {
+} = {}): Promise<OutcomesJobEnqueueResponse> {
   return fetchJSON(`${BASE}/outcomes/followups/detect`, {
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+export async function getOutcomeJob(jobId: number): Promise<OutcomesJobStatusResponse> {
+  return fetchJSON(`${BASE}/outcomes/jobs/${jobId}`);
 }
 
 // --- Conversation endpoints ---
