@@ -14,6 +14,15 @@ function parsePositiveInt(value: unknown, label: string, fallback: number, max: 
   return parsed;
 }
 
+function parseOptionalPositiveInt(value: unknown, label: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return parsed;
+}
+
 function parseRange(body: Record<string, unknown>): {
   rangeDays: number | null;
   rangeStart: string | null;
@@ -65,12 +74,12 @@ export async function POST(request: NextRequest) {
 
   let range;
   let observationDays: number;
-  let maxCandidates: number;
+  let maxCandidates: number | undefined;
   try {
     const settings = getOutcomesGitHubSyncSettings();
     range = parseRange(body);
     observationDays = parsePositiveInt(body.observation_days, "observation_days", settings.observation_window_days, 365);
-    maxCandidates = parsePositiveInt(body.max_candidates, "max_candidates", 40, 200);
+    maxCandidates = parseOptionalPositiveInt(body.max_candidates, "max_candidates");
   } catch (error) {
     return NextResponse.json(
       { detail: error instanceof Error ? error.message : "Invalid follow-up detection request" },

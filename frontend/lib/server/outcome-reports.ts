@@ -315,7 +315,7 @@ export async function runOutcomeLearningReport(options: RunOutcomeLearningReport
     const summary = await buildOutcomesSummary({
       apps: options.apps,
       githubUnavailableWarning: "Report uses local and synced GitHub evidence; run GitHub sync first when freshness matters.",
-      maxGithubLookups: 0,
+      refreshGitHubState: false,
     });
     const content = buildReportContent({
       rows: summary.rows,

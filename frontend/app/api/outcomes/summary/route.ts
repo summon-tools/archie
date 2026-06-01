@@ -5,7 +5,8 @@ import { filterAppsForUser } from "@/lib/server/room-route-utils";
 import { buildOutcomesSummary, type OutcomeRowFilters } from "@/lib/server/outcomes";
 import type { OutcomeState } from "@/lib/types";
 
-const OUTCOME_STATES = new Set<OutcomeState>(["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"]);
+const OUTCOME_STATE_VALUES: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
+const OUTCOME_STATES = new Set<OutcomeState>(OUTCOME_STATE_VALUES);
 const PR_STATES = new Set(["OPEN", "CLOSED", "MERGED", "UNKNOWN", "NO_PR"]);
 
 function positiveInt(value: string | null, fallback: number): number {
@@ -45,6 +46,10 @@ export async function GET(request: NextRequest) {
   const apps = filterAppsForUser(user, dal.getApps());
   const page = positiveInt(request.nextUrl.searchParams.get("page"), 1);
   const pageSize = Math.min(200, positiveInt(request.nextUrl.searchParams.get("page_size"), 25));
+  const pagesByState = OUTCOME_STATE_VALUES.reduce((acc, state) => {
+    acc[state] = positiveInt(request.nextUrl.searchParams.get(`${state}_page`), 1);
+    return acc;
+  }, {} as Record<OutcomeState, number>);
 
   try {
     const summary = await buildOutcomesSummary({
@@ -52,6 +57,7 @@ export async function GET(request: NextRequest) {
       refreshGitHubState: false,
       rowFilters: parseFilters(request),
       pagination: { page, pageSize },
+      groupPagination: { pageSize, pagesByState },
     });
     return NextResponse.json(summary);
   } catch (error) {

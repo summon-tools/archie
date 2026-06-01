@@ -149,7 +149,7 @@ async function executeOutcomeJob(job: LlmOutcomeJobRow): Promise<unknown> {
         apps,
         githubToken,
         observationDays: input.observationDays || 14,
-        maxCandidates: input.maxCandidates || 40,
+        maxCandidates: input.maxCandidates,
         ...rangeArgs(input),
       });
     }

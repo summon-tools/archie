@@ -351,6 +351,67 @@ describe("outcomes summary aggregation", () => {
     expect(summary.filters.providers).toEqual(["claude", "codex"]);
   });
 
+  it("paginates each outcome group independently", async () => {
+    const firstNoPr = createWorkItem({ appName: "Grouped Pagination App", title: "First No PR" });
+    addRun({
+      appId: firstNoPr.appId,
+      workItemId: firstNoPr.workItemId,
+      conversationId: firstNoPr.conversationId,
+      resultJson: JSON.stringify({ cost: 1 }),
+    });
+    const latestNoPr = createWorkItem({ appName: "Grouped Pagination App", title: "Latest No PR" });
+    addRun({
+      appId: latestNoPr.appId,
+      workItemId: latestNoPr.workItemId,
+      conversationId: latestNoPr.conversationId,
+      resultJson: JSON.stringify({ cost: 2 }),
+    });
+    const firstPending = createWorkItem({ appName: "Grouped Pagination App", title: "First Pending" });
+    addPullRequestArtifact(firstPending.appId, firstPending.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/41",
+      pr_number: 41,
+    });
+    const latestPending = createWorkItem({ appName: "Grouped Pagination App", title: "Latest Pending" });
+    addPullRequestArtifact(latestPending.appId, latestPending.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/42",
+      pr_number: 42,
+    });
+    const { buildOutcomesSummary } = await loadOutcomes();
+
+    const summary = await buildOutcomesSummary({
+      apps: getAppRows(),
+      refreshGitHubState: false,
+      groupPagination: {
+        pageSize: 1,
+        pagesByState: {
+          pending_pr: 2,
+          no_pr: 1,
+        },
+      },
+    });
+
+    const pendingGroup = summary.row_groups.find((group) => group.state === "pending_pr");
+    const noPrGroup = summary.row_groups.find((group) => group.state === "no_pr");
+    expect(pendingGroup?.pagination).toMatchObject({
+      page: 2,
+      page_size: 1,
+      total_rows: 2,
+      filtered_rows: 2,
+      page_count: 2,
+    });
+    expect(pendingGroup?.rows).toHaveLength(1);
+    expect(pendingGroup?.rows[0].work_item_title).toBe("First Pending");
+    expect(noPrGroup?.pagination).toMatchObject({
+      page: 1,
+      page_size: 1,
+      total_rows: 2,
+      filtered_rows: 2,
+      page_count: 2,
+    });
+    expect(noPrGroup?.rows).toHaveLength(1);
+    expect(noPrGroup?.rows[0].work_item_title).toBe("Latest No PR");
+  });
+
   it("uses persisted GitHub evidence snapshots for PR outcome and evidence counts", async () => {
     const user = seedUser(db, { username: "sync-user", email: "sync@example.com" });
     const work = createWorkItem({ appName: "Synced App" });
@@ -777,6 +838,67 @@ describe("outcome snapshot recompute", () => {
 });
 
 describe("outcome evidence assessment", () => {
+  it("assesses every matching GitHub snapshot by default instead of capping the batch", async () => {
+    const dal = await import("@/lib/server/dal");
+    for (let index = 1; index <= 26; index += 1) {
+      const work = createWorkItem({ appName: `Assessment Batch App ${index}` });
+      const prNumber = 1000 + index;
+      addPullRequestArtifact(work.appId, work.workItemId, {
+        pr_url: `https://github.com/acme/repo/pull/${prNumber}`,
+        pr_number: prNumber,
+      });
+      dal.replaceGitHubPrEvidence({
+        snapshot: {
+          app_id: work.appId,
+          work_item_id: work.workItemId,
+          owner: "acme",
+          repo: "repo",
+          pr_number: prNumber,
+          pr_url: `https://github.com/acme/repo/pull/${prNumber}`,
+          title: `Assessment Batch PR ${index}`,
+          state: "MERGED",
+          commits_count: 1,
+          issue_comments_count: 0,
+          review_comments_count: 0,
+          reviews_count: 0,
+        },
+        issue_comments: [],
+        review_comments: [],
+        reviews: [],
+        commits: [],
+      });
+    }
+
+    const { runOutcomeEvidenceAssessment } = await import("@/lib/server/outcome-assessments");
+    let assessmentCalls = 0;
+    const result = await runOutcomeEvidenceAssessment({
+      apps: getAppRows(),
+      assessor: async () => {
+        assessmentCalls += 1;
+        return {
+          review_pressure: "low",
+          comment_categories: {
+            clarification: 0,
+            requested_change: 0,
+            bug_or_regression: 0,
+            nit: 0,
+            approval_or_positive: 0,
+            other: 0,
+          },
+          human_followup_type: "none",
+          agent_correction_commit_count: 0,
+          confidence: "high",
+          evidence_ids: [],
+          summary: "No correction evidence found.",
+        };
+      },
+    });
+
+    expect(assessmentCalls).toBe(26);
+    expect(result.assessed_count).toBe(26);
+    expect(result.failed_count).toBe(0);
+  });
+
   it("can downgrade deterministic rework when review evidence is clarification and expected iteration", async () => {
     setSetting("github_bot_username", "archie-bot");
     setSetting("github_bot_display_name", "Archie");
@@ -1236,6 +1358,14 @@ describe("GET /api/outcomes/summary", () => {
       app_name: "API App",
       outcome_state: "no_pr",
     });
+    const noPrGroup = body.row_groups.find((group: any) => group.state === "no_pr");
+    expect(noPrGroup).toMatchObject({
+      pagination: {
+        page: 1,
+        filtered_rows: 1,
+      },
+    });
+    expect(noPrGroup.rows).toHaveLength(1);
     expect(body.warnings).toEqual([]);
   });
 });
@@ -1299,6 +1429,7 @@ describe("POST /api/outcomes/assessments/run", () => {
       kind: "evidence_assessment",
       status: "queued",
     });
+    expect(JSON.parse(body.job.input_json)).not.toHaveProperty("maxItems");
 
     const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
     const completed = await runOutcomeJobNow(body.job.id);
@@ -1411,6 +1542,21 @@ describe("POST /api/outcomes/followups/detect", () => {
     const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/followups/detect"));
 
     expect(response.status).toBe(401);
+  });
+
+  it("queues follow-up detection without a default candidate cap", async () => {
+    const token = await createAuthToken();
+    const { POST } = await import("@/app/api/outcomes/followups/detect/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/followups/detect", token, { range_days: 14 }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.job).toMatchObject({
+      kind: "followup_detection",
+      status: "queued",
+    });
+    expect(JSON.parse(body.job.input_json)).not.toHaveProperty("maxCandidates");
   });
 });
 

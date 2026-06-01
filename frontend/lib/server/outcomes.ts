@@ -8,9 +8,12 @@ import type {
   OutcomeCostBuckets,
   OutcomeEvidenceCompleteness,
   OutcomeRow,
+  OutcomeRowGroup,
   OutcomesSummaryResponse,
   OutcomeState,
 } from "@/lib/types";
+
+const OUTCOME_GROUP_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 
 type PullRequestLookup = (params: {
   owner: string;
@@ -23,10 +26,11 @@ interface BuildOutcomesOptions {
   apps: AppRow[];
   githubToken?: string | null;
   githubUnavailableWarning?: string;
-  maxGithubLookups?: number;
+  maxGithubLookups?: number | null;
   refreshGitHubState?: boolean;
   rowFilters?: OutcomeRowFilters;
   pagination?: OutcomePaginationOptions;
+  groupPagination?: OutcomeGroupPaginationOptions;
   prLookup?: PullRequestLookup;
 }
 
@@ -42,6 +46,11 @@ export interface OutcomeRowFilters {
 export interface OutcomePaginationOptions {
   page?: number;
   pageSize?: number;
+}
+
+export interface OutcomeGroupPaginationOptions {
+  pageSize?: number;
+  pagesByState?: Partial<Record<OutcomeState, number>>;
 }
 
 type OutcomeRecord = {
@@ -150,6 +159,19 @@ function emptySummary(apps: AppRow[], warnings: string[] = []): OutcomesSummaryR
     },
     coverage: emptyCoverage(),
     rows: [],
+    row_groups: OUTCOME_GROUP_ORDER.map((state) => ({
+      state,
+      rows: [],
+      pagination: {
+        page: 1,
+        page_size: 25,
+        total_rows: 0,
+        filtered_rows: 0,
+        page_count: 0,
+        has_previous: false,
+        has_next: false,
+      },
+    })),
     pagination: {
       page: 1,
       page_size: 25,
@@ -435,13 +457,13 @@ function applyRowFilters(rows: OutcomeRow[], filters: OutcomeRowFilters | undefi
   });
 }
 
-function paginateRows(rows: OutcomeRow[], totalRows: number, pagination: OutcomePaginationOptions | undefined): {
+function paginateOutcomeRows(rows: OutcomeRow[], totalRows: number, pageSizeInput: number | undefined, pageInput: number | undefined): {
   rows: OutcomeRow[];
   pagination: OutcomesSummaryResponse["pagination"];
 } {
-  const pageSize = Math.min(200, Math.max(1, Math.floor(pagination?.pageSize || 25)));
+  const pageSize = Math.min(200, Math.max(1, Math.floor(pageSizeInput || 25)));
   const pageCount = rows.length === 0 ? 0 : Math.ceil(rows.length / pageSize);
-  const requestedPage = Math.max(1, Math.floor(pagination?.page || 1));
+  const requestedPage = Math.max(1, Math.floor(pageInput || 1));
   const page = pageCount === 0 ? 1 : Math.min(requestedPage, pageCount);
   const start = (page - 1) * pageSize;
   return {
@@ -458,14 +480,56 @@ function paginateRows(rows: OutcomeRow[], totalRows: number, pagination: Outcome
   };
 }
 
+function paginateRows(rows: OutcomeRow[], totalRows: number, pagination: OutcomePaginationOptions | undefined): {
+  rows: OutcomeRow[];
+  pagination: OutcomesSummaryResponse["pagination"];
+} {
+  return paginateOutcomeRows(rows, totalRows, pagination?.pageSize, pagination?.page);
+}
+
+function paginateOutcomeGroups(
+  rows: OutcomeRow[],
+  filteredRows: OutcomeRow[],
+  options: OutcomeGroupPaginationOptions | undefined,
+): OutcomeRowGroup[] {
+  const totalRowsByState = new Map<OutcomeState, number>();
+  const filteredRowsByState = new Map<OutcomeState, OutcomeRow[]>();
+  for (const state of OUTCOME_GROUP_ORDER) {
+    totalRowsByState.set(state, 0);
+    filteredRowsByState.set(state, []);
+  }
+  for (const row of rows) {
+    totalRowsByState.set(row.outcome_state, (totalRowsByState.get(row.outcome_state) || 0) + 1);
+  }
+  for (const row of filteredRows) {
+    filteredRowsByState.get(row.outcome_state)?.push(row);
+  }
+
+  return OUTCOME_GROUP_ORDER.map((state) => {
+    const groupRows = filteredRowsByState.get(state) || [];
+    const paged = paginateOutcomeRows(
+      groupRows,
+      totalRowsByState.get(state) || 0,
+      options?.pageSize,
+      options?.pagesByState?.[state],
+    );
+    return {
+      state,
+      rows: paged.rows,
+      pagination: paged.pagination,
+    };
+  });
+}
+
 export async function buildOutcomesSummary({
   apps,
   githubToken = null,
   githubUnavailableWarning,
-  maxGithubLookups = 25,
+  maxGithubLookups = null,
   refreshGitHubState = true,
   rowFilters,
   pagination,
+  groupPagination,
   prLookup = getPullRequest,
 }: BuildOutcomesOptions): Promise<OutcomesSummaryResponse> {
   const warnings: string[] = [];
@@ -710,7 +774,7 @@ export async function buildOutcomesSummary({
     let lookups = 0;
     for (const row of rows) {
       if (!row.pr_number) continue;
-      if (lookups >= maxGithubLookups) {
+      if (maxGithubLookups !== null && maxGithubLookups >= 0 && lookups >= maxGithubLookups) {
         row.warnings.push("GitHub PR state was not refreshed because the lookup limit was reached.");
         pushUnique(warnings, `GitHub enrichment was capped at ${maxGithubLookups} PRs for this request.`);
         continue;
@@ -770,6 +834,7 @@ export async function buildOutcomesSummary({
   }
   const filteredRows = applyRowFilters(rows, rowFilters);
   const paged = paginateRows(filteredRows, rows.length, pagination);
+  const rowGroups = paginateOutcomeGroups(rows, filteredRows, groupPagination);
 
   return {
     generated_at: new Date().toISOString(),
@@ -777,6 +842,7 @@ export async function buildOutcomesSummary({
     costs,
     coverage: buildCoverage(rows),
     rows: paged.rows,
+    row_groups: rowGroups,
     pagination: paged.pagination,
     filters: buildFilters(apps, rows),
     warnings,

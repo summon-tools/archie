@@ -225,8 +225,12 @@ function loadCandidates(
     params.push(rangeEnd);
   }
 
-  const limit = Math.max(1, Math.min(options.maxItems || 25, 100));
-  params.push(limit);
+  const limit = options.maxItems && options.maxItems > 0
+    ? Math.floor(options.maxItems)
+    : null;
+  if (limit !== null) {
+    params.push(limit);
+  }
 
   return getDb().prepare(`
     SELECT
@@ -247,7 +251,7 @@ function loadCandidates(
     JOIN github_pr_snapshots pr ON pr.id = snapshot.pr_snapshot_id
     WHERE ${conditions.join(" AND ")}
     ORDER BY snapshot.computed_at DESC, snapshot.id DESC
-    LIMIT ?
+    ${limit !== null ? "LIMIT ?" : ""}
   `).all(...params) as AssessmentCandidate[];
 }
 
