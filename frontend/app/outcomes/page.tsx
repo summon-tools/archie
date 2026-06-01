@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
-import { getOutcomesSummary } from "@/lib/api";
-import type { OutcomeRow, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import { getOutcomesSettings, getOutcomesSummary, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
+import type { OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 
@@ -85,8 +85,12 @@ function EmptyState() {
 
 export default function OutcomesPage() {
   const [data, setData] = useState<OutcomesSummaryResponse | null>(null);
+  const [settings, setSettings] = useState<OutcomesGitHubSyncSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncRangeDays, setSyncRangeDays] = useState("14");
   const [appFilter, setAppFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
@@ -94,15 +98,57 @@ export default function OutcomesPage() {
   const [runStatusFilter, setRunStatusFilter] = useState("all");
   const [prStateFilter, setPrStateFilter] = useState("all");
 
-  useEffect(() => {
-    getOutcomesSummary()
-      .then((summary) => {
+  const loadData = useCallback(() => {
+    setLoading(true);
+    Promise.all([getOutcomesSummary(), getOutcomesSettings()])
+      .then(([summary, loadedSettings]) => {
         setData(summary);
+        setSettings(loadedSettings);
+        setSyncRangeDays(String(loadedSettings.observation_window_days));
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load outcomes"))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const syncedEvidenceRows = useMemo(() => {
+    return data?.rows.filter((row) => row.github_evidence_synced_at).length || 0;
+  }, [data?.rows]);
+
+  async function handleRangeChange(value: string) {
+    setSyncRangeDays(value);
+    const days = Number(value);
+    if (!Number.isInteger(days) || days < 1) return;
+    try {
+      const updated = await updateOutcomesSettings({ observation_window_days: days });
+      setSettings(updated);
+      setSyncMessage(null);
+    } catch (err) {
+      setSyncMessage(err instanceof Error ? err.message : "Failed to update sync window");
+    }
+  }
+
+  async function handleSyncNow() {
+    const days = Number(syncRangeDays);
+    if (!Number.isInteger(days) || days < 1) return;
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const result = await syncOutcomesGitHubEvidence({ range_days: days });
+      setSyncMessage(`Synced ${result.run.synced_count} of ${result.run.scanned_count} PRs${result.run.failed_count ? `, ${result.run.failed_count} failed` : ""}.`);
+      const [summary, loadedSettings] = await Promise.all([getOutcomesSummary(), getOutcomesSettings()]);
+      setData(summary);
+      setSettings(loadedSettings);
+    } catch (err) {
+      setSyncMessage(err instanceof Error ? err.message : "GitHub evidence sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const filteredRows = useMemo(() => {
     const rows = data?.rows || [];
@@ -209,6 +255,41 @@ export default function OutcomesPage() {
             </section>
 
             <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-th-primary">GitHub evidence</h2>
+                  <div className="mt-1 text-xs text-th-muted">
+                    {syncedEvidenceRows} PR row{syncedEvidenceRows === 1 ? "" : "s"} synced. Daily sync {settings?.daily_sync_enabled ? "enabled" : "disabled"} at {settings?.daily_sync_hour_utc ?? 6}:00 UTC.
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <FilterSelect
+                    label="Window"
+                    value={syncRangeDays}
+                    onChange={handleRangeChange}
+                    includeAll={false}
+                    options={[
+                      { value: "14", label: "Last 14 days" },
+                      { value: "30", label: "Last 30 days" },
+                      { value: "60", label: "Last 60 days" },
+                      { value: "90", label: "Last 90 days" },
+                    ]}
+                  />
+                  <button
+                    onClick={handleSyncNow}
+                    disabled={syncing}
+                    className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+                  >
+                    {syncing ? "Syncing..." : "Sync now"}
+                  </button>
+                </div>
+              </div>
+              {syncMessage && (
+                <div className="mt-3 text-xs text-th-muted">{syncMessage}</div>
+              )}
+            </section>
+
+            <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-sm font-semibold text-th-primary">Outcome funnel</h2>
                 <span className="text-xs text-th-muted">{data.counts.total_work_items} total work item{data.counts.total_work_items === 1 ? "" : "s"}</span>
@@ -287,11 +368,13 @@ function FilterSelect({
   value,
   onChange,
   options,
+  includeAll = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string }[];
+  includeAll?: boolean;
 }) {
   return (
     <label className="min-w-[140px] flex-1">
@@ -301,7 +384,7 @@ function FilterSelect({
         onChange={(event) => onChange(event.target.value)}
         className="w-full h-9 rounded-lg border border-th bg-th-surface text-sm text-th-primary px-2 focus:outline-none focus:border-th-strong"
       >
-        <option value="all">All</option>
+        {includeAll && <option value="all">All</option>}
         {options.map((option) => (
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
@@ -373,6 +456,17 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                 </td>
                 <td className="px-4 py-3 align-top text-th-secondary">
                   <div>{row.evidence_completeness.replaceAll("_", " ")}</div>
+                  {row.github_evidence_synced_at && (
+                    <div className="mt-1 text-xs text-th-muted">
+                      {(row.github_issue_comments_count || 0) + (row.github_review_comments_count || 0)} comments, {row.github_reviews_count || 0} reviews, {row.github_commits_count || 0} commits
+                    </div>
+                  )}
+                  {row.github_additions !== null && row.github_deletions !== null && (
+                    <div className="mt-1 text-xs text-th-muted">
+                      +{row.github_additions} / -{row.github_deletions}
+                      {row.github_changed_files !== null ? `, ${row.github_changed_files} files` : ""}
+                    </div>
+                  )}
                   {row.warnings.length > 0 && (
                     <div className="mt-1 text-xs text-st-yellow">{row.warnings[0]}</div>
                   )}

@@ -146,6 +146,99 @@ export interface ArtifactRow {
   created_at: string;
 }
 
+export interface GitHubPrSnapshotRow {
+  id: number;
+  app_id: number;
+  work_item_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  pr_url: string;
+  title: string;
+  state: string;
+  author_login: string | null;
+  head_ref: string | null;
+  base_ref: string | null;
+  merged_at: string | null;
+  closed_at: string | null;
+  github_created_at: string | null;
+  github_updated_at: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changed_files: number | null;
+  commits_count: number | null;
+  issue_comments_count: number | null;
+  review_comments_count: number | null;
+  reviews_count: number | null;
+  raw_json: string | null;
+  synced_at: string;
+  created_at: string;
+}
+
+export interface GitHubPrCommentRow {
+  id: number;
+  pr_snapshot_id: number;
+  app_id: number;
+  work_item_id: number;
+  github_id: number;
+  comment_type: "issue" | "review";
+  author_login: string | null;
+  body: string;
+  path: string | null;
+  commit_id: string | null;
+  github_created_at: string | null;
+  github_updated_at: string | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface GitHubPrReviewRow {
+  id: number;
+  pr_snapshot_id: number;
+  app_id: number;
+  work_item_id: number;
+  github_id: number;
+  author_login: string | null;
+  state: string | null;
+  body: string;
+  submitted_at: string | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface GitHubPrCommitRow {
+  id: number;
+  pr_snapshot_id: number;
+  app_id: number;
+  work_item_id: number;
+  sha: string;
+  author_login: string | null;
+  author_name: string | null;
+  author_email: string | null;
+  committer_login: string | null;
+  message: string;
+  authored_at: string | null;
+  committed_at: string | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface GitHubOutcomeSyncRunRow {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "running" | "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  scanned_count: number;
+  synced_count: number;
+  failed_count: number;
+  warnings_json: string | null;
+  error_text: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
 export type AppFileStatus = "uploading" | "available" | "deleted";
 export type AppFileLinkType = "attachment" | "context";
 

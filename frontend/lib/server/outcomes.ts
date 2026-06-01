@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/server/db";
-import { getPullRequest, parseGitHubRemoteUrl } from "@/lib/server/github";
+import { getPullRequest } from "@/lib/server/github";
+import { parsePullRequestMetadata, resolvePullRequestRepo } from "@/lib/server/github-pr-utils";
 import type { AppRow, RunRow } from "@/lib/server/types";
 import type {
   OutcomeCostBuckets,
@@ -41,8 +42,21 @@ type OutcomeRecord = {
   last_model_id: string | null;
   work_item_created_at: string;
   work_item_updated_at: string;
-  pr_metadata_json: string | null;
   pr_artifact_id: number | null;
+  pr_metadata_json: string | null;
+  evidence_synced_at: string | null;
+  evidence_state: string | null;
+  evidence_pr_url: string | null;
+  evidence_title: string | null;
+  evidence_merged_at: string | null;
+  evidence_closed_at: string | null;
+  evidence_issue_comments_count: number | null;
+  evidence_review_comments_count: number | null;
+  evidence_reviews_count: number | null;
+  evidence_commits_count: number | null;
+  evidence_additions: number | null;
+  evidence_deletions: number | null;
+  evidence_changed_files: number | null;
 };
 
 type MatchedRun = RunRow & { matched_work_item_id: number };
@@ -99,45 +113,6 @@ function parseCost(resultJson: string | null): number | null {
   } catch {
     return null;
   }
-}
-
-function parsePrMetadata(metadataJson: string | null): {
-  prNumber: number | null;
-  prUrl: string | null;
-  warnings: string[];
-} {
-  if (!metadataJson) {
-    return { prNumber: null, prUrl: null, warnings: [] };
-  }
-
-  try {
-    const parsed = JSON.parse(metadataJson);
-    const rawNumber = parsed?.pr_number;
-    const numberValue = typeof rawNumber === "number" ? rawNumber : Number(rawNumber);
-    const prUrl = typeof parsed?.pr_url === "string" && parsed.pr_url.trim() ? parsed.pr_url.trim() : null;
-    const urlNumberMatch = prUrl?.match(/\/pull\/(\d+)(?:[/?#].*)?$/);
-    const parsedUrlNumber = urlNumberMatch ? Number(urlNumberMatch[1]) : null;
-    const prNumber = Number.isInteger(numberValue) && numberValue > 0
-      ? numberValue
-      : parsedUrlNumber;
-    const warnings: string[] = [];
-    if (!prNumber) warnings.push("PR artifact is missing a valid PR number.");
-    return { prNumber, prUrl, warnings };
-  } catch {
-    return { prNumber: null, prUrl: null, warnings: ["PR artifact metadata is not valid JSON."] };
-  }
-}
-
-function parseGitHubPullRequestUrl(url: string | null): { owner: string; repo: string } | null {
-  if (!url) return null;
-  const match = url.trim().match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/\d+(?:[/?#].*)?$/);
-  if (!match) return null;
-  return { owner: match[1], repo: match[2].replace(/\.git$/, "") };
-}
-
-function resolvePullRequestRepo(row: OutcomeRow): { owner: string; repo: string } | null {
-  return (row.app_github_repo ? parseGitHubRemoteUrl(row.app_github_repo) : null)
-    || parseGitHubPullRequestUrl(row.pr_url);
 }
 
 function groupRunsByWorkItem(workItemIds: number[]): Map<number, MatchedRun[]> {
@@ -260,7 +235,20 @@ export async function buildOutcomesSummary({
       session.status AS session_status,
       session.last_model_id AS last_model_id,
       pr.id AS pr_artifact_id,
-      pr.metadata_json AS pr_metadata_json
+      pr.metadata_json AS pr_metadata_json,
+      evidence.synced_at AS evidence_synced_at,
+      evidence.state AS evidence_state,
+      evidence.pr_url AS evidence_pr_url,
+      evidence.title AS evidence_title,
+      evidence.merged_at AS evidence_merged_at,
+      evidence.closed_at AS evidence_closed_at,
+      evidence.issue_comments_count AS evidence_issue_comments_count,
+      evidence.review_comments_count AS evidence_review_comments_count,
+      evidence.reviews_count AS evidence_reviews_count,
+      evidence.commits_count AS evidence_commits_count,
+      evidence.additions AS evidence_additions,
+      evidence.deletions AS evidence_deletions,
+      evidence.changed_files AS evidence_changed_files
     FROM work_items wi
     JOIN apps app ON app.id = wi.app_id
     LEFT JOIN conversations c ON c.id = wi.primary_conversation_id
@@ -277,6 +265,12 @@ export async function buildOutcomesSummary({
       ORDER BY created_at DESC, id DESC
       LIMIT 1
     )
+    LEFT JOIN github_pr_snapshots evidence ON evidence.id = (
+      SELECT id FROM github_pr_snapshots
+      WHERE work_item_id = wi.id
+      ORDER BY synced_at DESC, id DESC
+      LIMIT 1
+    )
     WHERE wi.app_id IN (${placeholders(appIds.length)})
     ORDER BY wi.updated_at DESC, wi.id DESC
   `).all(...appIds) as OutcomeRecord[];
@@ -287,7 +281,7 @@ export async function buildOutcomesSummary({
   const rows: OutcomeRow[] = records.map((record) => {
     const runs = runsByWorkItem.get(record.work_item_id) || [];
     const { latestRun, knownCost, unknownCostRuns } = summarizeRuns(runs);
-    const pr = parsePrMetadata(record.pr_metadata_json);
+    const pr = parsePullRequestMetadata(record.pr_metadata_json);
     const rowWarnings = [...pr.warnings];
     const hasPrArtifact = record.pr_artifact_id !== null;
     const hasValidPr = hasPrArtifact && pr.prNumber !== null;
@@ -302,6 +296,14 @@ export async function buildOutcomesSummary({
     } else if (hasPrArtifact) {
       outcomeState = "unknown";
       evidenceCompleteness = "incomplete";
+    }
+
+    const syncedState = record.evidence_state === "MERGED" || record.evidence_state === "CLOSED" || record.evidence_state === "OPEN"
+      ? record.evidence_state
+      : null;
+    if (syncedState) {
+      outcomeState = outcomeFromPrState(syncedState);
+      evidenceCompleteness = "github_enriched";
     }
 
     return {
@@ -327,11 +329,19 @@ export async function buildOutcomesSummary({
       known_cost_usd: knownCost,
       unknown_cost_runs: unknownCostRuns,
       pr_number: pr.prNumber,
-      pr_url: pr.prUrl,
-      pr_title: null,
-      pr_state: hasValidPr ? "UNKNOWN" : null,
+      pr_url: record.evidence_pr_url || pr.prUrl,
+      pr_title: record.evidence_title || null,
+      pr_state: syncedState || (hasValidPr ? "UNKNOWN" : null),
       outcome_state: outcomeState,
       evidence_completeness: evidenceCompleteness,
+      github_evidence_synced_at: record.evidence_synced_at,
+      github_issue_comments_count: record.evidence_issue_comments_count,
+      github_review_comments_count: record.evidence_review_comments_count,
+      github_reviews_count: record.evidence_reviews_count,
+      github_commits_count: record.evidence_commits_count,
+      github_additions: record.evidence_additions,
+      github_deletions: record.evidence_deletions,
+      github_changed_files: record.evidence_changed_files,
       warnings: rowWarnings,
       created_at: record.work_item_created_at,
       updated_at: record.work_item_updated_at,
@@ -355,7 +365,7 @@ export async function buildOutcomesSummary({
         continue;
       }
 
-      const remote = resolvePullRequestRepo(row);
+      const remote = resolvePullRequestRepo({ appGithubRepo: row.app_github_repo, prUrl: row.pr_url });
       if (!remote) {
         row.warnings.push("GitHub PR state was not refreshed because no valid GitHub repository could be resolved.");
         continue;

@@ -285,6 +285,92 @@ describe("outcomes summary aggregation", () => {
     expect(summary.rows[0].app_name).toBe("Included App");
     expect(summary.costs.total_known_cost_usd).toBe(0.1);
   });
+
+  it("uses persisted GitHub evidence snapshots for PR outcome and evidence counts", async () => {
+    const user = seedUser(db, { username: "sync-user", email: "sync@example.com" });
+    const work = createWorkItem({ appName: "Synced App" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/11",
+      pr_number: 11,
+    });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      resultJson: JSON.stringify({ cost: 3 }),
+    });
+    const { runGitHubEvidenceSync } = await import("@/lib/server/outcomes-github-sync");
+
+    const result = await runGitHubEvidenceSync({
+      apps: getAppRows(),
+      userId: user.id,
+      githubToken: "token",
+      mode: "manual",
+      rangeDays: 30,
+      fetchEvidence: async (params) => {
+        expect(params).toMatchObject({ owner: "acme", repo: "repo", pr_number: 11 });
+        return {
+          pr: {
+            number: 11,
+            html_url: "https://github.com/acme/repo/pull/11",
+            title: "Merged synced PR",
+            state: "closed",
+            merged_at: "2026-05-31T12:00:00Z",
+            closed_at: "2026-05-31T12:00:00Z",
+            created_at: "2026-05-30T12:00:00Z",
+            updated_at: "2026-05-31T12:00:00Z",
+            additions: 10,
+            deletions: 4,
+            changed_files: 2,
+            commits: 1,
+            user: { login: "engineer" },
+            head: { ref: "feature/synced" },
+            base: { ref: "main" },
+          },
+          issue_comments: [{ id: 101, body: "Looks good", user: { login: "reviewer" }, created_at: "2026-05-31T10:00:00Z", updated_at: "2026-05-31T10:00:00Z" }],
+          review_comments: [{ id: 201, body: "Inline note", path: "app.ts", commit_id: "abc", user: { login: "reviewer" }, created_at: "2026-05-31T11:00:00Z", updated_at: "2026-05-31T11:00:00Z" }],
+          reviews: [{ id: 301, state: "APPROVED", body: "Approved", user: { login: "reviewer" }, submitted_at: "2026-05-31T11:30:00Z" }],
+          commits: [{
+            sha: "abc",
+            author: { login: "engineer" },
+            committer: { login: "archie-bot" },
+            commit: {
+              message: "Implement synced PR",
+              author: { name: "Engineer", email: "engineer@example.com", date: "2026-05-31T09:00:00Z" },
+              committer: { date: "2026-05-31T09:05:00Z" },
+            },
+          }],
+        };
+      },
+    });
+
+    expect(result.run.status).toBe("completed");
+    expect(result.run.scanned_count).toBe(1);
+    expect(result.run.synced_count).toBe(1);
+    expect(db.prepare("SELECT body FROM github_pr_comments ORDER BY github_id").all()).toEqual([
+      { body: "Looks good" },
+      { body: "Inline note" },
+    ]);
+
+    const { buildOutcomesSummary } = await loadOutcomes();
+    const summary = await buildOutcomesSummary({ apps: getAppRows() });
+
+    expect(summary.counts.merged_prs).toBe(1);
+    expect(summary.costs.merged_pr_cost_usd).toBe(3);
+    expect(summary.rows[0]).toMatchObject({
+      outcome_state: "merged",
+      evidence_completeness: "github_enriched",
+      pr_state: "MERGED",
+      pr_title: "Merged synced PR",
+      github_issue_comments_count: 1,
+      github_review_comments_count: 1,
+      github_reviews_count: 1,
+      github_commits_count: 1,
+      github_additions: 10,
+      github_deletions: 4,
+      github_changed_files: 2,
+    });
+  });
 });
 
 describe("GET /api/outcomes/summary", () => {
@@ -321,5 +407,31 @@ describe("GET /api/outcomes/summary", () => {
       outcome_state: "no_pr",
     });
     expect(body.warnings).toEqual([]);
+  });
+});
+
+describe("GET/PUT /api/outcomes/settings", () => {
+  it("returns default settings and persists observation window updates", async () => {
+    const token = await createAuthToken();
+    const { GET, PUT } = await import("@/app/api/outcomes/settings/route");
+
+    const getResponse = await GET(makeRequest("http://localhost:8080/api/outcomes/settings", token));
+    await expect(getResponse.json()).resolves.toMatchObject({
+      settings: {
+        observation_window_days: 14,
+        daily_sync_enabled: true,
+        daily_sync_hour_utc: 6,
+      },
+    });
+
+    const putResponse = await PUT({
+      ...makeRequest("http://localhost:8080/api/outcomes/settings", token),
+      json: async () => ({ observation_window_days: 30 }),
+    } as any);
+    await expect(putResponse.json()).resolves.toMatchObject({
+      settings: {
+        observation_window_days: 30,
+      },
+    });
   });
 });

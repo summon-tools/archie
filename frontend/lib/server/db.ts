@@ -211,6 +211,124 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_artifacts_kind ON artifacts(kind);
     CREATE INDEX IF NOT EXISTS idx_artifacts_app_kind ON artifacts(app_id, kind) WHERE work_item_id IS NULL;
 
+    CREATE TABLE IF NOT EXISTS github_pr_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      work_item_id INTEGER NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      pr_url TEXT NOT NULL,
+      title TEXT DEFAULT '',
+      state TEXT NOT NULL DEFAULT 'UNKNOWN',
+      author_login TEXT DEFAULT NULL,
+      head_ref TEXT DEFAULT NULL,
+      base_ref TEXT DEFAULT NULL,
+      merged_at TEXT DEFAULT NULL,
+      closed_at TEXT DEFAULT NULL,
+      github_created_at TEXT DEFAULT NULL,
+      github_updated_at TEXT DEFAULT NULL,
+      additions INTEGER DEFAULT NULL,
+      deletions INTEGER DEFAULT NULL,
+      changed_files INTEGER DEFAULT NULL,
+      commits_count INTEGER DEFAULT NULL,
+      issue_comments_count INTEGER DEFAULT NULL,
+      review_comments_count INTEGER DEFAULT NULL,
+      reviews_count INTEGER DEFAULT NULL,
+      raw_json TEXT DEFAULT NULL,
+      synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(owner, repo, pr_number),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_pr_snapshots_work_item_id ON github_pr_snapshots(work_item_id);
+    CREATE INDEX IF NOT EXISTS idx_github_pr_snapshots_synced_at ON github_pr_snapshots(synced_at);
+
+    CREATE TABLE IF NOT EXISTS github_pr_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pr_snapshot_id INTEGER NOT NULL,
+      app_id INTEGER NOT NULL,
+      work_item_id INTEGER NOT NULL,
+      github_id INTEGER NOT NULL,
+      comment_type TEXT NOT NULL CHECK(comment_type IN ('issue', 'review')),
+      author_login TEXT DEFAULT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      path TEXT DEFAULT NULL,
+      commit_id TEXT DEFAULT NULL,
+      github_created_at TEXT DEFAULT NULL,
+      github_updated_at TEXT DEFAULT NULL,
+      raw_json TEXT DEFAULT NULL,
+      synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(comment_type, github_id),
+      FOREIGN KEY (pr_snapshot_id) REFERENCES github_pr_snapshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_pr_comments_snapshot_id ON github_pr_comments(pr_snapshot_id);
+    CREATE INDEX IF NOT EXISTS idx_github_pr_comments_work_item_id ON github_pr_comments(work_item_id);
+
+    CREATE TABLE IF NOT EXISTS github_pr_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pr_snapshot_id INTEGER NOT NULL,
+      app_id INTEGER NOT NULL,
+      work_item_id INTEGER NOT NULL,
+      github_id INTEGER NOT NULL,
+      author_login TEXT DEFAULT NULL,
+      state TEXT DEFAULT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      submitted_at TEXT DEFAULT NULL,
+      raw_json TEXT DEFAULT NULL,
+      synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(github_id),
+      FOREIGN KEY (pr_snapshot_id) REFERENCES github_pr_snapshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_pr_reviews_snapshot_id ON github_pr_reviews(pr_snapshot_id);
+    CREATE INDEX IF NOT EXISTS idx_github_pr_reviews_work_item_id ON github_pr_reviews(work_item_id);
+
+    CREATE TABLE IF NOT EXISTS github_pr_commits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pr_snapshot_id INTEGER NOT NULL,
+      app_id INTEGER NOT NULL,
+      work_item_id INTEGER NOT NULL,
+      sha TEXT NOT NULL,
+      author_login TEXT DEFAULT NULL,
+      author_name TEXT DEFAULT NULL,
+      author_email TEXT DEFAULT NULL,
+      committer_login TEXT DEFAULT NULL,
+      message TEXT NOT NULL DEFAULT '',
+      authored_at TEXT DEFAULT NULL,
+      committed_at TEXT DEFAULT NULL,
+      raw_json TEXT DEFAULT NULL,
+      synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(pr_snapshot_id, sha),
+      FOREIGN KEY (pr_snapshot_id) REFERENCES github_pr_snapshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_pr_commits_snapshot_id ON github_pr_commits(pr_snapshot_id);
+    CREATE INDEX IF NOT EXISTS idx_github_pr_commits_work_item_id ON github_pr_commits(work_item_id);
+
+    CREATE TABLE IF NOT EXISTS github_outcome_sync_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      requested_by_user_id INTEGER DEFAULT NULL,
+      mode TEXT NOT NULL DEFAULT 'manual' CHECK(mode IN ('manual', 'scheduled')),
+      status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed')),
+      range_start TEXT DEFAULT NULL,
+      range_end TEXT DEFAULT NULL,
+      scanned_count INTEGER NOT NULL DEFAULT 0,
+      synced_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      warnings_json TEXT DEFAULT NULL,
+      error_text TEXT DEFAULT NULL,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT DEFAULT NULL,
+      FOREIGN KEY (requested_by_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_outcome_sync_runs_started_at ON github_outcome_sync_runs(started_at);
+
     CREATE TABLE IF NOT EXISTS app_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL,

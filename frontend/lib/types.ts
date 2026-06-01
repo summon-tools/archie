@@ -464,6 +464,14 @@ export interface OutcomeRow {
   pr_state: "OPEN" | "CLOSED" | "MERGED" | "UNKNOWN" | null;
   outcome_state: OutcomeState;
   evidence_completeness: OutcomeEvidenceCompleteness;
+  github_evidence_synced_at: string | null;
+  github_issue_comments_count: number | null;
+  github_review_comments_count: number | null;
+  github_reviews_count: number | null;
+  github_commits_count: number | null;
+  github_additions: number | null;
+  github_deletions: number | null;
+  github_changed_files: number | null;
   warnings: string[];
   created_at: string;
   updated_at: string;
@@ -481,5 +489,34 @@ export interface OutcomesSummaryResponse {
     run_statuses: string[];
     outcome_states: OutcomeState[];
   };
+  warnings: string[];
+}
+
+export interface OutcomesGitHubSyncSettings {
+  observation_window_days: number;
+  daily_sync_enabled: boolean;
+  daily_sync_hour_utc: number;
+  sync_user_id: number | null;
+  last_scheduled_sync_at: string | null;
+}
+
+export interface GitHubOutcomeSyncRun {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "running" | "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  scanned_count: number;
+  synced_count: number;
+  failed_count: number;
+  warnings_json: string | null;
+  error_text: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface OutcomesGitHubSyncResponse {
+  run: GitHubOutcomeSyncRun;
   warnings: string[];
 }

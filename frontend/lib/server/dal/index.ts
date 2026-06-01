@@ -7,6 +7,7 @@ export * from "./app-files";
 export * from "./apps";
 export * from "./users";
 export * from "./github-connections";
+export * from "./github-evidence";
 export * from "./notifications";
 export * from "./automation-configs";
 export * from "./rooms";
