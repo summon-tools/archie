@@ -5,10 +5,17 @@ import Link from "next/link";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
 import { detectOutcomeFollowups, getLatestOutcomeLearningReport, getOutcomeJob, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeJob, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeJob, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomeRowGroup, OutcomeRowsPagination, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 const PAGE_SIZE_OPTIONS = ["25", "50", "100", "200"];
+
+function initialGroupPages(): Record<OutcomeState, number> {
+  return OUTCOME_ORDER.reduce((acc, state) => {
+    acc[state] = 1;
+    return acc;
+  }, {} as Record<OutcomeState, number>);
+}
 
 function formatCurrency(value: number): string {
   const maximumFractionDigits = value > 0 && value < 1 ? 4 : 2;
@@ -190,7 +197,7 @@ export default function OutcomesPage() {
   const [modelFilter, setModelFilter] = useState("all");
   const [runStatusFilter, setRunStatusFilter] = useState("all");
   const [prStateFilter, setPrStateFilter] = useState("all");
-  const [page, setPage] = useState(1);
+  const [groupPages, setGroupPages] = useState<Record<OutcomeState, number>>(() => initialGroupPages());
   const [pageSize, setPageSize] = useState("25");
   const initializedSettingsRef = useRef(false);
   const syncing = isJobActive(syncJob);
@@ -200,15 +207,19 @@ export default function OutcomesPage() {
   const detectingFollowups = isJobActive(followupJob);
 
   const summaryQuery = useMemo(() => ({
-    page,
     page_size: Number(pageSize),
+    pending_pr_page: groupPages.pending_pr,
+    merged_page: groupPages.merged,
+    closed_unmerged_page: groupPages.closed_unmerged,
+    no_pr_page: groupPages.no_pr,
+    unknown_page: groupPages.unknown,
     app_id: appFilter,
     outcome_state: outcomeFilter,
     provider: providerFilter,
     model: modelFilter,
     run_status: runStatusFilter,
     pr_state: prStateFilter,
-  }), [appFilter, modelFilter, outcomeFilter, page, pageSize, prStateFilter, providerFilter, runStatusFilter]);
+  }), [appFilter, groupPages.closed_unmerged, groupPages.merged, groupPages.no_pr, groupPages.pending_pr, groupPages.unknown, modelFilter, outcomeFilter, pageSize, prStateFilter, providerFilter, runStatusFilter]);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -344,13 +355,13 @@ export default function OutcomesPage() {
   function updatePagedFilter(setter: (value: string) => void) {
     return (value: string) => {
       setter(value);
-      setPage(1);
+      setGroupPages(initialGroupPages());
     };
   }
 
   function handlePageSizeChange(value: string) {
     setPageSize(value);
-    setPage(1);
+    setGroupPages(initialGroupPages());
   }
 
   async function handleRangeChange(value: string) {
@@ -397,7 +408,7 @@ export default function OutcomesPage() {
     if (!Number.isInteger(days) || days < 1) return;
     setAssessmentMessage(null);
     try {
-      const result = await runOutcomesEvidenceAssessment({ range_days: days, max_items: 25 });
+      const result = await runOutcomesEvidenceAssessment({ range_days: days });
       setAssessmentJob(result.job);
       setAssessmentMessage("Queued evidence assessment. The dashboard will refresh when it finishes.");
     } catch (err) {
@@ -423,7 +434,7 @@ export default function OutcomesPage() {
     if (!Number.isInteger(days) || days < 1) return;
     setFollowupMessage(null);
     try {
-      const result = await detectOutcomeFollowups({ range_days: days, max_candidates: 40 });
+      const result = await detectOutcomeFollowups({ range_days: days });
       setFollowupJob(result.job);
       setFollowupMessage("Queued follow-up detection. The dashboard will refresh when it finishes.");
     } catch (err) {
@@ -431,12 +442,37 @@ export default function OutcomesPage() {
     }
   }
 
-  const groupedRows = useMemo(() => {
-    return OUTCOME_ORDER.map((state) => ({
-      state,
-      rows: (data?.rows || []).filter((row) => row.outcome_state === state),
-    })).filter((group) => group.rows.length > 0);
-  }, [data?.rows]);
+  const groupedRows = useMemo<OutcomeRowGroup[]>(() => {
+    if (!data) return [];
+    const groups = data.row_groups?.length
+      ? data.row_groups
+      : OUTCOME_ORDER.map((state) => {
+        const rows = (data.rows || []).filter((row) => row.outcome_state === state);
+        return {
+          state,
+          rows,
+          pagination: {
+            page: 1,
+            page_size: Number(pageSize),
+            total_rows: rows.length,
+            filtered_rows: rows.length,
+            page_count: rows.length > 0 ? 1 : 0,
+            has_previous: false,
+            has_next: false,
+          },
+        };
+      });
+    return groups.filter((group) => group.pagination.filtered_rows > 0);
+  }, [data, pageSize]);
+
+  const visibleRowCount = useMemo(() => {
+    return groupedRows.reduce((total, group) => total + group.rows.length, 0);
+  }, [groupedRows]);
+
+  const filteredRowCount = useMemo(() => {
+    if (!data?.row_groups?.length) return data?.pagination.filtered_rows || 0;
+    return data.row_groups.reduce((total, group) => total + group.pagination.filtered_rows, 0);
+  }, [data?.pagination.filtered_rows, data?.row_groups]);
 
   const resetFilters = () => {
     setAppFilter("all");
@@ -445,7 +481,7 @@ export default function OutcomesPage() {
     setModelFilter("all");
     setRunStatusFilter("all");
     setPrStateFilter("all");
-    setPage(1);
+    setGroupPages(initialGroupPages());
   };
 
   return (
@@ -697,7 +733,7 @@ export default function OutcomesPage() {
                     <FilterSelect label="Model" value={modelFilter} onChange={updatePagedFilter(setModelFilter)} options={data.filters.models.map((model) => ({ value: model, label: model }))} />
                     <FilterSelect label="Run status" value={runStatusFilter} onChange={updatePagedFilter(setRunStatusFilter)} options={data.filters.run_statuses.map((status) => ({ value: status, label: status }))} />
                     <FilterSelect label="PR state" value={prStateFilter} onChange={updatePagedFilter(setPrStateFilter)} options={data.filters.pr_states.map((state) => ({ value: state, label: state === "NO_PR" ? "No PR" : state }))} />
-                    <FilterSelect label="Page size" value={pageSize} onChange={handlePageSizeChange} includeAll={false} options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: `${size} rows` }))} />
+                    <FilterSelect label="Rows/group" value={pageSize} onChange={handlePageSizeChange} includeAll={false} options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: `${size} rows` }))} />
                     <button
                       onClick={resetFilters}
                       className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover transition-colors"
@@ -706,13 +742,24 @@ export default function OutcomesPage() {
                     </button>
                   </div>
                   <div className="mt-3 text-xs text-th-muted">
-                    Showing {data.rows.length} of {data.pagination.filtered_rows} matching rows across {data.pagination.total_rows} total.
+                    Showing {visibleRowCount} of {filteredRowCount} matching rows across {data.pagination.total_rows} total. Each outcome group paginates independently.
                   </div>
                 </section>
 
                 <div className="mt-6 space-y-6">
                   {groupedRows.map((group) => (
-                    <OutcomeGroup key={group.state} state={group.state} rows={group.rows} />
+                    <OutcomeGroup
+                      key={group.state}
+                      group={group}
+                      onPrevious={() => setGroupPages((current) => ({
+                        ...current,
+                        [group.state]: Math.max(1, (current[group.state] || 1) - 1),
+                      }))}
+                      onNext={() => setGroupPages((current) => ({
+                        ...current,
+                        [group.state]: (current[group.state] || 1) + 1,
+                      }))}
+                    />
                   ))}
                   {groupedRows.length === 0 && (
                     <div className="border border-th rounded-xl bg-th-surface p-6 text-sm text-th-muted">
@@ -720,11 +767,6 @@ export default function OutcomesPage() {
                     </div>
                   )}
                 </div>
-                <PaginationControls
-                  pagination={data.pagination}
-                  onPrevious={() => setPage((current) => Math.max(1, current - 1))}
-                  onNext={() => setPage((current) => current + 1)}
-                />
               </>
             )}
           </>
@@ -780,12 +822,12 @@ function FilterSelect({
   );
 }
 
-function PaginationControls({
+function GroupPaginationControls({
   pagination,
   onPrevious,
   onNext,
 }: {
-  pagination: OutcomesSummaryResponse["pagination"];
+  pagination: OutcomeRowsPagination;
   onPrevious: () => void;
   onNext: () => void;
 }) {
@@ -793,7 +835,7 @@ function PaginationControls({
   const start = (pagination.page - 1) * pagination.page_size + 1;
   const end = Math.min(pagination.filtered_rows, pagination.page * pagination.page_size);
   return (
-    <div className="mt-4 flex flex-col gap-3 border border-th rounded-xl bg-th-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-wrap items-center justify-end gap-2">
       <div className="text-xs text-th-muted">
         Rows {start}-{end} of {pagination.filtered_rows}. Page {pagination.page} of {pagination.page_count}.
       </div>
@@ -801,14 +843,14 @@ function PaginationControls({
         <button
           onClick={onPrevious}
           disabled={!pagination.has_previous}
-          className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+          className="h-8 px-2.5 rounded-lg bg-btn-secondary text-btn-secondary text-xs font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
         >
           Previous
         </button>
         <button
           onClick={onNext}
           disabled={!pagination.has_next}
-          className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+          className="h-8 px-2.5 rounded-lg bg-btn-secondary text-btn-secondary text-xs font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
         >
           Next
         </button>
@@ -935,8 +977,17 @@ function ReportExample({ example }: { example: OutcomeLearningReportExample }) {
   );
 }
 
-function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[] }) {
+function OutcomeGroup({
+  group,
+  onPrevious,
+  onNext,
+}: {
+  group: OutcomeRowGroup;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const { state, rows, pagination } = group;
 
   function toggleRow(rowId: string) {
     setExpandedRows((current) => {
@@ -949,13 +1000,16 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
 
   return (
     <section className="border border-th rounded-xl bg-th-surface overflow-hidden">
-      <div className="px-4 py-3 border-b border-th flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-th flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           <span className={`px-2 py-1 rounded-md border text-xs font-semibold ${outcomeClass(state)}`}>
             {outcomeLabel(state)}
           </span>
-          <span className="text-sm text-th-muted">{rows.length} row{rows.length === 1 ? "" : "s"}</span>
+          <span className="text-sm text-th-muted">
+            {pagination.filtered_rows} matching row{pagination.filtered_rows === 1 ? "" : "s"}
+          </span>
         </div>
+        <GroupPaginationControls pagination={pagination} onPrevious={onPrevious} onNext={onNext} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

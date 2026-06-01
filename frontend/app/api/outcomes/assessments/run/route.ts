@@ -46,8 +46,8 @@ function parseRange(body: Record<string, unknown>): {
 function parseMaxItems(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
-    throw new Error("max_items must be an integer from 1 to 100");
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error("max_items must be a positive integer");
   }
   return parsed;
 }

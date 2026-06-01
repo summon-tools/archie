@@ -589,21 +589,30 @@ export interface OutcomeRow {
   updated_at: string;
 }
 
+export interface OutcomeRowsPagination {
+  page: number;
+  page_size: number;
+  total_rows: number;
+  filtered_rows: number;
+  page_count: number;
+  has_previous: boolean;
+  has_next: boolean;
+}
+
+export interface OutcomeRowGroup {
+  state: OutcomeState;
+  rows: OutcomeRow[];
+  pagination: OutcomeRowsPagination;
+}
+
 export interface OutcomesSummaryResponse {
   generated_at: string;
   counts: OutcomeSummaryCounts;
   costs: OutcomeCostBuckets;
   coverage: OutcomeCoverageCounts;
   rows: OutcomeRow[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total_rows: number;
-    filtered_rows: number;
-    page_count: number;
-    has_previous: boolean;
-    has_next: boolean;
-  };
+  row_groups: OutcomeRowGroup[];
+  pagination: OutcomeRowsPagination;
   filters: {
     apps: { id: number; name: string }[];
     providers: string[];

@@ -460,7 +460,9 @@ export async function runOutcomeFollowupDetection(options: RunOutcomeFollowupDet
   const fetchFiles = options.fetchPullRequestFiles || getPullRequestFiles;
   const verifier = options.verifier || defaultVerifier;
   const maxRepoPages = options.maxRepoPages || 3;
-  const maxCandidates = options.maxCandidates || 40;
+  const maxCandidates = options.maxCandidates && options.maxCandidates > 0
+    ? Math.floor(options.maxCandidates)
+    : null;
   const warnings: string[] = [];
   const sources = getSourceOutcomePrs(options.apps, rangeStart, rangeEnd);
   const repoKeys = Array.from(new Set(sources.map((source) => `${source.owner}/${source.repo}`)));
@@ -500,7 +502,7 @@ export async function runOutcomeFollowupDetection(options: RunOutcomeFollowupDet
     const sourceFiles = dal.listGitHubRepoPullRequestFiles(sourceRepoPr.id);
     const followupPrs = listIndexedFollowupPrs(source, observationDays);
     for (const followup of followupPrs) {
-      if (candidateCount >= maxCandidates) {
+      if (maxCandidates !== null && candidateCount >= maxCandidates) {
         warnings.push(`Follow-up detection capped at ${maxCandidates} candidates.`);
         break;
       }
