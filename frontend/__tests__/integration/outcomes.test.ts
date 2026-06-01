@@ -1176,6 +1176,7 @@ describe("outcome learning reports", () => {
 
     expect(report.status).toBe("completed");
     expect(report.report).toMatchObject({
+      version: 2,
       counts: {
         total_work_items: 2,
         resolved_prs: 1,
@@ -1184,18 +1185,88 @@ describe("outcome learning reports", () => {
       },
       costs: {
         resolved_known_cost_usd: 0.5,
+        strong_known_cost_usd: 0.5,
+        likely_regression_known_cost_usd: 0,
       },
     });
     expect(report.report?.insights[0]).toMatchObject({
       id: "strong_outcomes",
+      summary: expect.stringContaining("asked for tests"),
       evidence: [{
         work_item_id: resolved.workItemId,
         prompt_excerpt: "Build a focused billing export with tests and keep the UI unchanged.",
       }],
     });
+    expect(report.report?.recommendations[0]).toMatchObject({
+      id: "create_team_skill_from_strong_examples",
+      action: expect.stringContaining("Draft a Codex/Archie skill"),
+    });
     const stored = db.prepare("SELECT * FROM llm_outcome_reports").all() as any[];
     expect(stored).toHaveLength(1);
     expect(JSON.parse(stored[0].report_json).counts.resolved_prs).toBe(1);
+  });
+
+  it("includes every resolved row in the report instead of only the first dashboard page", async () => {
+    setSetting("github_bot_username", "archie-bot");
+    for (let index = 1; index <= 26; index += 1) {
+      const work = createWorkItem({ appName: `Full Report App ${index}`, title: `Merged Report Work ${index}` });
+      addRun({
+        appId: work.appId,
+        workItemId: work.workItemId,
+        conversationId: work.conversationId,
+        resultJson: JSON.stringify({ cost: 0.1 }),
+      });
+      addPullRequestArtifact(work.appId, work.workItemId, {
+        pr_url: `https://github.com/acme/repo/pull/${700 + index}`,
+        pr_number: 700 + index,
+      });
+      const dal = await import("@/lib/server/dal");
+      dal.replaceGitHubPrEvidence({
+        snapshot: {
+          app_id: work.appId,
+          work_item_id: work.workItemId,
+          owner: "acme",
+          repo: "repo",
+          pr_number: 700 + index,
+          pr_url: `https://github.com/acme/repo/pull/${700 + index}`,
+          title: `Merged report PR ${index}`,
+          state: "MERGED",
+          author_login: "archie-bot",
+          commits_count: 1,
+          issue_comments_count: 0,
+          review_comments_count: 0,
+          reviews_count: 0,
+        },
+        issue_comments: [],
+        review_comments: [],
+        reviews: [],
+        commits: [{
+          sha: `full-report-${index}`,
+          author: { login: "archie-bot" },
+          committer: { login: "archie-bot" },
+          commit: {
+            message: `Implement report work ${index}`,
+            author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
+            committer: { date: "2026-05-31T09:01:00Z" },
+          },
+        }],
+      });
+      db.prepare("UPDATE work_items SET updated_at = ? WHERE id = ?").run("2026-05-31 12:00:00", work.workItemId);
+    }
+    const { runOutcomeLearningReport } = await import("@/lib/server/outcome-reports");
+
+    const report = await runOutcomeLearningReport({
+      apps: getAppRows(),
+      rangeStart: "2026-05-01T00:00:00Z",
+      rangeEnd: "2026-06-02T00:00:00Z",
+      generatedAt: "2026-06-01T12:00:00Z",
+      userId: null,
+    });
+
+    expect(report.status).toBe("completed");
+    expect(report.report?.counts.resolved_prs).toBe(26);
+    expect(report.report?.counts.merged_prs).toBe(26);
+    expect(report.report?.costs.resolved_known_cost_usd).toBeCloseTo(2.6);
   });
 });
 

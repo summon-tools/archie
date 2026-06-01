@@ -7,6 +7,7 @@ import type {
   OutcomeLearningReportContent,
   OutcomeLearningReportExample,
   OutcomeLearningReportInsight,
+  OutcomeLearningReportRecommendation,
   OutcomeLearningReportRun,
   OutcomeRow,
 } from "@/lib/types";
@@ -110,12 +111,53 @@ function buildInsight(id: string, title: string, summary: string, rows: OutcomeR
   };
 }
 
+function buildRecommendation(
+  id: string,
+  title: string,
+  summary: string,
+  action: string,
+  rows: OutcomeRow[],
+  promptExcerpts: Map<number, string>,
+): OutcomeLearningReportRecommendation {
+  return {
+    id,
+    title,
+    summary,
+    action,
+    evidence: rows.slice(0, 3).map((row) => toExample(row, promptExcerpts)),
+  };
+}
+
 function sortByEvidenceWeight(rows: OutcomeRow[]): OutcomeRow[] {
   return rows.slice().sort((left, right) => {
     const leftWeight = (left.known_cost_usd || 0) + (left.correction_burden_score || 0) + (left.github_review_comments_count || 0);
     const rightWeight = (right.known_cost_usd || 0) + (right.correction_burden_score || 0) + (right.github_review_comments_count || 0);
     return rightWeight - leftWeight;
   });
+}
+
+function promptSignals(rows: OutcomeRow[], promptExcerpts: Map<number, string>): string[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const prompt = row.conversation_id ? (promptExcerpts.get(row.conversation_id) || "").toLowerCase() : "";
+    if (!prompt) continue;
+    const signals = new Set<string>();
+    if (/\btest(s|ing)?\b|spec\b|coverage\b/.test(prompt)) signals.add("asked for tests");
+    if (/\bfocused\b|\bsmall\b|\bscoped\b|\bonly\b|\bkeep\b|\bunchanged\b/.test(prompt)) signals.add("kept scope explicit");
+    if (/\bacceptance\b|\bcriteria\b|\bverify\b|\bvalidate\b/.test(prompt)) signals.add("gave validation criteria");
+    if (/\bexisting\b|\bmatch\b|\bconsistent\b|\bstyle\b|\bpattern\b/.test(prompt)) signals.add("referenced existing patterns");
+    if (/\bfile\b|\bcomponent\b|\broute\b|\bendpoint\b|\bmodel\b/.test(prompt)) signals.add("named concrete code areas");
+    for (const signal of signals) counts.set(signal, (counts.get(signal) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 4)
+    .map(([signal, count]) => `${signal} (${count})`);
+}
+
+function summarizeSignals(rows: OutcomeRow[], promptExcerpts: Map<number, string>, fallback: string): string {
+  const signals = promptSignals(rows, promptExcerpts);
+  return signals.length > 0 ? signals.join(", ") : fallback;
 }
 
 function buildReportContent(input: {
@@ -145,13 +187,15 @@ function buildReportContent(input: {
   }));
   const postMergeFixRows = sortByEvidenceWeight(mergedRows.filter((row) => row.regression_followup_count > 0));
   const promptExcerpts = loadPromptExcerpts(rows.map((row) => row.conversation_id).filter((id): id is number => id !== null));
+  const strongPromptSignals = summarizeSignals(strongRows, promptExcerpts, "not enough prompt evidence yet");
+  const costlyPromptSignals = summarizeSignals(costlyRows, promptExcerpts, "not enough prompt evidence yet");
 
   const insights: OutcomeLearningReportInsight[] = [];
   if (strongRows.length > 0) {
     insights.push(buildInsight(
       "strong_outcomes",
       "Strong merged outcomes worth copying",
-      `${strongRows.length} merged PR${strongRows.length === 1 ? "" : "s"} had low review pressure and no detected correction burden.`,
+      `${strongRows.length} merged PR${strongRows.length === 1 ? "" : "s"} had low review pressure and no detected correction burden. Common prompt signals: ${strongPromptSignals}.`,
       strongRows,
       promptExcerpts,
     ));
@@ -160,7 +204,7 @@ function buildReportContent(input: {
     insights.push(buildInsight(
       "costly_rework",
       "Merged work with correction burden",
-      `${costlyRows.length} merged PR${costlyRows.length === 1 ? "" : "s"} carried costly rework signals from comments, reviews, or human follow-up commits.`,
+      `${costlyRows.length} merged PR${costlyRows.length === 1 ? "" : "s"} carried costly rework signals from comments, reviews, or human follow-up commits. Prompt signals in this set: ${costlyPromptSignals}.`,
       costlyRows,
       promptExcerpts,
     ));
@@ -217,16 +261,52 @@ function buildReportContent(input: {
   const likelyFollowupCount = mergedRows.reduce((sum, row) => sum + row.regression_followup_count, 0);
   const costlyCost = sumKnownCost(costlyRows);
   const resolvedCost = sumKnownCost(resolvedRows);
+  const strongCost = sumKnownCost(strongRows);
+  const postMergeFixCost = sumKnownCost(postMergeFixRows);
+  const likelyRegressionCost = sumKnownCost(mergedRows.filter((row) => row.regression_followup_count > 0));
+  const recommendations: OutcomeLearningReportRecommendation[] = [];
+
+  if (strongRows.length > 0) {
+    recommendations.push(buildRecommendation(
+      "create_team_skill_from_strong_examples",
+      "Create a reusable team skill from strong examples",
+      `Package the strongest prompt and review patterns into a shared skill. The strongest merged examples most often show: ${strongPromptSignals}.`,
+      "Draft a Codex/Archie skill with the observed prompt structure, validation checklist, and example constraints from the linked sessions.",
+      strongRows,
+      promptExcerpts,
+    ));
+  }
+  if (costlyRows.length > 0 || postMergeFixRows.length > 0) {
+    recommendations.push(buildRecommendation(
+      "add_regression_guardrail_doc",
+      "Add a guardrail doc for costly or regression-prone work",
+      `${costlyRows.length} costly merged PR${costlyRows.length === 1 ? "" : "s"} and ${postMergeFixRows.length} merged PR${postMergeFixRows.length === 1 ? "" : "s"} with likely post-merge fixes indicate reusable checks are missing.`,
+      "Create or update an agent-facing doc/checklist that names the recurring failure mode, required tests, and review evidence expected before opening the PR.",
+      costlyRows.length > 0 ? costlyRows : postMergeFixRows,
+      promptExcerpts,
+    ));
+  }
+  if (lowConfidenceRows.length > 0) {
+    recommendations.push(buildRecommendation(
+      "improve_evidence_coverage",
+      "Improve evidence coverage before drawing stronger conclusions",
+      `${lowConfidenceRows.length} resolved row${lowConfidenceRows.length === 1 ? "" : "s"} have low-confidence or missing evidence.`,
+      "Sync GitHub evidence, assess review evidence, and keep PR descriptions/comments complete so future reports can explain outcomes with higher confidence.",
+      lowConfidenceRows,
+      promptExcerpts,
+    ));
+  }
 
   const summaryBullets = [
     `${resolvedRows.length} resolved PR${resolvedRows.length === 1 ? "" : "s"} are included; ${pendingRows.length} pending PR${pendingRows.length === 1 ? "" : "s"} are excluded from conclusions.`,
     `${mergedRows.length} merged PR${mergedRows.length === 1 ? "" : "s"}, ${closedRows.length} closed-unmerged PR${closedRows.length === 1 ? "" : "s"}, and ${assessedResolved.length} resolved PR${assessedResolved.length === 1 ? "" : "s"} with LLM evidence assessment.`,
     `${likelyFollowupCount} likely regression, revert, or agent-correction follow-up${likelyFollowupCount === 1 ? "" : "s"} detected after merged PRs.`,
     `Known resolved LLM cost is $${resolvedCost.toFixed(4)}; costly-rework known cost is $${costlyCost.toFixed(4)}.`,
+    `At-risk known LLM spend from merged PRs with likely post-merge fixes is $${likelyRegressionCost.toFixed(4)}.`,
   ];
 
   return {
-    version: 1,
+    version: 2,
     generated_at: input.generatedAt,
     range: input.range,
     counts: {
@@ -245,10 +325,14 @@ function buildReportContent(input: {
       resolved_known_cost_usd: resolvedCost,
       merged_known_cost_usd: sumKnownCost(mergedRows),
       costly_rework_known_cost_usd: costlyCost,
+      strong_known_cost_usd: strongCost,
+      post_merge_followup_known_cost_usd: postMergeFixCost,
+      likely_regression_known_cost_usd: likelyRegressionCost,
       unknown_cost_rows: resolvedRows.filter((row) => row.known_cost_usd === null || row.unknown_cost_runs > 0).length,
     },
     summary_bullets: summaryBullets,
     insights,
+    recommendations,
     sections: {
       strong_examples: strongRows.slice(0, 5).map((row) => toExample(row, promptExcerpts)),
       costly_rework_examples: costlyRows.slice(0, 5).map((row) => toExample(row, promptExcerpts)),
