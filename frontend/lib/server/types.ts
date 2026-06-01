@@ -293,6 +293,23 @@ export interface LlmOutcomeAssessmentRow {
   created_at: string;
 }
 
+export interface LlmOutcomeReportRow {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  range_days: number | null;
+  total_work_items: number;
+  resolved_pr_count: number;
+  report_json: string | null;
+  warnings_json: string | null;
+  error_text: string | null;
+  generated_at: string;
+  created_at: string;
+}
+
 export type AppFileStatus = "uploading" | "available" | "deleted";
 export type AppFileLinkType = "attachment" | "context";
 

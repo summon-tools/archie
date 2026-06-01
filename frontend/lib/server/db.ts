@@ -393,6 +393,26 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_assessments_created_at ON llm_outcome_assessments(created_at);
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_assessments_input_hash ON llm_outcome_assessments(input_hash);
 
+    CREATE TABLE IF NOT EXISTS llm_outcome_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      requested_by_user_id INTEGER DEFAULT NULL,
+      mode TEXT NOT NULL DEFAULT 'manual' CHECK(mode IN ('manual', 'scheduled')),
+      status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed', 'failed')),
+      range_start TEXT DEFAULT NULL,
+      range_end TEXT DEFAULT NULL,
+      range_days INTEGER DEFAULT NULL,
+      total_work_items INTEGER NOT NULL DEFAULT 0,
+      resolved_pr_count INTEGER NOT NULL DEFAULT 0,
+      report_json TEXT DEFAULT NULL,
+      warnings_json TEXT DEFAULT NULL,
+      error_text TEXT DEFAULT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (requested_by_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_reports_generated_at ON llm_outcome_reports(generated_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_reports_status ON llm_outcome_reports(status);
+
     CREATE TABLE IF NOT EXISTS app_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL,

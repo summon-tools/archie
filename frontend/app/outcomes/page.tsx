@@ -4,8 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
-import { getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeAttributionClassification, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import { getLatestOutcomeLearningReport, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
+import type { OutcomeAttributionClassification, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 
@@ -141,16 +141,20 @@ function EmptyState() {
 export default function OutcomesPage() {
   const [data, setData] = useState<OutcomesSummaryResponse | null>(null);
   const [settings, setSettings] = useState<OutcomesGitHubSyncSettings | null>(null);
+  const [latestReport, setLatestReport] = useState<OutcomeLearningReportRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
   const [assessing, setAssessing] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
   const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
+  const [reportMessage, setReportMessage] = useState<string | null>(null);
   const [syncRangeDays, setSyncRangeDays] = useState("14");
   const [snapshotRangeDays, setSnapshotRangeDays] = useState("14");
+  const [reportRangeDays, setReportRangeDays] = useState("30");
   const [appFilter, setAppFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
@@ -160,10 +164,11 @@ export default function OutcomesPage() {
 
   const loadData = useCallback(() => {
     setLoading(true);
-    Promise.all([getOutcomesSummary(), getOutcomesSettings()])
-      .then(([summary, loadedSettings]) => {
+    Promise.all([getOutcomesSummary(), getOutcomesSettings(), getLatestOutcomeLearningReport()])
+      .then(([summary, loadedSettings, reportResponse]) => {
         setData(summary);
         setSettings(loadedSettings);
+        setLatestReport(reportResponse.report);
         setSyncRangeDays(String(loadedSettings.observation_window_days));
         setSnapshotRangeDays(String(loadedSettings.observation_window_days));
         setError(null);
@@ -259,6 +264,25 @@ export default function OutcomesPage() {
       setAssessmentMessage(err instanceof Error ? err.message : "Outcome evidence assessment failed");
     } finally {
       setAssessing(false);
+    }
+  }
+
+  async function handleRunReport() {
+    const days = Number(reportRangeDays);
+    if (!Number.isInteger(days) || days < 1) return;
+    setGeneratingReport(true);
+    setReportMessage(null);
+    try {
+      const result = await runOutcomeLearningReport({ range_days: days });
+      setLatestReport(result.report);
+      const report = result.report.report;
+      setReportMessage(`Generated report with ${report?.counts.resolved_prs ?? 0} resolved PR${report?.counts.resolved_prs === 1 ? "" : "s"} and ${report?.insights.length ?? 0} insight${report?.insights.length === 1 ? "" : "s"}.`);
+      const summary = await getOutcomesSummary();
+      setData(summary);
+    } catch (err) {
+      setReportMessage(err instanceof Error ? err.message : "Outcome learning report failed");
+    } finally {
+      setGeneratingReport(false);
     }
   }
 
@@ -447,6 +471,44 @@ export default function OutcomesPage() {
             </section>
 
             <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-th-primary">Learning report</h2>
+                  <div className="mt-1 text-xs text-th-muted">
+                    {latestReport?.report
+                      ? `Latest report generated ${formatDate(latestReport.generated_at)} with ${latestReport.report.counts.resolved_prs} resolved PR${latestReport.report.counts.resolved_prs === 1 ? "" : "s"}.`
+                      : "No learning report generated yet."}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <FilterSelect
+                    label="Window"
+                    value={reportRangeDays}
+                    onChange={setReportRangeDays}
+                    includeAll={false}
+                    options={[
+                      { value: "14", label: "Last 14 days" },
+                      { value: "30", label: "Last 30 days" },
+                      { value: "60", label: "Last 60 days" },
+                      { value: "90", label: "Last 90 days" },
+                    ]}
+                  />
+                  <button
+                    onClick={handleRunReport}
+                    disabled={generatingReport}
+                    className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+                  >
+                    {generatingReport ? "Generating..." : "Generate report"}
+                  </button>
+                </div>
+              </div>
+              {reportMessage && (
+                <div className="mt-3 text-xs text-th-muted">{reportMessage}</div>
+              )}
+              <LearningReportPreview report={latestReport} />
+            </section>
+
+            <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-sm font-semibold text-th-primary">Outcome funnel</h2>
                 <span className="text-xs text-th-muted">{data.counts.total_work_items} total work item{data.counts.total_work_items === 1 ? "" : "s"}</span>
@@ -547,6 +609,114 @@ function FilterSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function LearningReportPreview({ report }: { report: OutcomeLearningReportRun | null }) {
+  const content = report?.report;
+  if (!content) {
+    return (
+      <div className="mt-4 border-t border-th pt-4 text-sm text-th-muted">
+        Generate a report after syncing GitHub evidence and recomputing snapshots. Only merged and closed-unmerged PRs are used for learning conclusions.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 border-t border-th pt-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="bg-th-subtle rounded-lg p-3">
+          <div className="text-xs text-th-muted">Resolved PRs</div>
+          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.resolved_prs}</div>
+          <div className="mt-1 text-xs text-th-muted">{content.counts.pending_prs_excluded} pending excluded</div>
+        </div>
+        <div className="bg-th-subtle rounded-lg p-3">
+          <div className="text-xs text-th-muted">Merged</div>
+          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.merged_prs}</div>
+          <div className="mt-1 text-xs text-th-muted">{content.counts.closed_unmerged_prs} closed unmerged</div>
+        </div>
+        <div className="bg-th-subtle rounded-lg p-3">
+          <div className="text-xs text-th-muted">Resolved cost</div>
+          <div className="mt-1 text-lg font-semibold text-th-primary">{formatCurrency(content.costs.resolved_known_cost_usd)}</div>
+          <div className="mt-1 text-xs text-th-muted">{content.costs.unknown_cost_rows} rows incomplete</div>
+        </div>
+        <div className="bg-th-subtle rounded-lg p-3">
+          <div className="text-xs text-th-muted">Assessed</div>
+          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.assessed_resolved_prs}</div>
+          <div className="mt-1 text-xs text-th-muted">resolved PRs</div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Summary</div>
+          <ul className="mt-2 space-y-1 text-sm text-th-secondary">
+            {content.summary_bullets.map((bullet) => (
+              <li key={bullet}>{bullet}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Latest run</div>
+          <div className="mt-2 text-sm text-th-secondary">
+            {formatDate(report.generated_at)} - {report.mode} - {report.status}
+          </div>
+          <div className="mt-1 text-xs text-th-muted">
+            Range {content.range.days ? `last ${content.range.days} days` : "custom"}; generated from session/PR examples, not developer ranking.
+          </div>
+          {content.warnings.length > 0 && (
+            <div className="mt-2 text-xs text-st-yellow">{content.warnings[0]}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {content.insights.map((insight) => (
+          <ReportInsight key={insight.id} insight={insight} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReportInsight({ insight }: { insight: OutcomeLearningReportInsight }) {
+  return (
+    <div className="rounded-lg border border-th bg-th-surface p-3">
+      <div className="text-sm font-semibold text-th-primary">{insight.title}</div>
+      <div className="mt-1 text-sm text-th-secondary">{insight.summary}</div>
+      {insight.evidence.length > 0 && (
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+          {insight.evidence.map((example) => (
+            <ReportExample key={`${insight.id}-${example.work_item_id}`} example={example} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportExample({ example }: { example: OutcomeLearningReportExample }) {
+  return (
+    <div className="rounded-lg bg-th-subtle p-3 text-xs">
+      <Link href={`/apps/${example.app_id}/conversation/${example.work_item_id}`} className="font-semibold text-th-primary hover:underline">
+        {example.work_item_title}
+      </Link>
+      <div className="mt-1 text-th-muted">{example.app_name}</div>
+      <div className="mt-2 text-th-secondary">
+        {qualityLabel(example.quality_band)} - {example.known_cost_usd === null ? "unknown cost" : formatCurrency(example.known_cost_usd)}
+      </div>
+      {example.pr_url && (
+        <a href={example.pr_url} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-th-secondary hover:underline">
+          PR #{example.pr_number || "?"}
+        </a>
+      )}
+      {example.assessment_summary && (
+        <div className="mt-2 text-th-muted">{example.assessment_summary}</div>
+      )}
+      {example.prompt_excerpt && (
+        <div className="mt-2 text-th-dimmed">{example.prompt_excerpt}</div>
+      )}
+    </div>
   );
 }
 

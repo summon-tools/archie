@@ -616,3 +616,91 @@ export interface OutcomesAssessmentRunResponse {
   generated_at: string;
   warnings: string[];
 }
+
+export interface OutcomeLearningReportExample {
+  app_id: number;
+  app_name: string;
+  work_item_id: number;
+  work_item_title: string;
+  conversation_id: number | null;
+  provider_id: string | null;
+  model_id: string | null;
+  outcome_state: OutcomeState;
+  quality_band: OutcomeQualityBand | null;
+  known_cost_usd: number | null;
+  unknown_cost_runs: number;
+  pr_number: number | null;
+  pr_url: string | null;
+  assessment_summary: string | null;
+  assessment_confidence: OutcomeAttributionConfidence | null;
+  prompt_excerpt: string | null;
+  evidence_ids: string[];
+}
+
+export interface OutcomeLearningReportInsight {
+  id: string;
+  title: string;
+  summary: string;
+  evidence: OutcomeLearningReportExample[];
+}
+
+export interface OutcomeLearningReportContent {
+  version: number;
+  generated_at: string;
+  range: {
+    start: string | null;
+    end: string | null;
+    days: number | null;
+  };
+  counts: {
+    total_work_items: number;
+    resolved_prs: number;
+    merged_prs: number;
+    closed_unmerged_prs: number;
+    pending_prs_excluded: number;
+    no_pr_excluded: number;
+    unknown_excluded: number;
+    assessed_resolved_prs: number;
+  };
+  costs: {
+    resolved_known_cost_usd: number;
+    merged_known_cost_usd: number;
+    costly_rework_known_cost_usd: number;
+    unknown_cost_rows: number;
+  };
+  summary_bullets: string[];
+  insights: OutcomeLearningReportInsight[];
+  sections: {
+    strong_examples: OutcomeLearningReportExample[];
+    costly_rework_examples: OutcomeLearningReportExample[];
+    clarification_examples: OutcomeLearningReportExample[];
+    abandoned_examples: OutcomeLearningReportExample[];
+    low_confidence_examples: OutcomeLearningReportExample[];
+  };
+  warnings: string[];
+}
+
+export interface OutcomeLearningReportRun {
+  id: number;
+  requested_by_user_id: number | null;
+  mode: "manual" | "scheduled";
+  status: "completed" | "failed";
+  range_start: string | null;
+  range_end: string | null;
+  range_days: number | null;
+  total_work_items: number;
+  resolved_pr_count: number;
+  report: OutcomeLearningReportContent | null;
+  warnings: string[];
+  error_text: string | null;
+  generated_at: string;
+  created_at: string;
+}
+
+export interface OutcomesLearningReportResponse {
+  report: OutcomeLearningReportRun | null;
+}
+
+export interface OutcomesLearningReportRunResponse {
+  report: OutcomeLearningReportRun;
+}

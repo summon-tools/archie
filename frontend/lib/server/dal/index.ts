@@ -10,6 +10,7 @@ export * from "./github-connections";
 export * from "./github-evidence";
 export * from "./outcome-snapshots";
 export * from "./outcome-assessments";
+export * from "./outcome-reports";
 export * from "./notifications";
 export * from "./automation-configs";
 export * from "./rooms";

@@ -865,6 +865,117 @@ describe("outcome evidence assessment", () => {
   });
 });
 
+describe("outcome learning reports", () => {
+  it("generates a persisted report from resolved PR evidence and excludes pending work from conclusions", async () => {
+    setSetting("github_bot_username", "archie-bot");
+    setSetting("github_bot_display_name", "Archie");
+    setSetting("github_bot_email", "bot@example.com");
+    const resolved = createWorkItem({ appName: "Report App", title: "Resolved Report Work" });
+    db.prepare("INSERT INTO messages (conversation_id, seq, role, kind, body_md) VALUES (?, 1, 'user', 'text', ?)")
+      .run(resolved.conversationId, "Build a focused billing export with tests and keep the UI unchanged.");
+    addRun({
+      appId: resolved.appId,
+      workItemId: resolved.workItemId,
+      conversationId: resolved.conversationId,
+      resultJson: JSON.stringify({ cost: 0.5 }),
+    });
+    addPullRequestArtifact(resolved.appId, resolved.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/41",
+      pr_number: 41,
+    });
+    const pending = createWorkItem({ appName: "Report App", title: "Pending Report Work" });
+    addPullRequestArtifact(pending.appId, pending.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/42",
+      pr_number: 42,
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: resolved.appId,
+        work_item_id: resolved.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 41,
+        pr_url: "https://github.com/acme/repo/pull/41",
+        title: "Resolved report PR",
+        state: "MERGED",
+        author_login: "archie-bot",
+        commits_count: 1,
+        issue_comments_count: 0,
+        review_comments_count: 0,
+        reviews_count: 0,
+      },
+      issue_comments: [],
+      review_comments: [],
+      reviews: [],
+      commits: [{
+        sha: "report-agent",
+        author: { login: "archie-bot" },
+        committer: { login: "archie-bot" },
+        commit: {
+          message: "Implement billing export",
+          author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
+          committer: { date: "2026-05-31T09:01:00Z" },
+        },
+      }],
+    });
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: pending.appId,
+        work_item_id: pending.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 42,
+        pr_url: "https://github.com/acme/repo/pull/42",
+        title: "Pending report PR",
+        state: "OPEN",
+        commits_count: 1,
+        issue_comments_count: 0,
+        review_comments_count: 0,
+        reviews_count: 0,
+      },
+      issue_comments: [],
+      review_comments: [],
+      reviews: [],
+      commits: [],
+    });
+    db.prepare("UPDATE work_items SET updated_at = ? WHERE id IN (?, ?)")
+      .run("2026-05-31 12:00:00", resolved.workItemId, pending.workItemId);
+    const { runOutcomeLearningReport } = await import("@/lib/server/outcome-reports");
+
+    const report = await runOutcomeLearningReport({
+      apps: getAppRows(),
+      rangeStart: "2026-05-01T00:00:00Z",
+      rangeEnd: "2026-06-02T00:00:00Z",
+      generatedAt: "2026-06-01T12:00:00Z",
+      userId: null,
+    });
+
+    expect(report.status).toBe("completed");
+    expect(report.report).toMatchObject({
+      counts: {
+        total_work_items: 2,
+        resolved_prs: 1,
+        merged_prs: 1,
+        pending_prs_excluded: 1,
+      },
+      costs: {
+        resolved_known_cost_usd: 0.5,
+      },
+    });
+    expect(report.report?.insights[0]).toMatchObject({
+      id: "strong_outcomes",
+      evidence: [{
+        work_item_id: resolved.workItemId,
+        prompt_excerpt: "Build a focused billing export with tests and keep the UI unchanged.",
+      }],
+    });
+    const stored = db.prepare("SELECT * FROM llm_outcome_reports").all() as any[];
+    expect(stored).toHaveLength(1);
+    expect(JSON.parse(stored[0].report_json).counts.resolved_prs).toBe(1);
+  });
+});
+
 describe("GET /api/outcomes/summary", () => {
   it("requires authentication", async () => {
     const { GET } = await import("@/app/api/outcomes/summary/route");
@@ -955,6 +1066,53 @@ describe("POST /api/outcomes/assessments/run", () => {
       assessment_ids: [],
       recomputed_snapshots: 0,
     });
+  });
+});
+
+describe("outcome report APIs", () => {
+  it("requires authentication for latest reports", async () => {
+    const { GET } = await import("@/app/api/outcomes/reports/latest/route");
+
+    const response = await GET(makeRequest("http://localhost:8080/api/outcomes/reports/latest"));
+
+    expect(response.status).toBe(401);
+  });
+
+  it("requires authentication for report generation", async () => {
+    const { POST } = await import("@/app/api/outcomes/reports/run/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/reports/run"));
+
+    expect(response.status).toBe(401);
+  });
+
+  it("generates and returns the latest authenticated report", async () => {
+    const token = await createAuthToken();
+    const work = createWorkItem({ appName: "Report API App" });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      resultJson: JSON.stringify({ cost: 0.2 }),
+    });
+    const { POST } = await import("@/app/api/outcomes/reports/run/route");
+    const { GET } = await import("@/app/api/outcomes/reports/latest/route");
+
+    const runResponse = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/reports/run", token, { range_days: 30 }));
+    const runBody = await runResponse.json();
+    const latestResponse = await GET(makeRequest("http://localhost:8080/api/outcomes/reports/latest", token));
+    const latestBody = await latestResponse.json();
+
+    expect(runResponse.status).toBe(200);
+    expect(runBody.report).toMatchObject({
+      status: "completed",
+      range_days: 30,
+      total_work_items: 1,
+      resolved_pr_count: 0,
+    });
+    expect(latestResponse.status).toBe(200);
+    expect(latestBody.report.id).toBe(runBody.report.id);
+    expect(latestBody.report.report.counts.no_pr_excluded).toBe(1);
   });
 });
 
