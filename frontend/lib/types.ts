@@ -408,3 +408,78 @@ export interface Notification {
   read_at: string | null;
   created_at: string;
 }
+
+// ── Global LLM Outcomes ───────────────────────────────────────────
+
+export type OutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged" | "unknown";
+export type OutcomeEvidenceCompleteness = "no_pr_artifact" | "local_pr_artifact" | "github_enriched" | "incomplete";
+
+export interface OutcomeSummaryCounts {
+  total_work_items: number;
+  total_sessions: number;
+  pr_linked_work: number;
+  pending_prs: number;
+  merged_prs: number;
+  closed_unmerged_prs: number;
+  no_pr_work: number;
+  unknown_outcome: number;
+  rows_with_unknown_cost: number;
+  unknown_cost_runs: number;
+}
+
+export interface OutcomeCostBuckets {
+  total_known_cost_usd: number;
+  pending_pr_cost_usd: number;
+  merged_pr_cost_usd: number;
+  closed_unmerged_cost_usd: number;
+  no_pr_cost_usd: number;
+  unknown_outcome_cost_usd: number;
+}
+
+export interface OutcomeRow {
+  id: string;
+  app_id: number;
+  app_name: string;
+  app_github_repo: string | null;
+  work_item_id: number;
+  work_item_title: string;
+  work_item_status: string;
+  conversation_id: number | null;
+  conversation_title: string | null;
+  branch_name: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  session_id: number | null;
+  external_session_id: string | null;
+  session_status: string | null;
+  latest_run_id: number | null;
+  latest_run_status: string | null;
+  latest_run_workflow_key: string | null;
+  run_count: number;
+  known_cost_usd: number | null;
+  unknown_cost_runs: number;
+  pr_number: number | null;
+  pr_url: string | null;
+  pr_title: string | null;
+  pr_state: "OPEN" | "CLOSED" | "MERGED" | "UNKNOWN" | null;
+  outcome_state: OutcomeState;
+  evidence_completeness: OutcomeEvidenceCompleteness;
+  warnings: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutcomesSummaryResponse {
+  generated_at: string;
+  counts: OutcomeSummaryCounts;
+  costs: OutcomeCostBuckets;
+  rows: OutcomeRow[];
+  filters: {
+    apps: { id: number; name: string }[];
+    providers: string[];
+    models: string[];
+    run_statuses: string[];
+    outcome_states: OutcomeState[];
+  };
+  warnings: string[];
+}

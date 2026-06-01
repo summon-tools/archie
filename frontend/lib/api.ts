@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse } from "./types";
 
 const BASE = "/api";
 
@@ -100,6 +100,12 @@ export async function restartApp(appId: number): Promise<{ success: boolean; mes
 
 export async function deleteApp(appId: number, deleteFiles = false): Promise<{ success: boolean; message: string; files_deleted: boolean }> {
   return fetchJSON(`${BASE}/apps/${appId}?delete_files=${deleteFiles}`, { method: "DELETE" });
+}
+
+// --- Global outcomes ---
+
+export async function getOutcomesSummary(): Promise<OutcomesSummaryResponse> {
+  return fetchJSON(`${BASE}/outcomes/summary`);
 }
 
 // --- Conversation endpoints ---
