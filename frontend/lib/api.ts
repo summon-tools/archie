@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings, OutcomesSnapshotRecomputeResponse, OutcomesAssessmentRunResponse, OutcomesLearningReportResponse, OutcomesLearningReportRunResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings, OutcomesSnapshotRecomputeResponse, OutcomesAssessmentRunResponse, OutcomesLearningReportResponse, OutcomesLearningReportRunResponse, OutcomesFollowupDetectionResponse } from "./types";
 
 const BASE = "/api";
 
@@ -172,6 +172,19 @@ export async function runOutcomeLearningReport(data: {
   range_end?: string;
 } = {}): Promise<OutcomesLearningReportRunResponse> {
   return fetchJSON(`${BASE}/outcomes/reports/run`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function detectOutcomeFollowups(data: {
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+  observation_days?: number;
+  max_candidates?: number;
+} = {}): Promise<OutcomesFollowupDetectionResponse> {
+  return fetchJSON(`${BASE}/outcomes/followups/detect`, {
     method: "POST",
     body: JSON.stringify(data),
   });

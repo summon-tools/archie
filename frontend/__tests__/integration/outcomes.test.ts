@@ -976,6 +976,132 @@ describe("outcome learning reports", () => {
   });
 });
 
+describe("outcome follow-up detection", () => {
+  it("links later PRs that likely fix regressions from merged Archie PRs", async () => {
+    setSetting("github_bot_username", "archie-bot");
+    setSetting("github_bot_display_name", "Archie");
+    setSetting("github_bot_email", "bot@example.com");
+    const work = createWorkItem({ appName: "Follow-up App", title: "Checkout totals" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/51",
+      pr_number: 51,
+    });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      resultJson: JSON.stringify({ cost: 0.7 }),
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: work.appId,
+        work_item_id: work.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 51,
+        pr_url: "https://github.com/acme/repo/pull/51",
+        title: "Add checkout totals",
+        state: "MERGED",
+        author_login: "archie-bot",
+        merged_at: "2026-05-20T12:00:00Z",
+        github_created_at: "2026-05-20T10:00:00Z",
+        github_updated_at: "2026-05-20T12:00:00Z",
+        commits_count: 1,
+        issue_comments_count: 0,
+        review_comments_count: 0,
+        reviews_count: 0,
+        raw_json: JSON.stringify({ body: "Implements checkout totals." }),
+      },
+      issue_comments: [],
+      review_comments: [],
+      reviews: [],
+      commits: [{
+        sha: "checkout-source",
+        author: { login: "archie-bot" },
+        committer: { login: "archie-bot" },
+        commit: {
+          message: "Add checkout totals",
+          author: { name: "Archie", email: "bot@example.com", date: "2026-05-20T10:00:00Z" },
+          committer: { date: "2026-05-20T10:01:00Z" },
+        },
+      }],
+    });
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+    recomputeOutcomeSnapshots({ apps: getAppRows() });
+    const { runOutcomeFollowupDetection } = await import("@/lib/server/outcome-followups");
+
+    const result = await runOutcomeFollowupDetection({
+      apps: getAppRows(),
+      githubToken: "token",
+      rangeStart: "2026-05-01T00:00:00Z",
+      rangeEnd: "2026-06-01T00:00:00Z",
+      observationDays: 14,
+      fetchRepositoryPullRequests: async () => [
+        {
+          number: 51,
+          html_url: "https://github.com/acme/repo/pull/51",
+          title: "Add checkout totals",
+          body: "Implements checkout totals.",
+          state: "closed",
+          merged_at: "2026-05-20T12:00:00Z",
+          created_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T12:00:00Z",
+          user: { login: "archie-bot" },
+          head: { ref: "feature/checkout" },
+          base: { ref: "main" },
+        },
+        {
+          number: 52,
+          html_url: "https://github.com/acme/repo/pull/52",
+          title: "Fix regression in checkout totals",
+          body: "Fixes #51 where checkout totals broke discounts.",
+          state: "closed",
+          merged_at: "2026-05-22T12:00:00Z",
+          created_at: "2026-05-22T10:00:00Z",
+          updated_at: "2026-05-22T12:00:00Z",
+          user: { login: "engineer" },
+          head: { ref: "fix/checkout-totals" },
+          base: { ref: "main" },
+        },
+      ],
+      fetchPullRequestFiles: async ({ pr_number }) => [
+        { filename: pr_number === 51 ? "src/checkout.ts" : "src/checkout.ts", status: "modified", additions: 3, deletions: 1, changes: 4 },
+      ],
+      verifier: async (packet) => {
+        expect(packet.source.pr_number).toBe(51);
+        expect(packet.followup.pr_number).toBe(52);
+        expect(packet.deterministic.signals).toContain("references_source_pr");
+        return {
+          relation_type: "regression_fix",
+          confidence: "high",
+          evidence_ids: ["references_source_pr", "file_overlap:1"],
+          summary: "The later PR explicitly fixes a regression from the source PR.",
+        };
+      },
+    });
+
+    expect(result).toMatchObject({
+      scanned_source_prs: 1,
+      candidate_count: 1,
+      detected_count: 1,
+      regression_count: 1,
+    });
+    const { buildOutcomesSummary } = await loadOutcomes();
+    const summary = await buildOutcomesSummary({ apps: getAppRows() });
+    expect(summary.rows[0]).toMatchObject({
+      followup_count: 1,
+      regression_followup_count: 1,
+    });
+    expect(summary.rows[0].followup_evidence[0]).toMatchObject({
+      relation_type: "regression_fix",
+      confidence: "high",
+      followup_pr_number: 52,
+      summary: "The later PR explicitly fixes a regression from the source PR.",
+    });
+  });
+});
+
 describe("GET /api/outcomes/summary", () => {
   it("requires authentication", async () => {
     const { GET } = await import("@/app/api/outcomes/summary/route");
@@ -1113,6 +1239,16 @@ describe("outcome report APIs", () => {
     expect(latestResponse.status).toBe(200);
     expect(latestBody.report.id).toBe(runBody.report.id);
     expect(latestBody.report.report.counts.no_pr_excluded).toBe(1);
+  });
+});
+
+describe("POST /api/outcomes/followups/detect", () => {
+  it("requires authentication", async () => {
+    const { POST } = await import("@/app/api/outcomes/followups/detect/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/followups/detect"));
+
+    expect(response.status).toBe(401);
   });
 });
 

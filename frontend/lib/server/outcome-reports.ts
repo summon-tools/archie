@@ -94,6 +94,8 @@ function toExample(row: OutcomeRow, promptExcerpts: Map<number, string>): Outcom
     pr_url: row.pr_url,
     assessment_summary: row.assessment_summary || assessment?.summary || null,
     assessment_confidence: row.assessment_confidence || assessment?.confidence || null,
+    followup_count: row.followup_count,
+    regression_followup_count: row.regression_followup_count,
     prompt_excerpt: row.conversation_id ? promptExcerpts.get(row.conversation_id) || null : null,
     evidence_ids: assessment?.evidence_ids || [],
   };
@@ -141,6 +143,7 @@ function buildReportContent(input: {
   const lowConfidenceRows = sortByEvidenceWeight(resolvedRows.filter((row) => {
     return row.quality_confidence === "low" || row.attribution_confidence === "low" || row.assessment_confidence === "low" || !row.snapshot_evidence;
   }));
+  const postMergeFixRows = sortByEvidenceWeight(mergedRows.filter((row) => row.regression_followup_count > 0));
   const promptExcerpts = loadPromptExcerpts(rows.map((row) => row.conversation_id).filter((id): id is number => id !== null));
 
   const insights: OutcomeLearningReportInsight[] = [];
@@ -168,6 +171,15 @@ function buildReportContent(input: {
       "Clarification-heavy review is not always rework",
       `${clarificationRows.length} merged PR${clarificationRows.length === 1 ? "" : "s"} had clarification or expected-iteration evidence without being classified as correction work.`,
       clarificationRows,
+      promptExcerpts,
+    ));
+  }
+  if (postMergeFixRows.length > 0) {
+    insights.push(buildInsight(
+      "post_merge_fixes",
+      "Post-merge fixes need source review",
+      `${postMergeFixRows.length} merged PR${postMergeFixRows.length === 1 ? "" : "s"} had likely regression, revert, or agent-correction follow-up evidence inside the observation window.`,
+      postMergeFixRows,
       promptExcerpts,
     ));
   }
@@ -202,12 +214,14 @@ function buildReportContent(input: {
   const noPrRows = rows.filter((row) => row.outcome_state === "no_pr");
   const unknownRows = rows.filter((row) => row.outcome_state === "unknown");
   const assessedResolved = resolvedRows.filter((row) => row.assessment_status === "completed");
+  const likelyFollowupCount = mergedRows.reduce((sum, row) => sum + row.regression_followup_count, 0);
   const costlyCost = sumKnownCost(costlyRows);
   const resolvedCost = sumKnownCost(resolvedRows);
 
   const summaryBullets = [
     `${resolvedRows.length} resolved PR${resolvedRows.length === 1 ? "" : "s"} are included; ${pendingRows.length} pending PR${pendingRows.length === 1 ? "" : "s"} are excluded from conclusions.`,
     `${mergedRows.length} merged PR${mergedRows.length === 1 ? "" : "s"}, ${closedRows.length} closed-unmerged PR${closedRows.length === 1 ? "" : "s"}, and ${assessedResolved.length} resolved PR${assessedResolved.length === 1 ? "" : "s"} with LLM evidence assessment.`,
+    `${likelyFollowupCount} likely regression, revert, or agent-correction follow-up${likelyFollowupCount === 1 ? "" : "s"} detected after merged PRs.`,
     `Known resolved LLM cost is $${resolvedCost.toFixed(4)}; costly-rework known cost is $${costlyCost.toFixed(4)}.`,
   ];
 
@@ -224,6 +238,8 @@ function buildReportContent(input: {
       no_pr_excluded: noPrRows.length,
       unknown_excluded: unknownRows.length,
       assessed_resolved_prs: assessedResolved.length,
+      post_merge_followups: mergedRows.reduce((sum, row) => sum + row.followup_count, 0),
+      likely_regression_followups: mergedRows.reduce((sum, row) => sum + row.regression_followup_count, 0),
     },
     costs: {
       resolved_known_cost_usd: resolvedCost,
@@ -237,6 +253,7 @@ function buildReportContent(input: {
       strong_examples: strongRows.slice(0, 5).map((row) => toExample(row, promptExcerpts)),
       costly_rework_examples: costlyRows.slice(0, 5).map((row) => toExample(row, promptExcerpts)),
       clarification_examples: clarificationRows.slice(0, 5).map((row) => toExample(row, promptExcerpts)),
+      post_merge_fix_examples: postMergeFixRows.slice(0, 5).map((row) => toExample(row, promptExcerpts)),
       abandoned_examples: sortByEvidenceWeight(closedRows).slice(0, 5).map((row) => toExample(row, promptExcerpts)),
       low_confidence_examples: lowConfidenceRows.slice(0, 5).map((row) => toExample(row, promptExcerpts)),
     },

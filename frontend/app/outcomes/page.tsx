@@ -4,8 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
-import { getLatestOutcomeLearningReport, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeAttributionClassification, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import { detectOutcomeFollowups, getLatestOutcomeLearningReport, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
+import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 
@@ -103,6 +103,18 @@ function followupTypeLabel(value: string): string {
   }
 }
 
+function followupRelationLabel(value: OutcomeFollowupRelation | string): string {
+  switch (value) {
+    case "expected_iteration": return "Expected iteration";
+    case "routine_followup": return "Routine follow-up";
+    case "agent_correction": return "Agent correction";
+    case "regression_fix": return "Regression fix";
+    case "revert": return "Revert";
+    case "no_relation": return "No relation";
+    default: return "Unknown";
+  }
+}
+
 function StatCard({
   label,
   value,
@@ -148,13 +160,16 @@ export default function OutcomesPage() {
   const [recomputing, setRecomputing] = useState(false);
   const [assessing, setAssessing] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [detectingFollowups, setDetectingFollowups] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
   const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
   const [reportMessage, setReportMessage] = useState<string | null>(null);
+  const [followupMessage, setFollowupMessage] = useState<string | null>(null);
   const [syncRangeDays, setSyncRangeDays] = useState("14");
   const [snapshotRangeDays, setSnapshotRangeDays] = useState("14");
   const [reportRangeDays, setReportRangeDays] = useState("30");
+  const [followupRangeDays, setFollowupRangeDays] = useState("90");
   const [appFilter, setAppFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
@@ -191,6 +206,14 @@ export default function OutcomesPage() {
 
   const assessedEvidenceRows = useMemo(() => {
     return data?.rows.filter((row) => row.assessment_status === "completed").length || 0;
+  }, [data?.rows]);
+
+  const followupRows = useMemo(() => {
+    return data?.rows.filter((row) => row.followup_count > 0).length || 0;
+  }, [data?.rows]);
+
+  const regressionFollowupRows = useMemo(() => {
+    return data?.rows.filter((row) => row.regression_followup_count > 0).length || 0;
   }, [data?.rows]);
 
   const qualityCounts = useMemo(() => {
@@ -283,6 +306,24 @@ export default function OutcomesPage() {
       setReportMessage(err instanceof Error ? err.message : "Outcome learning report failed");
     } finally {
       setGeneratingReport(false);
+    }
+  }
+
+  async function handleDetectFollowups() {
+    const days = Number(followupRangeDays);
+    if (!Number.isInteger(days) || days < 1) return;
+    setDetectingFollowups(true);
+    setFollowupMessage(null);
+    try {
+      const result = await detectOutcomeFollowups({ range_days: days, max_candidates: 40 });
+      setFollowupMessage(`Scanned ${result.scanned_source_prs} merged PR${result.scanned_source_prs === 1 ? "" : "s"}, checked ${result.candidate_count} candidate${result.candidate_count === 1 ? "" : "s"}, detected ${result.detected_count} follow-up${result.detected_count === 1 ? "" : "s"} including ${result.regression_count} likely fix${result.regression_count === 1 ? "" : "es"}.`);
+      const [summary, reportResponse] = await Promise.all([getOutcomesSummary(), getLatestOutcomeLearningReport()]);
+      setData(summary);
+      setLatestReport(reportResponse.report);
+    } catch (err) {
+      setFollowupMessage(err instanceof Error ? err.message : "Follow-up detection failed");
+    } finally {
+      setDetectingFollowups(false);
     }
   }
 
@@ -473,6 +514,41 @@ export default function OutcomesPage() {
             <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div>
+                  <h2 className="text-sm font-semibold text-th-primary">Post-merge follow-ups</h2>
+                  <div className="mt-1 text-xs text-th-muted">
+                    {followupRows} merged row{followupRows === 1 ? "" : "s"} have detected follow-ups; {regressionFollowupRows} have likely regression, revert, or agent-correction evidence.
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <FilterSelect
+                    label="Source PRs"
+                    value={followupRangeDays}
+                    onChange={setFollowupRangeDays}
+                    includeAll={false}
+                    options={[
+                      { value: "14", label: "Last 14 days" },
+                      { value: "30", label: "Last 30 days" },
+                      { value: "60", label: "Last 60 days" },
+                      { value: "90", label: "Last 90 days" },
+                    ]}
+                  />
+                  <button
+                    onClick={handleDetectFollowups}
+                    disabled={detectingFollowups}
+                    className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+                  >
+                    {detectingFollowups ? "Detecting..." : "Detect follow-ups"}
+                  </button>
+                </div>
+              </div>
+              {followupMessage && (
+                <div className="mt-3 text-xs text-th-muted">{followupMessage}</div>
+              )}
+            </section>
+
+            <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
                   <h2 className="text-sm font-semibold text-th-primary">Learning report</h2>
                   <div className="mt-1 text-xs text-th-muted">
                     {latestReport?.report
@@ -624,7 +700,7 @@ function LearningReportPreview({ report }: { report: OutcomeLearningReportRun | 
 
   return (
     <div className="mt-4 border-t border-th pt-4">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
         <div className="bg-th-subtle rounded-lg p-3">
           <div className="text-xs text-th-muted">Resolved PRs</div>
           <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.resolved_prs}</div>
@@ -644,6 +720,11 @@ function LearningReportPreview({ report }: { report: OutcomeLearningReportRun | 
           <div className="text-xs text-th-muted">Assessed</div>
           <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.assessed_resolved_prs}</div>
           <div className="mt-1 text-xs text-th-muted">resolved PRs</div>
+        </div>
+        <div className="bg-th-subtle rounded-lg p-3">
+          <div className="text-xs text-th-muted">Likely fixes</div>
+          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.likely_regression_followups}</div>
+          <div className="mt-1 text-xs text-th-muted">{content.counts.post_merge_followups} follow-ups</div>
         </div>
       </div>
 
@@ -705,6 +786,11 @@ function ReportExample({ example }: { example: OutcomeLearningReportExample }) {
       <div className="mt-2 text-th-secondary">
         {qualityLabel(example.quality_band)} - {example.known_cost_usd === null ? "unknown cost" : formatCurrency(example.known_cost_usd)}
       </div>
+      {example.regression_followup_count > 0 && (
+        <div className="mt-1 text-st-yellow">
+          {example.regression_followup_count} likely post-merge fix{example.regression_followup_count === 1 ? "" : "es"}
+        </div>
+      )}
       {example.pr_url && (
         <a href={example.pr_url} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-th-secondary hover:underline">
           PR #{example.pr_number || "?"}
@@ -859,6 +945,12 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                   {row.assessment_created_at && (
                     <div className="mt-1 text-xs text-th-muted">Assessment {formatDate(row.assessment_created_at)}</div>
                   )}
+                  {row.followup_count > 0 && (
+                    <div className={row.regression_followup_count > 0 ? "mt-1 text-xs text-st-yellow" : "mt-1 text-xs text-th-muted"}>
+                      {row.followup_count} follow-up{row.followup_count === 1 ? "" : "s"}
+                      {row.regression_followup_count > 0 ? `, ${row.regression_followup_count} likely fix${row.regression_followup_count === 1 ? "" : "es"}` : ""}
+                    </div>
+                  )}
                   {row.snapshot_evidence && (
                     <button
                       onClick={() => toggleRow(row.id)}
@@ -898,6 +990,7 @@ function OutcomeEvidenceDetails({ row }: { row: OutcomeRow }) {
   const assessment = evidence.llm_assessment;
 
   return (
+    <div>
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Quality rule</div>
@@ -977,6 +1070,37 @@ function OutcomeEvidenceDetails({ row }: { row: OutcomeRow }) {
           </div>
         )}
       </div>
+    </div>
+    {row.followup_evidence.length > 0 && (
+      <div className="mt-4 border-t border-th pt-4">
+        <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Post-merge follow-ups</div>
+        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
+          {row.followup_evidence.map((followup) => (
+            <div key={followup.id} className="rounded-lg bg-th-surface border border-th p-3 text-xs">
+              <div className="font-semibold text-th-primary">
+                {followupRelationLabel(followup.relation_type)} - {followup.confidence}
+              </div>
+              <div className="mt-1 text-th-muted">
+                {followup.followup_pr_url ? (
+                  <a href={followup.followup_pr_url} target="_blank" rel="noreferrer" className="hover:underline">
+                    PR #{followup.followup_pr_number}
+                  </a>
+                ) : (
+                  `PR #${followup.followup_pr_number}`
+                )}
+                {followup.followup_title ? ` - ${followup.followup_title}` : ""}
+              </div>
+              {followup.summary && (
+                <div className="mt-2 text-th-secondary">{followup.summary}</div>
+              )}
+              {followup.deterministic_signals.length > 0 && (
+                <div className="mt-2 text-th-dimmed">{followup.deterministic_signals.slice(0, 4).join(", ")}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
     </div>
   );
 }

@@ -419,6 +419,7 @@ export type OutcomeAttributionClassification = "agent" | "known_user" | "human" 
 export type OutcomeAttributionConfidence = "unknown" | "low" | "medium" | "high";
 export type OutcomeReviewPressure = "low" | "medium" | "high" | "unknown";
 export type OutcomeHumanFollowupType = "none" | "clarification" | "expected_iteration" | "agent_correction" | "unrelated_extension" | "unknown";
+export type OutcomeFollowupRelation = "no_relation" | "expected_iteration" | "routine_followup" | "agent_correction" | "regression_fix" | "revert" | "unknown";
 
 export interface OutcomeCommitClassification {
   sha: string;
@@ -469,6 +470,19 @@ export interface OutcomeSnapshotEvidence {
   };
   pr_artifact_warnings: string[];
   commit_classifications: OutcomeCommitClassification[];
+}
+
+export interface OutcomeFollowupEvidence {
+  id: number;
+  relation_type: OutcomeFollowupRelation;
+  confidence: OutcomeAttributionConfidence;
+  deterministic_score: number;
+  deterministic_signals: string[];
+  summary: string | null;
+  followup_pr_number: number;
+  followup_pr_url: string | null;
+  followup_title: string | null;
+  detected_at: string;
 }
 
 export interface OutcomeSummaryCounts {
@@ -543,6 +557,9 @@ export interface OutcomeRow {
   coauthored_commit_count: number | null;
   unknown_commit_count: number | null;
   human_after_agent_commit_count: number | null;
+  followup_count: number;
+  regression_followup_count: number;
+  followup_evidence: OutcomeFollowupEvidence[];
   github_evidence_synced_at: string | null;
   github_issue_comments_count: number | null;
   github_review_comments_count: number | null;
@@ -633,6 +650,8 @@ export interface OutcomeLearningReportExample {
   pr_url: string | null;
   assessment_summary: string | null;
   assessment_confidence: OutcomeAttributionConfidence | null;
+  followup_count: number;
+  regression_followup_count: number;
   prompt_excerpt: string | null;
   evidence_ids: string[];
 }
@@ -661,6 +680,8 @@ export interface OutcomeLearningReportContent {
     no_pr_excluded: number;
     unknown_excluded: number;
     assessed_resolved_prs: number;
+    post_merge_followups: number;
+    likely_regression_followups: number;
   };
   costs: {
     resolved_known_cost_usd: number;
@@ -674,6 +695,7 @@ export interface OutcomeLearningReportContent {
     strong_examples: OutcomeLearningReportExample[];
     costly_rework_examples: OutcomeLearningReportExample[];
     clarification_examples: OutcomeLearningReportExample[];
+    post_merge_fix_examples: OutcomeLearningReportExample[];
     abandoned_examples: OutcomeLearningReportExample[];
     low_confidence_examples: OutcomeLearningReportExample[];
   };
@@ -703,4 +725,15 @@ export interface OutcomesLearningReportResponse {
 
 export interface OutcomesLearningReportRunResponse {
   report: OutcomeLearningReportRun;
+}
+
+export interface OutcomesFollowupDetectionResponse {
+  scanned_source_prs: number;
+  indexed_repo_prs: number;
+  candidate_count: number;
+  detected_count: number;
+  regression_count: number;
+  followup_ids: number[];
+  generated_at: string;
+  warnings: string[];
 }

@@ -85,6 +85,19 @@ type OutcomeRecord = {
 };
 
 type MatchedRun = RunRow & { matched_work_item_id: number };
+type FollowupRecord = {
+  id: number;
+  source_work_item_id: number;
+  relation_type: string;
+  confidence: string;
+  deterministic_score: number;
+  deterministic_signals_json: string | null;
+  assessment_json: string | null;
+  detected_at: string;
+  followup_pr_number: number;
+  followup_pr_url: string | null;
+  followup_title: string | null;
+};
 
 function placeholders(count: number): string {
   return Array(count).fill("?").join(", ");
@@ -158,6 +171,35 @@ function groupRunsByWorkItem(workItemIds: number[]): Map<number, MatchedRun[]> {
     const list = grouped.get(run.matched_work_item_id) || [];
     list.push(run);
     grouped.set(run.matched_work_item_id, list);
+  }
+  return grouped;
+}
+
+function groupFollowupsByWorkItem(workItemIds: number[]): Map<number, FollowupRecord[]> {
+  const grouped = new Map<number, FollowupRecord[]>();
+  if (workItemIds.length === 0) return grouped;
+  const rows = getDb().prepare(`
+    SELECT
+      followup.id AS id,
+      followup.source_work_item_id AS source_work_item_id,
+      followup.relation_type AS relation_type,
+      followup.confidence AS confidence,
+      followup.deterministic_score AS deterministic_score,
+      followup.deterministic_signals_json AS deterministic_signals_json,
+      followup.assessment_json AS assessment_json,
+      followup.detected_at AS detected_at,
+      repo_pr.pr_number AS followup_pr_number,
+      repo_pr.pr_url AS followup_pr_url,
+      repo_pr.title AS followup_title
+    FROM llm_outcome_followups followup
+    JOIN github_repo_pull_requests repo_pr ON repo_pr.id = followup.followup_repo_pr_id
+    WHERE followup.source_work_item_id IN (${placeholders(workItemIds.length)})
+    ORDER BY followup.detected_at DESC, followup.id DESC
+  `).all(...workItemIds) as FollowupRecord[];
+  for (const row of rows) {
+    const list = grouped.get(row.source_work_item_id) || [];
+    list.push(row);
+    grouped.set(row.source_work_item_id, list);
   }
   return grouped;
 }
@@ -264,6 +306,31 @@ function parseSnapshotEvidence(value: string | null): OutcomeRow["snapshot_evide
 function parseAssessmentSummary(value: string | null): string | null {
   const assessment = parseOutcomeEvidenceAssessment(value);
   return assessment?.summary || null;
+}
+
+function parseStringArray(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((entry) => String(entry)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseFollowupSummary(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed?.summary === "string" ? parsed.summary : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRegressionFollowup(row: FollowupRecord): boolean {
+  if (row.confidence === "unknown" || row.confidence === "low") return false;
+  return row.relation_type === "regression_fix" || row.relation_type === "revert" || row.relation_type === "agent_correction";
 }
 
 function costBucketForState(state: OutcomeState): keyof OutcomeCostBuckets | null {
@@ -404,6 +471,7 @@ export async function buildOutcomesSummary({
   if (records.length === 0) return emptySummary(apps);
 
   const runsByWorkItem = groupRunsByWorkItem(records.map((record) => record.work_item_id));
+  const followupsByWorkItem = groupFollowupsByWorkItem(records.map((record) => record.work_item_id));
   const rows: OutcomeRow[] = records.map((record) => {
     const runs = runsByWorkItem.get(record.work_item_id) || [];
     const { latestRun, knownCost, unknownCostRuns } = summarizeRuns(runs);
@@ -413,6 +481,8 @@ export async function buildOutcomesSummary({
     const hasValidPr = hasPrArtifact && pr.prNumber !== null;
     const providerId = latestRun?.provider_id || record.session_provider_id || null;
     const modelId = latestRun?.model_id || record.last_model_id || null;
+    const followups = followupsByWorkItem.get(record.work_item_id) || [];
+    const regressionFollowups = followups.filter(isRegressionFollowup);
 
     let outcomeState: OutcomeState = "no_pr";
     let evidenceCompleteness: OutcomeEvidenceCompleteness = "no_pr_artifact";
@@ -500,6 +570,24 @@ export async function buildOutcomesSummary({
       coauthored_commit_count: record.snapshot_coauthored_commit_count,
       unknown_commit_count: record.snapshot_unknown_commit_count,
       human_after_agent_commit_count: record.snapshot_human_after_agent_commit_count,
+      followup_count: followups.length,
+      regression_followup_count: regressionFollowups.length,
+      followup_evidence: followups.slice(0, 5).map((followup) => ({
+        id: followup.id,
+        relation_type: followup.relation_type === "no_relation" || followup.relation_type === "expected_iteration" || followup.relation_type === "routine_followup" || followup.relation_type === "agent_correction" || followup.relation_type === "regression_fix" || followup.relation_type === "revert" || followup.relation_type === "unknown"
+          ? followup.relation_type
+          : "unknown",
+        confidence: followup.confidence === "unknown" || followup.confidence === "low" || followup.confidence === "medium" || followup.confidence === "high"
+          ? followup.confidence
+          : "unknown",
+        deterministic_score: followup.deterministic_score,
+        deterministic_signals: parseStringArray(followup.deterministic_signals_json),
+        summary: parseFollowupSummary(followup.assessment_json),
+        followup_pr_number: followup.followup_pr_number,
+        followup_pr_url: followup.followup_pr_url,
+        followup_title: followup.followup_title,
+        detected_at: followup.detected_at,
+      })),
       github_evidence_synced_at: record.evidence_synced_at,
       github_issue_comments_count: record.evidence_issue_comments_count,
       github_review_comments_count: record.evidence_review_comments_count,

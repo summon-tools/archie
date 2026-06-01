@@ -251,6 +251,52 @@ export interface PullRequestEvidencePayload {
   commits: Array<Record<string, any>>;
 }
 
+export async function listRepositoryPullRequests({
+  owner,
+  repo,
+  token,
+  maxPages = 3,
+}: {
+  owner: string;
+  repo: string;
+  token: string;
+  maxPages?: number;
+}): Promise<Array<Record<string, any>>> {
+  const results: Array<Record<string, any>> = [];
+  const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const res = await fetch(`${apiBase}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`, {
+      headers: githubHeaders(token),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `GitHub API error ${res.status}`);
+    }
+    const pulls = await res.json();
+    if (!Array.isArray(pulls) || pulls.length === 0) break;
+    results.push(...pulls);
+    if (pulls.length < 100) break;
+  }
+  return results;
+}
+
+export async function getPullRequestFiles({
+  owner,
+  repo,
+  pr_number,
+  token,
+}: {
+  owner: string;
+  repo: string;
+  pr_number: number;
+  token: string;
+}): Promise<Array<Record<string, any>>> {
+  return fetchAllGitHubPages<Record<string, any>>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pr_number}/files?per_page=100`,
+    token,
+  );
+}
+
 export async function getPullRequestEvidence({
   owner,
   repo,

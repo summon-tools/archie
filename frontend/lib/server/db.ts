@@ -393,6 +393,82 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_assessments_created_at ON llm_outcome_assessments(created_at);
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_assessments_input_hash ON llm_outcome_assessments(input_hash);
 
+    CREATE TABLE IF NOT EXISTS github_repo_pull_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      pr_url TEXT NOT NULL,
+      title TEXT DEFAULT '',
+      body TEXT DEFAULT '',
+      state TEXT NOT NULL DEFAULT 'UNKNOWN',
+      author_login TEXT DEFAULT NULL,
+      head_ref TEXT DEFAULT NULL,
+      base_ref TEXT DEFAULT NULL,
+      merged_at TEXT DEFAULT NULL,
+      closed_at TEXT DEFAULT NULL,
+      github_created_at TEXT DEFAULT NULL,
+      github_updated_at TEXT DEFAULT NULL,
+      additions INTEGER DEFAULT NULL,
+      deletions INTEGER DEFAULT NULL,
+      changed_files INTEGER DEFAULT NULL,
+      raw_json TEXT DEFAULT NULL,
+      synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(owner, repo, pr_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_repo_pr_repo ON github_repo_pull_requests(owner, repo);
+    CREATE INDEX IF NOT EXISTS idx_github_repo_pr_updated_at ON github_repo_pull_requests(github_updated_at);
+
+    CREATE TABLE IF NOT EXISTS github_repo_pull_request_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      repo_pr_id INTEGER NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      status TEXT DEFAULT NULL,
+      additions INTEGER DEFAULT NULL,
+      deletions INTEGER DEFAULT NULL,
+      changes INTEGER DEFAULT NULL,
+      raw_json TEXT DEFAULT NULL,
+      synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(repo_pr_id, filename),
+      FOREIGN KEY (repo_pr_id) REFERENCES github_repo_pull_requests(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_repo_pr_files_repo_pr_id ON github_repo_pull_request_files(repo_pr_id);
+    CREATE INDEX IF NOT EXISTS idx_github_repo_pr_files_path ON github_repo_pull_request_files(filename);
+
+    CREATE TABLE IF NOT EXISTS llm_outcome_followups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      source_work_item_id INTEGER NOT NULL,
+      source_snapshot_id INTEGER NOT NULL,
+      source_pr_snapshot_id INTEGER NOT NULL,
+      followup_repo_pr_id INTEGER NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      source_pr_number INTEGER NOT NULL,
+      followup_pr_number INTEGER NOT NULL,
+      relation_type TEXT NOT NULL DEFAULT 'unknown' CHECK(relation_type IN ('no_relation', 'expected_iteration', 'routine_followup', 'agent_correction', 'regression_fix', 'revert', 'unknown')),
+      confidence TEXT NOT NULL DEFAULT 'unknown' CHECK(confidence IN ('unknown', 'low', 'medium', 'high')),
+      deterministic_score INTEGER NOT NULL DEFAULT 0,
+      deterministic_signals_json TEXT DEFAULT NULL,
+      assessment_json TEXT DEFAULT NULL,
+      evidence_json TEXT DEFAULT NULL,
+      detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(source_snapshot_id, followup_repo_pr_id),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_snapshot_id) REFERENCES llm_outcome_snapshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_pr_snapshot_id) REFERENCES github_pr_snapshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (followup_repo_pr_id) REFERENCES github_repo_pull_requests(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_followups_source_work_item_id ON llm_outcome_followups(source_work_item_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_followups_relation_type ON llm_outcome_followups(relation_type);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_followups_detected_at ON llm_outcome_followups(detected_at);
+
     CREATE TABLE IF NOT EXISTS llm_outcome_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       requested_by_user_id INTEGER DEFAULT NULL,

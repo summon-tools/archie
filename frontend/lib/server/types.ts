@@ -244,6 +244,7 @@ export type LlmOutcomeQualityBand = "pending" | "strong" | "useful" | "costly_re
 export type LlmOutcomeConfidence = "low" | "medium" | "high";
 export type LlmAttributionClassification = "agent" | "known_user" | "human" | "unknown";
 export type LlmAttributionConfidence = "unknown" | "low" | "medium" | "high";
+export type LlmOutcomeFollowupRelation = "no_relation" | "expected_iteration" | "routine_followup" | "agent_correction" | "regression_fix" | "revert" | "unknown";
 
 export interface LlmOutcomeSnapshotRow {
   id: number;
@@ -307,6 +308,66 @@ export interface LlmOutcomeReportRow {
   warnings_json: string | null;
   error_text: string | null;
   generated_at: string;
+  created_at: string;
+}
+
+export interface GitHubRepoPullRequestRow {
+  id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  pr_url: string;
+  title: string;
+  body: string;
+  state: string;
+  author_login: string | null;
+  head_ref: string | null;
+  base_ref: string | null;
+  merged_at: string | null;
+  closed_at: string | null;
+  github_created_at: string | null;
+  github_updated_at: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changed_files: number | null;
+  raw_json: string | null;
+  synced_at: string;
+  created_at: string;
+}
+
+export interface GitHubRepoPullRequestFileRow {
+  id: number;
+  repo_pr_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  filename: string;
+  status: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changes: number | null;
+  raw_json: string | null;
+  synced_at: string;
+}
+
+export interface LlmOutcomeFollowupRow {
+  id: number;
+  app_id: number;
+  source_work_item_id: number;
+  source_snapshot_id: number;
+  source_pr_snapshot_id: number;
+  followup_repo_pr_id: number;
+  owner: string;
+  repo: string;
+  source_pr_number: number;
+  followup_pr_number: number;
+  relation_type: LlmOutcomeFollowupRelation;
+  confidence: LlmAttributionConfidence;
+  deterministic_score: number;
+  deterministic_signals_json: string | null;
+  assessment_json: string | null;
+  evidence_json: string | null;
+  detected_at: string;
   created_at: string;
 }
 
