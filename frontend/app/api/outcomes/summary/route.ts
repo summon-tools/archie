@@ -2,8 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
-import { GitHubAppError, getValidGitHubUserToken } from "@/lib/server/github-app";
-import { buildOutcomesSummary } from "@/lib/server/outcomes";
+import { buildOutcomesSummary, type OutcomeRowFilters } from "@/lib/server/outcomes";
+import type { OutcomeState } from "@/lib/types";
+
+const OUTCOME_STATES = new Set<OutcomeState>(["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"]);
+const PR_STATES = new Set(["OPEN", "CLOSED", "MERGED", "UNKNOWN", "NO_PR"]);
+
+function positiveInt(value: string | null, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseFilters(request: NextRequest): OutcomeRowFilters {
+  const params = request.nextUrl.searchParams;
+  const appId = params.get("app_id");
+  const outcomeState = params.get("outcome_state");
+  const prState = params.get("pr_state");
+  return {
+    appId: appId ? positiveInt(appId, 0) || null : null,
+    outcomeState: outcomeState && OUTCOME_STATES.has(outcomeState as OutcomeState)
+      ? outcomeState as OutcomeState
+      : null,
+    providerId: params.get("provider") || null,
+    modelId: params.get("model") || null,
+    runStatus: params.get("run_status") || null,
+    prState: prState && PR_STATES.has(prState) ? prState : null,
+  };
+}
 
 export async function GET(request: NextRequest) {
   let user: Awaited<ReturnType<typeof getAuthUser>>;
@@ -17,23 +43,15 @@ export async function GET(request: NextRequest) {
   }
 
   const apps = filterAppsForUser(user, dal.getApps());
-  let githubToken: string | null = null;
-  let githubUnavailableWarning: string | undefined;
-
-  try {
-    githubToken = (await getValidGitHubUserToken(user.id)).token;
-  } catch (error) {
-    githubUnavailableWarning = error instanceof GitHubAppError
-      ? "GitHub is not connected for this user, so PR states are based on local Archie evidence only."
-      : "GitHub auth failed, so PR states are based on local Archie evidence only.";
-  }
+  const page = positiveInt(request.nextUrl.searchParams.get("page"), 1);
+  const pageSize = Math.min(200, positiveInt(request.nextUrl.searchParams.get("page_size"), 25));
 
   try {
     const summary = await buildOutcomesSummary({
       apps,
-      githubToken,
-      githubUnavailableWarning,
-      maxGithubLookups: 25,
+      refreshGitHubState: false,
+      rowFilters: parseFilters(request),
+      pagination: { page, pageSize },
     });
     return NextResponse.json(summary);
   } catch (error) {

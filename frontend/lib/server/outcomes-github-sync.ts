@@ -50,7 +50,7 @@ export interface RunGitHubEvidenceSyncOptions {
   rangeStart?: string | null;
   rangeEnd?: string | null;
   rangeDays?: number | null;
-  maxPrs?: number;
+  maxPrs?: number | null;
   fetchEvidence?: EvidenceFetcher;
 }
 
@@ -112,7 +112,7 @@ function placeholders(count: number): string {
   return Array(count).fill("?").join(", ");
 }
 
-function getSyncCandidates(apps: AppRow[], rangeStart: string | null, rangeEnd: string | null, limit: number): SyncCandidate[] {
+function getSyncCandidates(apps: AppRow[], rangeStart: string | null, rangeEnd: string | null, limit: number | null): SyncCandidate[] {
   if (apps.length === 0) return [];
   const appIds = apps.map((app) => app.id);
   const conditions = [`wi.app_id IN (${placeholders(appIds.length)})`, "pr.id IS NOT NULL"];
@@ -125,7 +125,8 @@ function getSyncCandidates(apps: AppRow[], rangeStart: string | null, rangeEnd: 
     conditions.push("datetime(wi.updated_at) <= datetime(?)");
     params.push(rangeEnd);
   }
-  params.push(limit);
+  const limitClause = limit && limit > 0 ? "LIMIT ?" : "";
+  if (limitClause) params.push(limit);
 
   return getDb().prepare(`
     SELECT
@@ -146,7 +147,7 @@ function getSyncCandidates(apps: AppRow[], rangeStart: string | null, rangeEnd: 
     )
     WHERE ${conditions.join(" AND ")}
     ORDER BY wi.updated_at DESC, wi.id DESC
-    LIMIT ?
+    ${limitClause}
   `).all(...params) as SyncCandidate[];
 }
 
@@ -189,7 +190,7 @@ export async function runGitHubEvidenceSync(options: RunGitHubEvidenceSyncOption
     range_end: rangeEnd,
   });
   const fetchEvidence = options.fetchEvidence || getPullRequestEvidence;
-  const maxPrs = options.maxPrs ?? 50;
+  const maxPrs = options.maxPrs ?? null;
   const warnings: string[] = [];
   let scanned = 0;
   let synced = 0;
@@ -285,7 +286,6 @@ async function runScheduledSyncIfDue(): Promise<void> {
       githubToken: githubAuth.token,
       mode: "scheduled",
       rangeDays: settings.observation_window_days,
-      maxPrs: 50,
     });
     recomputeOutcomeSnapshots({ apps, rangeDays: settings.observation_window_days });
     dal.setSetting(LAST_SCHEDULED_SYNC_SETTING, new Date().toISOString());

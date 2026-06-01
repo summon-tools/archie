@@ -4,6 +4,7 @@ import { normalizeOutcomeEvidenceAssessment, parseOutcomeEvidenceAssessment } fr
 import { parsePullRequestMetadata, resolvePullRequestRepo } from "@/lib/server/github-pr-utils";
 import type { AppRow, RunRow } from "@/lib/server/types";
 import type {
+  OutcomeCoverageCounts,
   OutcomeCostBuckets,
   OutcomeEvidenceCompleteness,
   OutcomeRow,
@@ -23,7 +24,24 @@ interface BuildOutcomesOptions {
   githubToken?: string | null;
   githubUnavailableWarning?: string;
   maxGithubLookups?: number;
+  refreshGitHubState?: boolean;
+  rowFilters?: OutcomeRowFilters;
+  pagination?: OutcomePaginationOptions;
   prLookup?: PullRequestLookup;
+}
+
+export interface OutcomeRowFilters {
+  appId?: number | null;
+  outcomeState?: OutcomeState | null;
+  providerId?: string | null;
+  modelId?: string | null;
+  runStatus?: string | null;
+  prState?: string | null;
+}
+
+export interface OutcomePaginationOptions {
+  page?: number;
+  pageSize?: number;
 }
 
 type OutcomeRecord = {
@@ -130,15 +148,37 @@ function emptySummary(apps: AppRow[], warnings: string[] = []): OutcomesSummaryR
       no_pr_cost_usd: 0,
       unknown_outcome_cost_usd: 0,
     },
+    coverage: emptyCoverage(),
     rows: [],
+    pagination: {
+      page: 1,
+      page_size: 25,
+      total_rows: 0,
+      filtered_rows: 0,
+      page_count: 0,
+      has_previous: false,
+      has_next: false,
+    },
     filters: {
       apps: apps.map((app) => ({ id: app.id, name: app.name })),
       providers: [],
       models: [],
       run_statuses: [],
       outcome_states: [],
+      pr_states: [],
     },
     warnings,
+  };
+}
+
+function emptyCoverage(): OutcomeCoverageCounts {
+  return {
+    github_evidence_synced_rows: 0,
+    computed_snapshot_rows: 0,
+    assessed_evidence_rows: 0,
+    followup_rows: 0,
+    regression_followup_rows: 0,
+    quality_counts: {},
   };
 }
 
@@ -347,12 +387,14 @@ function buildFilters(apps: AppRow[], rows: OutcomeRow[]): OutcomesSummaryRespon
   const models = new Set<string>();
   const runStatuses = new Set<string>();
   const outcomeStates = new Set<OutcomeState>();
+  const prStates = new Set<string>();
 
   for (const row of rows) {
     if (row.provider_id) providers.add(row.provider_id);
     if (row.model_id) models.add(row.model_id);
     if (row.latest_run_status) runStatuses.add(row.latest_run_status);
     outcomeStates.add(row.outcome_state);
+    prStates.add(row.pr_state || "NO_PR");
   }
 
   return {
@@ -361,6 +403,58 @@ function buildFilters(apps: AppRow[], rows: OutcomeRow[]): OutcomesSummaryRespon
     models: Array.from(models).sort(),
     run_statuses: Array.from(runStatuses).sort(),
     outcome_states: Array.from(outcomeStates).sort(),
+    pr_states: Array.from(prStates).sort(),
+  };
+}
+
+function buildCoverage(rows: OutcomeRow[]): OutcomeCoverageCounts {
+  const coverage = emptyCoverage();
+  for (const row of rows) {
+    if (row.github_evidence_synced_at) coverage.github_evidence_synced_rows += 1;
+    if (row.snapshot_computed_at) coverage.computed_snapshot_rows += 1;
+    if (row.assessment_status === "completed") coverage.assessed_evidence_rows += 1;
+    if (row.followup_count > 0) coverage.followup_rows += 1;
+    if (row.regression_followup_count > 0) coverage.regression_followup_rows += 1;
+    if (row.quality_band) {
+      coverage.quality_counts[row.quality_band] = (coverage.quality_counts[row.quality_band] || 0) + 1;
+    }
+  }
+  return coverage;
+}
+
+function applyRowFilters(rows: OutcomeRow[], filters: OutcomeRowFilters | undefined): OutcomeRow[] {
+  if (!filters) return rows;
+  return rows.filter((row) => {
+    if (filters.appId && row.app_id !== filters.appId) return false;
+    if (filters.outcomeState && row.outcome_state !== filters.outcomeState) return false;
+    if (filters.providerId && row.provider_id !== filters.providerId) return false;
+    if (filters.modelId && row.model_id !== filters.modelId) return false;
+    if (filters.runStatus && row.latest_run_status !== filters.runStatus) return false;
+    if (filters.prState && (row.pr_state || "NO_PR") !== filters.prState) return false;
+    return true;
+  });
+}
+
+function paginateRows(rows: OutcomeRow[], totalRows: number, pagination: OutcomePaginationOptions | undefined): {
+  rows: OutcomeRow[];
+  pagination: OutcomesSummaryResponse["pagination"];
+} {
+  const pageSize = Math.min(200, Math.max(1, Math.floor(pagination?.pageSize || 25)));
+  const pageCount = rows.length === 0 ? 0 : Math.ceil(rows.length / pageSize);
+  const requestedPage = Math.max(1, Math.floor(pagination?.page || 1));
+  const page = pageCount === 0 ? 1 : Math.min(requestedPage, pageCount);
+  const start = (page - 1) * pageSize;
+  return {
+    rows: rows.slice(start, start + pageSize),
+    pagination: {
+      page,
+      page_size: pageSize,
+      total_rows: totalRows,
+      filtered_rows: rows.length,
+      page_count: pageCount,
+      has_previous: page > 1,
+      has_next: pageCount > 0 && page < pageCount,
+    },
   };
 }
 
@@ -369,6 +463,9 @@ export async function buildOutcomesSummary({
   githubToken = null,
   githubUnavailableWarning,
   maxGithubLookups = 25,
+  refreshGitHubState = true,
+  rowFilters,
+  pagination,
   prLookup = getPullRequest,
 }: BuildOutcomesOptions): Promise<OutcomesSummaryResponse> {
   const warnings: string[] = [];
@@ -602,14 +699,14 @@ export async function buildOutcomesSummary({
     };
   });
 
-  if (!githubToken) {
+  if (refreshGitHubState && !githubToken) {
     if (rows.some((row) => row.pr_number)) {
       pushUnique(
         warnings,
         githubUnavailableWarning || "GitHub is not connected for this user, so PR states are based on local Archie evidence only.",
       );
     }
-  } else {
+  } else if (refreshGitHubState && githubToken) {
     let lookups = 0;
     for (const row of rows) {
       if (!row.pr_number) continue;
@@ -651,8 +748,8 @@ export async function buildOutcomesSummary({
     }
   }
 
-  const counts = emptySummary(apps).counts;
-  const costs = emptySummary(apps).costs;
+  const counts = emptySummary(apps, warnings).counts;
+  const costs = emptySummary(apps, warnings).costs;
   for (const row of rows) {
     counts.total_work_items += 1;
     if (row.session_id || row.run_count > 0) counts.total_sessions += 1;
@@ -671,12 +768,16 @@ export async function buildOutcomesSummary({
       if (bucket) costs[bucket] += row.known_cost_usd;
     }
   }
+  const filteredRows = applyRowFilters(rows, rowFilters);
+  const paged = paginateRows(filteredRows, rows.length, pagination);
 
   return {
     generated_at: new Date().toISOString(),
     counts,
     costs,
-    rows,
+    coverage: buildCoverage(rows),
+    rows: paged.rows,
+    pagination: paged.pagination,
     filters: buildFilters(apps, rows),
     warnings,
   };

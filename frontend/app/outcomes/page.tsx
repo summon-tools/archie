@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
@@ -8,6 +8,7 @@ import { detectOutcomeFollowups, getLatestOutcomeLearningReport, getOutcomesSett
 import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
+const PAGE_SIZE_OPTIONS = ["25", "50", "100", "200"];
 
 function formatCurrency(value: number): string {
   const maximumFractionDigits = value > 0 && value < 1 ? 4 : 2;
@@ -176,54 +177,78 @@ export default function OutcomesPage() {
   const [modelFilter, setModelFilter] = useState("all");
   const [runStatusFilter, setRunStatusFilter] = useState("all");
   const [prStateFilter, setPrStateFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState("25");
+  const initializedSettingsRef = useRef(false);
+
+  const summaryQuery = useMemo(() => ({
+    page,
+    page_size: Number(pageSize),
+    app_id: appFilter,
+    outcome_state: outcomeFilter,
+    provider: providerFilter,
+    model: modelFilter,
+    run_status: runStatusFilter,
+    pr_state: prStateFilter,
+  }), [appFilter, modelFilter, outcomeFilter, page, pageSize, prStateFilter, providerFilter, runStatusFilter]);
 
   const loadData = useCallback(() => {
     setLoading(true);
-    Promise.all([getOutcomesSummary(), getOutcomesSettings(), getLatestOutcomeLearningReport()])
+    Promise.all([getOutcomesSummary(summaryQuery), getOutcomesSettings(), getLatestOutcomeLearningReport()])
       .then(([summary, loadedSettings, reportResponse]) => {
         setData(summary);
         setSettings(loadedSettings);
         setLatestReport(reportResponse.report);
-        setSyncRangeDays(String(loadedSettings.observation_window_days));
-        setSnapshotRangeDays(String(loadedSettings.observation_window_days));
+        if (!initializedSettingsRef.current) {
+          setSyncRangeDays(String(loadedSettings.observation_window_days));
+          setSnapshotRangeDays(String(loadedSettings.observation_window_days));
+          initializedSettingsRef.current = true;
+        }
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load outcomes"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [summaryQuery]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   const syncedEvidenceRows = useMemo(() => {
-    return data?.rows.filter((row) => row.github_evidence_synced_at).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.github_evidence_synced_rows || 0;
+  }, [data?.coverage.github_evidence_synced_rows]);
 
   const computedSnapshotRows = useMemo(() => {
-    return data?.rows.filter((row) => row.snapshot_computed_at).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.computed_snapshot_rows || 0;
+  }, [data?.coverage.computed_snapshot_rows]);
 
   const assessedEvidenceRows = useMemo(() => {
-    return data?.rows.filter((row) => row.assessment_status === "completed").length || 0;
-  }, [data?.rows]);
+    return data?.coverage.assessed_evidence_rows || 0;
+  }, [data?.coverage.assessed_evidence_rows]);
 
   const followupRows = useMemo(() => {
-    return data?.rows.filter((row) => row.followup_count > 0).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.followup_rows || 0;
+  }, [data?.coverage.followup_rows]);
 
   const regressionFollowupRows = useMemo(() => {
-    return data?.rows.filter((row) => row.regression_followup_count > 0).length || 0;
-  }, [data?.rows]);
+    return data?.coverage.regression_followup_rows || 0;
+  }, [data?.coverage.regression_followup_rows]);
 
   const qualityCounts = useMemo(() => {
-    const counts = new Map<OutcomeQualityBand, number>();
-    for (const row of data?.rows || []) {
-      if (!row.quality_band) continue;
-      counts.set(row.quality_band, (counts.get(row.quality_band) || 0) + 1);
-    }
-    return counts;
-  }, [data?.rows]);
+    return data?.coverage.quality_counts || {};
+  }, [data?.coverage.quality_counts]);
+
+  function updatePagedFilter(setter: (value: string) => void) {
+    return (value: string) => {
+      setter(value);
+      setPage(1);
+    };
+  }
+
+  function handlePageSizeChange(value: string) {
+    setPageSize(value);
+    setPage(1);
+  }
 
   async function handleRangeChange(value: string) {
     setSyncRangeDays(value);
@@ -246,7 +271,7 @@ export default function OutcomesPage() {
     try {
       const result = await syncOutcomesGitHubEvidence({ range_days: days });
       setSyncMessage(`Synced ${result.run.synced_count} of ${result.run.scanned_count} PRs${result.run.failed_count ? `, ${result.run.failed_count} failed` : ""}. Recomputed ${result.recomputed_snapshots ?? 0} snapshots.`);
-      const [summary, loadedSettings] = await Promise.all([getOutcomesSummary(), getOutcomesSettings()]);
+      const [summary, loadedSettings] = await Promise.all([getOutcomesSummary(summaryQuery), getOutcomesSettings()]);
       setData(summary);
       setSettings(loadedSettings);
     } catch (err) {
@@ -264,7 +289,7 @@ export default function OutcomesPage() {
     try {
       const result = await recomputeOutcomeSnapshots({ range_days: days });
       setSnapshotMessage(`Recomputed ${result.recomputed_count} outcome snapshot${result.recomputed_count === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary();
+      const summary = await getOutcomesSummary(summaryQuery);
       setData(summary);
     } catch (err) {
       setSnapshotMessage(err instanceof Error ? err.message : "Outcome snapshot recompute failed");
@@ -281,7 +306,7 @@ export default function OutcomesPage() {
     try {
       const result = await runOutcomesEvidenceAssessment({ range_days: days, max_items: 25 });
       setAssessmentMessage(`Assessed ${result.assessed_count} PR${result.assessed_count === 1 ? "" : "s"}, skipped ${result.skipped_count}, failed ${result.failed_count}. Recomputed ${result.recomputed_snapshots} snapshot${result.recomputed_snapshots === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary();
+      const summary = await getOutcomesSummary(summaryQuery);
       setData(summary);
     } catch (err) {
       setAssessmentMessage(err instanceof Error ? err.message : "Outcome evidence assessment failed");
@@ -300,7 +325,7 @@ export default function OutcomesPage() {
       setLatestReport(result.report);
       const report = result.report.report;
       setReportMessage(`Generated report with ${report?.counts.resolved_prs ?? 0} resolved PR${report?.counts.resolved_prs === 1 ? "" : "s"} and ${report?.insights.length ?? 0} insight${report?.insights.length === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary();
+      const summary = await getOutcomesSummary(summaryQuery);
       setData(summary);
     } catch (err) {
       setReportMessage(err instanceof Error ? err.message : "Outcome learning report failed");
@@ -317,7 +342,7 @@ export default function OutcomesPage() {
     try {
       const result = await detectOutcomeFollowups({ range_days: days, max_candidates: 40 });
       setFollowupMessage(`Scanned ${result.scanned_source_prs} merged PR${result.scanned_source_prs === 1 ? "" : "s"}, checked ${result.candidate_count} candidate${result.candidate_count === 1 ? "" : "s"}, detected ${result.detected_count} follow-up${result.detected_count === 1 ? "" : "s"} including ${result.regression_count} likely fix${result.regression_count === 1 ? "" : "es"}.`);
-      const [summary, reportResponse] = await Promise.all([getOutcomesSummary(), getLatestOutcomeLearningReport()]);
+      const [summary, reportResponse] = await Promise.all([getOutcomesSummary(summaryQuery), getLatestOutcomeLearningReport()]);
       setData(summary);
       setLatestReport(reportResponse.report);
     } catch (err) {
@@ -327,30 +352,11 @@ export default function OutcomesPage() {
     }
   }
 
-  const filteredRows = useMemo(() => {
-    const rows = data?.rows || [];
-    return rows.filter((row) => {
-      if (appFilter !== "all" && String(row.app_id) !== appFilter) return false;
-      if (outcomeFilter !== "all" && row.outcome_state !== outcomeFilter) return false;
-      if (providerFilter !== "all" && row.provider_id !== providerFilter) return false;
-      if (modelFilter !== "all" && row.model_id !== modelFilter) return false;
-      if (runStatusFilter !== "all" && row.latest_run_status !== runStatusFilter) return false;
-      if (prStateFilter !== "all" && (row.pr_state || "NO_PR") !== prStateFilter) return false;
-      return true;
-    });
-  }, [appFilter, data?.rows, modelFilter, outcomeFilter, prStateFilter, providerFilter, runStatusFilter]);
-
   const groupedRows = useMemo(() => {
     return OUTCOME_ORDER.map((state) => ({
       state,
-      rows: filteredRows.filter((row) => row.outcome_state === state),
+      rows: (data?.rows || []).filter((row) => row.outcome_state === state),
     })).filter((group) => group.rows.length > 0);
-  }, [filteredRows]);
-
-  const prStates = useMemo(() => {
-    const values = new Set<string>();
-    for (const row of data?.rows || []) values.add(row.pr_state || "NO_PR");
-    return Array.from(values).sort();
   }, [data?.rows]);
 
   const resetFilters = () => {
@@ -360,6 +366,7 @@ export default function OutcomesPage() {
     setModelFilter("all");
     setRunStatusFilter("all");
     setPrStateFilter("all");
+    setPage(1);
   };
 
   return (
@@ -471,7 +478,7 @@ export default function OutcomesPage() {
                 <div>
                   <h2 className="text-sm font-semibold text-th-primary">Outcome snapshots</h2>
                   <div className="mt-1 text-xs text-th-muted">
-                    {computedSnapshotRows} computed, {assessedEvidenceRows} LLM-assessed. Strong {qualityCounts.get("strong") || 0}, useful {qualityCounts.get("useful") || 0}, costly rework {qualityCounts.get("costly_reworked") || 0}, pending {qualityCounts.get("pending") || 0}.
+                    {computedSnapshotRows} computed, {assessedEvidenceRows} LLM-assessed. Strong {qualityCounts.strong || 0}, useful {qualityCounts.useful || 0}, costly rework {qualityCounts.costly_reworked || 0}, pending {qualityCounts.pending || 0}.
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -597,7 +604,7 @@ export default function OutcomesPage() {
               </div>
             </section>
 
-            {data.rows.length === 0 ? (
+            {data.pagination.total_rows === 0 ? (
               <div className="mt-6">
                 <EmptyState />
               </div>
@@ -605,12 +612,13 @@ export default function OutcomesPage() {
               <>
                 <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-                    <FilterSelect label="App" value={appFilter} onChange={setAppFilter} options={data.filters.apps.map((app) => ({ value: String(app.id), label: app.name }))} />
-                    <FilterSelect label="Outcome" value={outcomeFilter} onChange={setOutcomeFilter} options={OUTCOME_ORDER.map((state) => ({ value: state, label: outcomeLabel(state) }))} />
-                    <FilterSelect label="Provider" value={providerFilter} onChange={setProviderFilter} options={data.filters.providers.map((provider) => ({ value: provider, label: provider }))} />
-                    <FilterSelect label="Model" value={modelFilter} onChange={setModelFilter} options={data.filters.models.map((model) => ({ value: model, label: model }))} />
-                    <FilterSelect label="Run status" value={runStatusFilter} onChange={setRunStatusFilter} options={data.filters.run_statuses.map((status) => ({ value: status, label: status }))} />
-                    <FilterSelect label="PR state" value={prStateFilter} onChange={setPrStateFilter} options={prStates.map((state) => ({ value: state, label: state === "NO_PR" ? "No PR" : state }))} />
+                    <FilterSelect label="App" value={appFilter} onChange={updatePagedFilter(setAppFilter)} options={data.filters.apps.map((app) => ({ value: String(app.id), label: app.name }))} />
+                    <FilterSelect label="Outcome" value={outcomeFilter} onChange={updatePagedFilter(setOutcomeFilter)} options={OUTCOME_ORDER.map((state) => ({ value: state, label: outcomeLabel(state) }))} />
+                    <FilterSelect label="Provider" value={providerFilter} onChange={updatePagedFilter(setProviderFilter)} options={data.filters.providers.map((provider) => ({ value: provider, label: provider }))} />
+                    <FilterSelect label="Model" value={modelFilter} onChange={updatePagedFilter(setModelFilter)} options={data.filters.models.map((model) => ({ value: model, label: model }))} />
+                    <FilterSelect label="Run status" value={runStatusFilter} onChange={updatePagedFilter(setRunStatusFilter)} options={data.filters.run_statuses.map((status) => ({ value: status, label: status }))} />
+                    <FilterSelect label="PR state" value={prStateFilter} onChange={updatePagedFilter(setPrStateFilter)} options={data.filters.pr_states.map((state) => ({ value: state, label: state === "NO_PR" ? "No PR" : state }))} />
+                    <FilterSelect label="Page size" value={pageSize} onChange={handlePageSizeChange} includeAll={false} options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: `${size} rows` }))} />
                     <button
                       onClick={resetFilters}
                       className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover transition-colors"
@@ -619,7 +627,7 @@ export default function OutcomesPage() {
                     </button>
                   </div>
                   <div className="mt-3 text-xs text-th-muted">
-                    Showing {filteredRows.length} of {data.rows.length} rows.
+                    Showing {data.rows.length} of {data.pagination.filtered_rows} matching rows across {data.pagination.total_rows} total.
                   </div>
                 </section>
 
@@ -633,6 +641,11 @@ export default function OutcomesPage() {
                     </div>
                   )}
                 </div>
+                <PaginationControls
+                  pagination={data.pagination}
+                  onPrevious={() => setPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setPage((current) => current + 1)}
+                />
               </>
             )}
           </>
@@ -685,6 +698,43 @@ function FilterSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function PaginationControls({
+  pagination,
+  onPrevious,
+  onNext,
+}: {
+  pagination: OutcomesSummaryResponse["pagination"];
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (pagination.page_count <= 1) return null;
+  const start = (pagination.page - 1) * pagination.page_size + 1;
+  const end = Math.min(pagination.filtered_rows, pagination.page * pagination.page_size);
+  return (
+    <div className="mt-4 flex flex-col gap-3 border border-th rounded-xl bg-th-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-xs text-th-muted">
+        Rows {start}-{end} of {pagination.filtered_rows}. Page {pagination.page} of {pagination.page_count}.
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onPrevious}
+          disabled={!pagination.has_previous}
+          className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+        >
+          Previous
+        </button>
+        <button
+          onClick={onNext}
+          disabled={!pagination.has_next}
+          className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+        >
+          Next
+        </button>
+      </div>
+    </div>
   );
 }
 

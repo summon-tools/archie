@@ -114,8 +114,25 @@ export async function deleteApp(appId: number, deleteFiles = false): Promise<{ s
 
 // --- Global outcomes ---
 
-export async function getOutcomesSummary(): Promise<OutcomesSummaryResponse> {
-  return fetchJSON(`${BASE}/outcomes/summary`);
+export interface OutcomesSummaryQuery {
+  page?: number;
+  page_size?: number;
+  app_id?: string;
+  outcome_state?: string;
+  provider?: string;
+  model?: string;
+  run_status?: string;
+  pr_state?: string;
+}
+
+export async function getOutcomesSummary(query: OutcomesSummaryQuery = {}): Promise<OutcomesSummaryResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "" || value === "all") continue;
+    params.set(key, String(value));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJSON(`${BASE}/outcomes/summary${suffix}`);
 }
 
 export async function getOutcomesSettings(): Promise<OutcomesGitHubSyncSettings> {

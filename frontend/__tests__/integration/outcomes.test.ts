@@ -298,6 +298,59 @@ describe("outcomes summary aggregation", () => {
     expect(summary.costs.total_known_cost_usd).toBe(0.1);
   });
 
+  it("paginates filtered rows while preserving global summary totals", async () => {
+    const first = createWorkItem({ appName: "Pagination App", title: "First Codex Work" });
+    addRun({
+      appId: first.appId,
+      workItemId: first.workItemId,
+      conversationId: first.conversationId,
+      provider: "codex",
+      resultJson: JSON.stringify({ cost: 1 }),
+    });
+    const otherProvider = createWorkItem({ appName: "Pagination App", title: "Anthropic Work" });
+    addRun({
+      appId: otherProvider.appId,
+      workItemId: otherProvider.workItemId,
+      conversationId: otherProvider.conversationId,
+      provider: "claude",
+      resultJson: JSON.stringify({ cost: 2 }),
+    });
+    const latest = createWorkItem({ appName: "Pagination App", title: "Latest Codex Work" });
+    addRun({
+      appId: latest.appId,
+      workItemId: latest.workItemId,
+      conversationId: latest.conversationId,
+      provider: "codex",
+      resultJson: JSON.stringify({ cost: 3 }),
+    });
+    const { buildOutcomesSummary } = await loadOutcomes();
+
+    const summary = await buildOutcomesSummary({
+      apps: getAppRows(),
+      refreshGitHubState: false,
+      rowFilters: { providerId: "codex" },
+      pagination: { page: 2, pageSize: 1 },
+    });
+
+    expect(summary.counts.total_work_items).toBe(3);
+    expect(summary.costs.total_known_cost_usd).toBe(6);
+    expect(summary.pagination).toMatchObject({
+      page: 2,
+      page_size: 1,
+      total_rows: 3,
+      filtered_rows: 2,
+      page_count: 2,
+      has_previous: true,
+      has_next: false,
+    });
+    expect(summary.rows).toHaveLength(1);
+    expect(summary.rows[0]).toMatchObject({
+      work_item_title: "First Codex Work",
+      provider_id: "codex",
+    });
+    expect(summary.filters.providers).toEqual(["claude", "codex"]);
+  });
+
   it("uses persisted GitHub evidence snapshots for PR outcome and evidence counts", async () => {
     const user = seedUser(db, { username: "sync-user", email: "sync@example.com" });
     const work = createWorkItem({ appName: "Synced App" });
@@ -382,6 +435,54 @@ describe("outcomes summary aggregation", () => {
       github_deletions: 4,
       github_changed_files: 2,
     });
+  });
+
+  it("syncs all PR candidates in range when no explicit sync limit is provided", async () => {
+    const user = seedUser(db, { username: "sync-all-user", email: "sync-all@example.com" });
+    const works = [1, 2, 3].map((index) => {
+      const work = createWorkItem({ appName: "Sync All App", title: `Sync All Work ${index}` });
+      addPullRequestArtifact(work.appId, work.workItemId, {
+        pr_url: `https://github.com/acme/repo/pull/${50 + index}`,
+        pr_number: 50 + index,
+      });
+      return work;
+    });
+    const { runGitHubEvidenceSync } = await import("@/lib/server/outcomes-github-sync");
+
+    const result = await runGitHubEvidenceSync({
+      apps: getAppRows(),
+      userId: user.id,
+      githubToken: "token",
+      mode: "manual",
+      fetchEvidence: async (params) => ({
+        pr: {
+          number: params.pr_number,
+          html_url: `https://github.com/acme/repo/pull/${params.pr_number}`,
+          title: `Synced PR ${params.pr_number}`,
+          state: "open",
+          merged_at: null,
+          closed_at: null,
+          created_at: "2026-05-30T12:00:00Z",
+          updated_at: "2026-05-31T12:00:00Z",
+          additions: 1,
+          deletions: 0,
+          changed_files: 1,
+          commits: 1,
+          user: { login: "archie-bot" },
+          head: { ref: "feature/sync-all" },
+          base: { ref: "main" },
+        },
+        issue_comments: [],
+        review_comments: [],
+        reviews: [],
+        commits: [],
+      }),
+    });
+
+    expect(result.run.status).toBe("completed");
+    expect(result.run.scanned_count).toBe(works.length);
+    expect(result.run.synced_count).toBe(works.length);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM github_pr_snapshots").get()).toEqual({ count: works.length });
   });
 });
 

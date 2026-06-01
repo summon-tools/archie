@@ -77,7 +77,6 @@ export async function POST(request: NextRequest) {
     rangeDays: range.rangeStart ? null : range.rangeDays,
     rangeStart: range.rangeStart,
     rangeEnd: range.rangeEnd,
-    maxPrs: 50,
   });
   const recomputed = recomputeOutcomeSnapshots({
     apps,

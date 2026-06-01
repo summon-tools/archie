@@ -514,6 +514,15 @@ export interface OutcomeCostBuckets {
   unknown_outcome_cost_usd: number;
 }
 
+export interface OutcomeCoverageCounts {
+  github_evidence_synced_rows: number;
+  computed_snapshot_rows: number;
+  assessed_evidence_rows: number;
+  followup_rows: number;
+  regression_followup_rows: number;
+  quality_counts: Partial<Record<OutcomeQualityBand, number>>;
+}
+
 export interface OutcomeRow {
   id: string;
   app_id: number;
@@ -584,13 +593,24 @@ export interface OutcomesSummaryResponse {
   generated_at: string;
   counts: OutcomeSummaryCounts;
   costs: OutcomeCostBuckets;
+  coverage: OutcomeCoverageCounts;
   rows: OutcomeRow[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_rows: number;
+    filtered_rows: number;
+    page_count: number;
+    has_previous: boolean;
+    has_next: boolean;
+  };
   filters: {
     apps: { id: number; name: string }[];
     providers: string[];
     models: string[];
     run_statuses: string[];
     outcome_states: OutcomeState[];
+    pr_states: string[];
   };
   warnings: string[];
 }
