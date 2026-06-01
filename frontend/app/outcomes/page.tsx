@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
-import { getOutcomesSettings, getOutcomesSummary, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import { getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
+import type { OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 
@@ -45,6 +45,30 @@ function outcomeClass(state: OutcomeState): string {
     case "closed_unmerged": return "bg-st-red text-st-red border-st-red";
     case "no_pr": return "bg-th-muted text-th-secondary border-th";
     case "unknown": return "bg-st-yellow text-st-yellow border-st-yellow";
+  }
+}
+
+function qualityLabel(band: OutcomeQualityBand | null): string {
+  switch (band) {
+    case "pending": return "Pending";
+    case "strong": return "Strong";
+    case "useful": return "Useful";
+    case "costly_reworked": return "Costly rework";
+    case "abandoned": return "Abandoned";
+    case "unknown": return "Unknown";
+    default: return "Not computed";
+  }
+}
+
+function qualityClass(band: OutcomeQualityBand | null): string {
+  switch (band) {
+    case "strong": return "bg-st-green text-st-green border-st-green";
+    case "useful": return "bg-st-blue text-st-blue border-st-blue";
+    case "costly_reworked": return "bg-st-yellow text-st-yellow border-st-yellow";
+    case "abandoned": return "bg-st-red text-st-red border-st-red";
+    case "pending": return "bg-th-muted text-th-secondary border-th";
+    case "unknown": return "bg-th-muted text-th-secondary border-th";
+    default: return "bg-th-subtle text-th-muted border-th";
   }
 }
 
@@ -89,7 +113,9 @@ export default function OutcomesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
   const [syncRangeDays, setSyncRangeDays] = useState("14");
   const [appFilter, setAppFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
@@ -119,6 +145,19 @@ export default function OutcomesPage() {
     return data?.rows.filter((row) => row.github_evidence_synced_at).length || 0;
   }, [data?.rows]);
 
+  const computedSnapshotRows = useMemo(() => {
+    return data?.rows.filter((row) => row.snapshot_computed_at).length || 0;
+  }, [data?.rows]);
+
+  const qualityCounts = useMemo(() => {
+    const counts = new Map<OutcomeQualityBand, number>();
+    for (const row of data?.rows || []) {
+      if (!row.quality_band) continue;
+      counts.set(row.quality_band, (counts.get(row.quality_band) || 0) + 1);
+    }
+    return counts;
+  }, [data?.rows]);
+
   async function handleRangeChange(value: string) {
     setSyncRangeDays(value);
     const days = Number(value);
@@ -139,7 +178,7 @@ export default function OutcomesPage() {
     setSyncMessage(null);
     try {
       const result = await syncOutcomesGitHubEvidence({ range_days: days });
-      setSyncMessage(`Synced ${result.run.synced_count} of ${result.run.scanned_count} PRs${result.run.failed_count ? `, ${result.run.failed_count} failed` : ""}.`);
+      setSyncMessage(`Synced ${result.run.synced_count} of ${result.run.scanned_count} PRs${result.run.failed_count ? `, ${result.run.failed_count} failed` : ""}. Recomputed ${result.recomputed_snapshots ?? 0} snapshots.`);
       const [summary, loadedSettings] = await Promise.all([getOutcomesSummary(), getOutcomesSettings()]);
       setData(summary);
       setSettings(loadedSettings);
@@ -147,6 +186,21 @@ export default function OutcomesPage() {
       setSyncMessage(err instanceof Error ? err.message : "GitHub evidence sync failed");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleRecomputeSnapshots() {
+    setRecomputing(true);
+    setSnapshotMessage(null);
+    try {
+      const result = await recomputeOutcomeSnapshots();
+      setSnapshotMessage(`Recomputed ${result.recomputed_count} outcome snapshot${result.recomputed_count === 1 ? "" : "s"}.`);
+      const summary = await getOutcomesSummary();
+      setData(summary);
+    } catch (err) {
+      setSnapshotMessage(err instanceof Error ? err.message : "Outcome snapshot recompute failed");
+    } finally {
+      setRecomputing(false);
     }
   }
 
@@ -290,6 +344,27 @@ export default function OutcomesPage() {
             </section>
 
             <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-th-primary">Outcome snapshots</h2>
+                  <div className="mt-1 text-xs text-th-muted">
+                    {computedSnapshotRows} computed. Strong {qualityCounts.get("strong") || 0}, useful {qualityCounts.get("useful") || 0}, costly rework {qualityCounts.get("costly_reworked") || 0}, pending {qualityCounts.get("pending") || 0}.
+                  </div>
+                </div>
+                <button
+                  onClick={handleRecomputeSnapshots}
+                  disabled={recomputing}
+                  className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+                >
+                  {recomputing ? "Computing..." : "Recompute"}
+                </button>
+              </div>
+              {snapshotMessage && (
+                <div className="mt-3 text-xs text-th-muted">{snapshotMessage}</div>
+              )}
+            </section>
+
+            <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-sm font-semibold text-th-primary">Outcome funnel</h2>
                 <span className="text-xs text-th-muted">{data.counts.total_work_items} total work item{data.counts.total_work_items === 1 ? "" : "s"}</span>
@@ -414,6 +489,8 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
               <th className="text-left font-semibold px-4 py-3">Cost</th>
               <th className="text-left font-semibold px-4 py-3">Branch</th>
               <th className="text-left font-semibold px-4 py-3">PR</th>
+              <th className="text-left font-semibold px-4 py-3 min-w-[150px]">Quality</th>
+              <th className="text-left font-semibold px-4 py-3 min-w-[170px]">Attribution</th>
               <th className="text-left font-semibold px-4 py-3 min-w-[180px]">Evidence</th>
               <th className="text-left font-semibold px-4 py-3">Updated</th>
             </tr>
@@ -455,6 +532,34 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                   <div className="mt-1 text-xs text-th-muted">{row.pr_state || "NO_PR"}</div>
                 </td>
                 <td className="px-4 py-3 align-top text-th-secondary">
+                  <span className={`inline-flex px-2 py-1 rounded-md border text-xs font-semibold ${qualityClass(row.quality_band)}`}>
+                    {qualityLabel(row.quality_band)}
+                  </span>
+                  {row.quality_confidence && (
+                    <div className="mt-1 text-xs text-th-muted">{row.quality_confidence} confidence</div>
+                  )}
+                  {row.correction_burden_score !== null && (
+                    <div className="mt-1 text-xs text-th-muted">Burden {row.correction_burden_score}</div>
+                  )}
+                </td>
+                <td className="px-4 py-3 align-top text-th-secondary">
+                  {row.snapshot_computed_at ? (
+                    <>
+                      <div className="text-xs text-th-muted">
+                        Agent {row.agent_commit_count ?? 0}, coauthored {row.coauthored_commit_count ?? 0}
+                      </div>
+                      <div className="mt-1 text-xs text-th-muted">
+                        Human {row.human_commit_count ?? 0}, after agent {row.human_after_agent_commit_count ?? 0}
+                      </div>
+                      {(row.unknown_commit_count || 0) > 0 && (
+                        <div className="mt-1 text-xs text-st-yellow">{row.unknown_commit_count} unknown commits</div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-th-muted">not computed</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 align-top text-th-secondary">
                   <div>{row.evidence_completeness.replaceAll("_", " ")}</div>
                   {row.github_evidence_synced_at && (
                     <div className="mt-1 text-xs text-th-muted">
@@ -469,6 +574,9 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                   )}
                   {row.warnings.length > 0 && (
                     <div className="mt-1 text-xs text-st-yellow">{row.warnings[0]}</div>
+                  )}
+                  {row.snapshot_computed_at && (
+                    <div className="mt-1 text-xs text-th-muted">Snapshot {formatDate(row.snapshot_computed_at)}</div>
                   )}
                 </td>
                 <td className="px-4 py-3 align-top text-th-muted text-xs">

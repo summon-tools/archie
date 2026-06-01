@@ -57,6 +57,17 @@ type OutcomeRecord = {
   evidence_additions: number | null;
   evidence_deletions: number | null;
   evidence_changed_files: number | null;
+  snapshot_id: number | null;
+  snapshot_outcome_state: string | null;
+  snapshot_quality_band: string | null;
+  snapshot_confidence: string | null;
+  snapshot_computed_at: string | null;
+  snapshot_correction_burden_score: number | null;
+  snapshot_human_commit_count: number | null;
+  snapshot_agent_commit_count: number | null;
+  snapshot_coauthored_commit_count: number | null;
+  snapshot_unknown_commit_count: number | null;
+  snapshot_human_after_agent_commit_count: number | null;
 };
 
 type MatchedRun = RunRow & { matched_work_item_id: number };
@@ -174,6 +185,13 @@ function outcomeFromPrState(state: string | null): OutcomeState {
   return "pending_pr";
 }
 
+function asOutcomeState(value: string | null): OutcomeState | null {
+  if (value === "no_pr" || value === "pending_pr" || value === "merged" || value === "closed_unmerged" || value === "unknown") {
+    return value;
+  }
+  return null;
+}
+
 function costBucketForState(state: OutcomeState): keyof OutcomeCostBuckets | null {
   if (state === "pending_pr") return "pending_pr_cost_usd";
   if (state === "merged") return "merged_pr_cost_usd";
@@ -248,7 +266,18 @@ export async function buildOutcomesSummary({
       evidence.commits_count AS evidence_commits_count,
       evidence.additions AS evidence_additions,
       evidence.deletions AS evidence_deletions,
-      evidence.changed_files AS evidence_changed_files
+      evidence.changed_files AS evidence_changed_files,
+      snapshot.id AS snapshot_id,
+      snapshot.outcome_state AS snapshot_outcome_state,
+      snapshot.quality_band AS snapshot_quality_band,
+      snapshot.confidence AS snapshot_confidence,
+      snapshot.computed_at AS snapshot_computed_at,
+      snapshot.correction_burden_score AS snapshot_correction_burden_score,
+      snapshot.human_commit_count AS snapshot_human_commit_count,
+      snapshot.agent_commit_count AS snapshot_agent_commit_count,
+      snapshot.coauthored_commit_count AS snapshot_coauthored_commit_count,
+      snapshot.unknown_commit_count AS snapshot_unknown_commit_count,
+      snapshot.human_after_agent_commit_count AS snapshot_human_after_agent_commit_count
     FROM work_items wi
     JOIN apps app ON app.id = wi.app_id
     LEFT JOIN conversations c ON c.id = wi.primary_conversation_id
@@ -271,6 +300,7 @@ export async function buildOutcomesSummary({
       ORDER BY synced_at DESC, id DESC
       LIMIT 1
     )
+    LEFT JOIN llm_outcome_snapshots snapshot ON snapshot.work_item_id = wi.id
     WHERE wi.app_id IN (${placeholders(appIds.length)})
     ORDER BY wi.updated_at DESC, wi.id DESC
   `).all(...appIds) as OutcomeRecord[];
@@ -305,6 +335,10 @@ export async function buildOutcomesSummary({
       outcomeState = outcomeFromPrState(syncedState);
       evidenceCompleteness = "github_enriched";
     }
+    const snapshotOutcomeState = asOutcomeState(record.snapshot_outcome_state);
+    if (snapshotOutcomeState) {
+      outcomeState = snapshotOutcomeState;
+    }
 
     return {
       id: `work-item-${record.work_item_id}`,
@@ -334,6 +368,20 @@ export async function buildOutcomesSummary({
       pr_state: syncedState || (hasValidPr ? "UNKNOWN" : null),
       outcome_state: outcomeState,
       evidence_completeness: evidenceCompleteness,
+      snapshot_id: record.snapshot_id,
+      quality_band: record.snapshot_quality_band === "pending" || record.snapshot_quality_band === "strong" || record.snapshot_quality_band === "useful" || record.snapshot_quality_band === "costly_reworked" || record.snapshot_quality_band === "abandoned" || record.snapshot_quality_band === "unknown"
+        ? record.snapshot_quality_band
+        : null,
+      quality_confidence: record.snapshot_confidence === "low" || record.snapshot_confidence === "medium" || record.snapshot_confidence === "high"
+        ? record.snapshot_confidence
+        : null,
+      snapshot_computed_at: record.snapshot_computed_at,
+      correction_burden_score: record.snapshot_correction_burden_score,
+      human_commit_count: record.snapshot_human_commit_count,
+      agent_commit_count: record.snapshot_agent_commit_count,
+      coauthored_commit_count: record.snapshot_coauthored_commit_count,
+      unknown_commit_count: record.snapshot_unknown_commit_count,
+      human_after_agent_commit_count: record.snapshot_human_after_agent_commit_count,
       github_evidence_synced_at: record.evidence_synced_at,
       github_issue_comments_count: record.evidence_issue_comments_count,
       github_review_comments_count: record.evidence_review_comments_count,

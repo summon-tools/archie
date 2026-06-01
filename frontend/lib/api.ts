@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncResponse, OutcomesGitHubSyncSettings, OutcomesSnapshotRecomputeResponse } from "./types";
 
 const BASE = "/api";
 
@@ -131,6 +131,15 @@ export async function syncOutcomesGitHubEvidence(data: {
   range_end?: string;
 }): Promise<OutcomesGitHubSyncResponse> {
   return fetchJSON(`${BASE}/outcomes/github/sync`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function recomputeOutcomeSnapshots(data: {
+  work_item_ids?: number[];
+} = {}): Promise<OutcomesSnapshotRecomputeResponse> {
+  return fetchJSON(`${BASE}/outcomes/snapshots/recompute`, {
     method: "POST",
     body: JSON.stringify(data),
   });

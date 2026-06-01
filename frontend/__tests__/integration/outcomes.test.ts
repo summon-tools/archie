@@ -72,6 +72,11 @@ function addPullRequestArtifact(appId: number, workItemId: number, metadata: Rec
     .run(appId, workItemId, JSON.stringify(metadata));
 }
 
+function setSetting(key: string, value: unknown) {
+  db.prepare("INSERT OR REPLACE INTO system_settings (key, value_json) VALUES (?, ?)")
+    .run(key, JSON.stringify(value));
+}
+
 function makeRequest(url: string, token?: string) {
   const target = new URL(url);
   return {
@@ -84,6 +89,13 @@ function makeRequest(url: string, token?: string) {
     headers: { get: (_name: string) => null },
     nextUrl: target,
     url: target.toString(),
+  } as any;
+}
+
+function makeJsonRequest(url: string, token?: string, body: Record<string, unknown> = {}) {
+  return {
+    ...makeRequest(url, token),
+    json: async () => body,
   } as any;
 }
 
@@ -373,6 +385,213 @@ describe("outcomes summary aggregation", () => {
   });
 });
 
+describe("outcome snapshot recompute", () => {
+  it("creates idempotent pending snapshots from local PR artifacts", async () => {
+    const work = createWorkItem({ appName: "Snapshot Pending App" });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      resultJson: JSON.stringify({ cost: 0.75 }),
+    });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/21",
+      pr_number: 21,
+    });
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+
+    const first = recomputeOutcomeSnapshots({ apps: getAppRows(), computedAt: "2026-05-31T12:00:00Z" });
+    const second = recomputeOutcomeSnapshots({ apps: getAppRows(), computedAt: "2026-05-31T12:05:00Z" });
+    const snapshots = db.prepare("SELECT * FROM llm_outcome_snapshots").all() as any[];
+
+    expect(first.recomputed_count).toBe(1);
+    expect(second.snapshots[0].id).toBe(first.snapshots[0].id);
+    expect(snapshots).toHaveLength(1);
+    expect(second.snapshots[0]).toMatchObject({
+      outcome_state: "pending_pr",
+      quality_band: "pending",
+      confidence: "low",
+      known_cost_usd: 0.75,
+      unknown_cost_runs: 0,
+    });
+
+    const { buildOutcomesSummary } = await loadOutcomes();
+    const summary = await buildOutcomesSummary({ apps: getAppRows() });
+    expect(summary.rows[0]).toMatchObject({
+      snapshot_id: first.snapshots[0].id,
+      quality_band: "pending",
+      quality_confidence: "low",
+      snapshot_computed_at: "2026-05-31T12:05:00Z",
+    });
+  });
+
+  it("classifies merged low-rework agent PRs as strong", async () => {
+    setSetting("github_bot_username", "archie-bot");
+    setSetting("github_bot_display_name", "Archie");
+    setSetting("github_bot_email", "bot@example.com");
+    const work = createWorkItem({ appName: "Strong App" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/22",
+      pr_number: 22,
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: work.appId,
+        work_item_id: work.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 22,
+        pr_url: "https://github.com/acme/repo/pull/22",
+        title: "Strong PR",
+        state: "MERGED",
+        commits_count: 1,
+        issue_comments_count: 0,
+        review_comments_count: 0,
+        reviews_count: 0,
+      },
+      issue_comments: [],
+      review_comments: [],
+      reviews: [],
+      commits: [{
+        sha: "agent-a",
+        author: { login: "archie-bot" },
+        committer: { login: "archie-bot" },
+        commit: {
+          message: "Implement strong outcome",
+          author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
+          committer: { date: "2026-05-31T09:01:00Z" },
+        },
+      }],
+    });
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+
+    const result = recomputeOutcomeSnapshots({ apps: getAppRows() });
+
+    expect(result.snapshots[0]).toMatchObject({
+      outcome_state: "merged",
+      quality_band: "strong",
+      confidence: "high",
+      agent_commit_count: 1,
+      human_commit_count: 0,
+      human_after_agent_commit_count: 0,
+    });
+  });
+
+  it("classifies merged PRs with human correction commits after agent work as costly rework", async () => {
+    setSetting("github_bot_username", "archie-bot");
+    setSetting("github_bot_display_name", "Archie");
+    setSetting("github_bot_email", "bot@example.com");
+    const work = createWorkItem({ appName: "Rework App" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/23",
+      pr_number: 23,
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: work.appId,
+        work_item_id: work.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 23,
+        pr_url: "https://github.com/acme/repo/pull/23",
+        title: "Reworked PR",
+        state: "MERGED",
+        commits_count: 3,
+        issue_comments_count: 1,
+        review_comments_count: 1,
+        reviews_count: 1,
+      },
+      issue_comments: [{ id: 501, body: "Follow-up context", user: { login: "reviewer" } }],
+      review_comments: [{ id: 601, body: "Please revise", path: "app.ts", user: { login: "reviewer" } }],
+      reviews: [{ id: 701, state: "COMMENTED", body: "Needs edits", user: { login: "reviewer" } }],
+      commits: [
+        {
+          sha: "agent-b",
+          author: { login: "archie-bot" },
+          committer: { login: "archie-bot" },
+          commit: {
+            message: "Implement initial version",
+            author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
+            committer: { date: "2026-05-31T09:01:00Z" },
+          },
+        },
+        {
+          sha: "human-a",
+          author: { login: "engineer" },
+          committer: { login: "engineer" },
+          commit: {
+            message: "Fix generated behavior",
+            author: { name: "Engineer", email: "engineer@example.com", date: "2026-05-31T10:00:00Z" },
+            committer: { date: "2026-05-31T10:01:00Z" },
+          },
+        },
+        {
+          sha: "human-b",
+          author: { login: "engineer" },
+          committer: { login: "engineer" },
+          commit: {
+            message: "Tighten tests",
+            author: { name: "Engineer", email: "engineer@example.com", date: "2026-05-31T11:00:00Z" },
+            committer: { date: "2026-05-31T11:01:00Z" },
+          },
+        },
+      ],
+    });
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+
+    const result = recomputeOutcomeSnapshots({ apps: getAppRows() });
+
+    expect(result.snapshots[0]).toMatchObject({
+      outcome_state: "merged",
+      quality_band: "costly_reworked",
+      human_commit_count: 2,
+      agent_commit_count: 1,
+      human_after_agent_commit_count: 2,
+    });
+    expect(result.snapshots[0].correction_burden_score).toBeGreaterThanOrEqual(6);
+  });
+
+  it("classifies closed unmerged pull requests as abandoned", async () => {
+    const work = createWorkItem({ appName: "Abandoned App" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/24",
+      pr_number: 24,
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: work.appId,
+        work_item_id: work.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 24,
+        pr_url: "https://github.com/acme/repo/pull/24",
+        title: "Closed PR",
+        state: "CLOSED",
+        commits_count: 1,
+        issue_comments_count: 0,
+        review_comments_count: 0,
+        reviews_count: 0,
+      },
+      issue_comments: [],
+      review_comments: [],
+      reviews: [],
+      commits: [],
+    });
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+
+    const result = recomputeOutcomeSnapshots({ apps: getAppRows() });
+
+    expect(result.snapshots[0]).toMatchObject({
+      outcome_state: "closed_unmerged",
+      quality_band: "abandoned",
+      confidence: "high",
+    });
+  });
+});
+
 describe("GET /api/outcomes/summary", () => {
   it("requires authentication", async () => {
     const { GET } = await import("@/app/api/outcomes/summary/route");
@@ -407,6 +626,35 @@ describe("GET /api/outcomes/summary", () => {
       outcome_state: "no_pr",
     });
     expect(body.warnings).toEqual([]);
+  });
+});
+
+describe("POST /api/outcomes/snapshots/recompute", () => {
+  it("requires authentication", async () => {
+    const { POST } = await import("@/app/api/outcomes/snapshots/recompute/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/snapshots/recompute"));
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns recompute metadata for authenticated users", async () => {
+    const token = await createAuthToken();
+    const work = createWorkItem({ appName: "Snapshot API App" });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      resultJson: JSON.stringify({ cost: 0.12 }),
+    });
+    const { POST } = await import("@/app/api/outcomes/snapshots/recompute/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/snapshots/recompute", token));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.recomputed_count).toBe(1);
+    expect(body.snapshot_ids).toHaveLength(1);
   });
 });
 

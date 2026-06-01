@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { GitHubAppError, getValidGitHubUserToken } from "@/lib/server/github-app";
+import { recomputeOutcomeSnapshots } from "@/lib/server/outcome-snapshots";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
 import { getOutcomesGitHubSyncSettings, runGitHubEvidenceSync } from "@/lib/server/outcomes-github-sync";
 
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
     rangeEnd: range.rangeEnd,
     maxPrs: 50,
   });
+  const recomputed = recomputeOutcomeSnapshots({ apps });
 
-  return NextResponse.json(result);
+  return NextResponse.json({ ...result, recomputed_snapshots: recomputed.recomputed_count });
 }

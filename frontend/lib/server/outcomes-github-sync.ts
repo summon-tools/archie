@@ -4,6 +4,7 @@ import { getPullRequestEvidence, type PullRequestEvidencePayload } from "@/lib/s
 import { getValidGitHubUserToken } from "@/lib/server/github-app";
 import { parsePullRequestMetadata, resolvePullRequestRepo } from "@/lib/server/github-pr-utils";
 import { logger } from "@/lib/server/logger";
+import { recomputeOutcomeSnapshots } from "@/lib/server/outcome-snapshots";
 import type { AppRow } from "@/lib/server/types";
 
 const OBSERVATION_WINDOW_SETTING = "outcomes_observation_window_days";
@@ -286,6 +287,7 @@ async function runScheduledSyncIfDue(): Promise<void> {
       rangeDays: settings.observation_window_days,
       maxPrs: 50,
     });
+    recomputeOutcomeSnapshots({ apps });
     dal.setSetting(LAST_SCHEDULED_SYNC_SETTING, new Date().toISOString());
   } catch (error) {
     logger.error({ err: error }, "scheduled GitHub outcome evidence sync failed");

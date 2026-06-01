@@ -239,6 +239,37 @@ export interface GitHubOutcomeSyncRunRow {
   completed_at: string | null;
 }
 
+export type LlmOutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged" | "unknown";
+export type LlmOutcomeQualityBand = "pending" | "strong" | "useful" | "costly_reworked" | "abandoned" | "unknown";
+export type LlmOutcomeConfidence = "low" | "medium" | "high";
+
+export interface LlmOutcomeSnapshotRow {
+  id: number;
+  app_id: number;
+  work_item_id: number;
+  conversation_id: number | null;
+  session_id: number | null;
+  pr_snapshot_id: number | null;
+  outcome_state: LlmOutcomeState;
+  quality_band: LlmOutcomeQualityBand;
+  confidence: LlmOutcomeConfidence;
+  known_cost_usd: number | null;
+  unknown_cost_runs: number;
+  issue_comment_count: number;
+  review_comment_count: number;
+  review_count: number;
+  commit_count: number;
+  human_commit_count: number;
+  agent_commit_count: number;
+  coauthored_commit_count: number;
+  unknown_commit_count: number;
+  human_after_agent_commit_count: number;
+  correction_burden_score: number;
+  evidence_json: string | null;
+  computed_at: string;
+  created_at: string;
+}
+
 export type AppFileStatus = "uploading" | "available" | "deleted";
 export type AppFileLinkType = "attachment" | "context";
 

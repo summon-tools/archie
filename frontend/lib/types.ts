@@ -413,6 +413,8 @@ export interface Notification {
 
 export type OutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged" | "unknown";
 export type OutcomeEvidenceCompleteness = "no_pr_artifact" | "local_pr_artifact" | "github_enriched" | "incomplete";
+export type OutcomeQualityBand = "pending" | "strong" | "useful" | "costly_reworked" | "abandoned" | "unknown";
+export type OutcomeConfidence = "low" | "medium" | "high";
 
 export interface OutcomeSummaryCounts {
   total_work_items: number;
@@ -464,6 +466,16 @@ export interface OutcomeRow {
   pr_state: "OPEN" | "CLOSED" | "MERGED" | "UNKNOWN" | null;
   outcome_state: OutcomeState;
   evidence_completeness: OutcomeEvidenceCompleteness;
+  snapshot_id: number | null;
+  quality_band: OutcomeQualityBand | null;
+  quality_confidence: OutcomeConfidence | null;
+  snapshot_computed_at: string | null;
+  correction_burden_score: number | null;
+  human_commit_count: number | null;
+  agent_commit_count: number | null;
+  coauthored_commit_count: number | null;
+  unknown_commit_count: number | null;
+  human_after_agent_commit_count: number | null;
   github_evidence_synced_at: string | null;
   github_issue_comments_count: number | null;
   github_review_comments_count: number | null;
@@ -519,4 +531,11 @@ export interface GitHubOutcomeSyncRun {
 export interface OutcomesGitHubSyncResponse {
   run: GitHubOutcomeSyncRun;
   warnings: string[];
+  recomputed_snapshots?: number;
+}
+
+export interface OutcomesSnapshotRecomputeResponse {
+  recomputed_count: number;
+  snapshot_ids: number[];
+  generated_at: string;
 }

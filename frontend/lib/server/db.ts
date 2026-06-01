@@ -329,6 +329,42 @@ function initDb(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_github_outcome_sync_runs_started_at ON github_outcome_sync_runs(started_at);
 
+    CREATE TABLE IF NOT EXISTS llm_outcome_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      work_item_id INTEGER NOT NULL,
+      conversation_id INTEGER DEFAULT NULL,
+      session_id INTEGER DEFAULT NULL,
+      pr_snapshot_id INTEGER DEFAULT NULL,
+      outcome_state TEXT NOT NULL CHECK(outcome_state IN ('no_pr', 'pending_pr', 'merged', 'closed_unmerged', 'unknown')),
+      quality_band TEXT NOT NULL CHECK(quality_band IN ('pending', 'strong', 'useful', 'costly_reworked', 'abandoned', 'unknown')),
+      confidence TEXT NOT NULL CHECK(confidence IN ('low', 'medium', 'high')),
+      known_cost_usd REAL DEFAULT NULL,
+      unknown_cost_runs INTEGER NOT NULL DEFAULT 0,
+      issue_comment_count INTEGER NOT NULL DEFAULT 0,
+      review_comment_count INTEGER NOT NULL DEFAULT 0,
+      review_count INTEGER NOT NULL DEFAULT 0,
+      commit_count INTEGER NOT NULL DEFAULT 0,
+      human_commit_count INTEGER NOT NULL DEFAULT 0,
+      agent_commit_count INTEGER NOT NULL DEFAULT 0,
+      coauthored_commit_count INTEGER NOT NULL DEFAULT 0,
+      unknown_commit_count INTEGER NOT NULL DEFAULT 0,
+      human_after_agent_commit_count INTEGER NOT NULL DEFAULT 0,
+      correction_burden_score INTEGER NOT NULL DEFAULT 0,
+      evidence_json TEXT DEFAULT NULL,
+      computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(work_item_id),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+      FOREIGN KEY (session_id) REFERENCES agent_sessions(id),
+      FOREIGN KEY (pr_snapshot_id) REFERENCES github_pr_snapshots(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_snapshots_app_id ON llm_outcome_snapshots(app_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_snapshots_quality_band ON llm_outcome_snapshots(quality_band);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_snapshots_computed_at ON llm_outcome_snapshots(computed_at);
+
     CREATE TABLE IF NOT EXISTS app_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL,
