@@ -287,7 +287,7 @@ async function runScheduledSyncIfDue(): Promise<void> {
       rangeDays: settings.observation_window_days,
       maxPrs: 50,
     });
-    recomputeOutcomeSnapshots({ apps });
+    recomputeOutcomeSnapshots({ apps, rangeDays: settings.observation_window_days });
     dal.setSetting(LAST_SCHEDULED_SYNC_SETTING, new Date().toISOString());
   } catch (error) {
     logger.error({ err: error }, "scheduled GitHub outcome evidence sync failed");

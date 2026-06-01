@@ -421,7 +421,13 @@ describe("outcome snapshot recompute", () => {
       snapshot_id: first.snapshots[0].id,
       quality_band: "pending",
       quality_confidence: "low",
+      pr_author_classification: "unknown",
+      attribution_confidence: "low",
       snapshot_computed_at: "2026-05-31T12:05:00Z",
+    });
+    expect(summary.rows[0].snapshot_evidence).toMatchObject({
+      quality_reason: "A local pull request artifact exists, but GitHub evidence has not been synced.",
+      pr_author: { classification: "unknown", confidence: "low" },
     });
   });
 
@@ -445,6 +451,7 @@ describe("outcome snapshot recompute", () => {
         pr_url: "https://github.com/acme/repo/pull/22",
         title: "Strong PR",
         state: "MERGED",
+        author_login: "archie-bot",
         commits_count: 1,
         issue_comments_count: 0,
         review_comments_count: 0,
@@ -472,10 +479,19 @@ describe("outcome snapshot recompute", () => {
       outcome_state: "merged",
       quality_band: "strong",
       confidence: "high",
+      pr_author_login: "archie-bot",
+      pr_author_classification: "agent",
+      pr_author_confidence: "high",
+      attribution_confidence: "high",
       agent_commit_count: 1,
       human_commit_count: 0,
       human_after_agent_commit_count: 0,
     });
+    const evidence = JSON.parse(result.snapshots[0].evidence_json || "{}");
+    expect(evidence).toMatchObject({
+      pr_author: { login: "archie-bot", classification: "agent", confidence: "high" },
+    });
+    expect(evidence.quality_reason).toContain("merged with low review pressure");
   });
 
   it("classifies merged PRs with human correction commits after agent work as costly rework", async () => {
@@ -589,6 +605,73 @@ describe("outcome snapshot recompute", () => {
       quality_band: "abandoned",
       confidence: "high",
     });
+  });
+
+  it("classifies PR authors matched to connected GitHub users", async () => {
+    const user = seedUser(db, { username: "connected-engineer", email: "engineer@example.com" });
+    db.prepare(
+      `INSERT INTO github_user_connections (
+        user_id, github_user_id, github_login, github_name, github_email, access_token_ciphertext
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(user.id, 123, "engineer", "Engineer", "engineer@example.com", "ciphertext");
+    const work = createWorkItem({ appName: "Known User App" });
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/25",
+      pr_number: 25,
+    });
+    const dal = await import("@/lib/server/dal");
+    dal.replaceGitHubPrEvidence({
+      snapshot: {
+        app_id: work.appId,
+        work_item_id: work.workItemId,
+        owner: "acme",
+        repo: "repo",
+        pr_number: 25,
+        pr_url: "https://github.com/acme/repo/pull/25",
+        title: "Known user PR",
+        state: "OPEN",
+        author_login: "engineer",
+        commits_count: 0,
+        issue_comments_count: 0,
+        review_comments_count: 0,
+        reviews_count: 0,
+      },
+      issue_comments: [],
+      review_comments: [],
+      reviews: [],
+      commits: [],
+    });
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+
+    const result = recomputeOutcomeSnapshots({ apps: getAppRows() });
+
+    expect(result.snapshots[0]).toMatchObject({
+      outcome_state: "pending_pr",
+      pr_author_login: "engineer",
+      pr_author_classification: "known_user",
+      pr_author_confidence: "high",
+      attribution_confidence: "high",
+    });
+  });
+
+  it("limits recompute to work items inside the selected date range", async () => {
+    const recent = createWorkItem({ appName: "Recent Range App", title: "Recent Work" });
+    const old = createWorkItem({ appName: "Old Range App", title: "Old Work" });
+    db.prepare("UPDATE work_items SET updated_at = ? WHERE id = ?").run("2026-05-20 10:00:00", recent.workItemId);
+    db.prepare("UPDATE work_items SET updated_at = ? WHERE id = ?").run("2026-04-01 10:00:00", old.workItemId);
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+
+    const result = recomputeOutcomeSnapshots({
+      apps: getAppRows(),
+      rangeStart: "2026-05-01 00:00:00",
+      rangeEnd: "2026-05-31 23:59:59",
+    });
+
+    expect(result.recomputed_count).toBe(1);
+    expect(result.snapshots[0].work_item_id).toBe(recent.workItemId);
+    expect(db.prepare("SELECT work_item_id FROM llm_outcome_snapshots").all()).toEqual([
+      { work_item_id: recent.workItemId },
+    ]);
   });
 });
 

@@ -242,6 +242,8 @@ export interface GitHubOutcomeSyncRunRow {
 export type LlmOutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged" | "unknown";
 export type LlmOutcomeQualityBand = "pending" | "strong" | "useful" | "costly_reworked" | "abandoned" | "unknown";
 export type LlmOutcomeConfidence = "low" | "medium" | "high";
+export type LlmAttributionClassification = "agent" | "known_user" | "human" | "unknown";
+export type LlmAttributionConfidence = "unknown" | "low" | "medium" | "high";
 
 export interface LlmOutcomeSnapshotRow {
   id: number;
@@ -250,6 +252,10 @@ export interface LlmOutcomeSnapshotRow {
   conversation_id: number | null;
   session_id: number | null;
   pr_snapshot_id: number | null;
+  pr_author_login: string | null;
+  pr_author_classification: LlmAttributionClassification;
+  pr_author_confidence: LlmAttributionConfidence;
+  attribution_confidence: LlmAttributionConfidence;
   outcome_state: LlmOutcomeState;
   quality_band: LlmOutcomeQualityBand;
   confidence: LlmOutcomeConfidence;

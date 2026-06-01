@@ -7,6 +7,8 @@ import type {
   GitHubPrCommentRow,
   GitHubPrCommitRow,
   GitHubPrReviewRow,
+  LlmAttributionClassification,
+  LlmAttributionConfidence,
   LlmOutcomeConfidence,
   LlmOutcomeQualityBand,
   LlmOutcomeSnapshotRow,
@@ -27,6 +29,8 @@ type SnapshotCandidate = {
   evidence_review_comments_count: number | null;
   evidence_reviews_count: number | null;
   evidence_commits_count: number | null;
+  evidence_author_login: string | null;
+  work_item_updated_at: string;
 };
 
 type MatchedRun = RunRow & { matched_work_item_id: number };
@@ -35,6 +39,9 @@ type CommitClassification = "agent_authored" | "agent_coauthored" | "human_autho
 export interface RecomputeOutcomeSnapshotsOptions {
   apps: AppRow[];
   workItemIds?: number[];
+  rangeStart?: string | null;
+  rangeEnd?: string | null;
+  rangeDays?: number | null;
   computedAt?: string;
 }
 
@@ -82,6 +89,10 @@ function outcomeFromPrState(state: string | null): LlmOutcomeState {
   if (state === "CLOSED") return "closed_unmerged";
   if (state === "OPEN") return "pending_pr";
   return "unknown";
+}
+
+function isoDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function normalize(value: string | null | undefined): string {
@@ -137,6 +148,50 @@ function getActorSignals() {
 
 function coAuthorMatchesBot(coAuthor: { name: string; email: string }, actors: ReturnType<typeof getActorSignals>): boolean {
   return matchesAny(coAuthor.email, actors.botEmails) || matchesAny(coAuthor.name, actors.botNames);
+}
+
+function classifyPrAuthor(
+  authorLogin: string | null,
+  actors: ReturnType<typeof getActorSignals>,
+  hasValidPrArtifact: boolean,
+): {
+  classification: LlmAttributionClassification;
+  confidence: LlmAttributionConfidence;
+  reason: string;
+} {
+  if (matchesAny(authorLogin, actors.botLogins)) {
+    return {
+      classification: "agent",
+      confidence: "high",
+      reason: "PR author login matches the configured Archie GitHub bot.",
+    };
+  }
+  if (matchesAny(authorLogin, actors.humanLogins)) {
+    return {
+      classification: "known_user",
+      confidence: "high",
+      reason: "PR author login matches a connected Archie user.",
+    };
+  }
+  if (normalize(authorLogin)) {
+    return {
+      classification: "human",
+      confidence: "medium",
+      reason: "PR author login is present, but it is not mapped to a connected Archie user.",
+    };
+  }
+  if (hasValidPrArtifact) {
+    return {
+      classification: "unknown",
+      confidence: "low",
+      reason: "A local PR artifact exists, but the GitHub PR author has not been synced.",
+    };
+  }
+  return {
+    classification: "unknown",
+    confidence: "unknown",
+    reason: "No PR author evidence is available.",
+  };
 }
 
 function classifyCommit(commit: GitHubPrCommitRow, actors: ReturnType<typeof getActorSignals>): {
@@ -212,6 +267,10 @@ function computeCommitAttribution(commits: GitHubPrCommitRow[], actors: ReturnTy
   let unknownCommitCount = 0;
   let humanAfterAgentCommitCount = 0;
   let seenAgentAssistedCommit = false;
+  let hasAgentAuthorSignal = false;
+  let hasAgentCoauthorSignal = false;
+  let hasKnownHumanSignal = false;
+  let hasHumanSignal = false;
 
   const classifications = commits
     .slice()
@@ -226,6 +285,10 @@ function computeCommitAttribution(commits: GitHubPrCommitRow[], actors: ReturnTy
       if (classified.classification === "agent_authored") agentCommitCount += 1;
       if (classified.classification === "agent_coauthored") coauthoredCommitCount += 1;
       if (classified.classification === "unknown") unknownCommitCount += 1;
+      if (classified.signals.includes("agent_author_or_committer")) hasAgentAuthorSignal = true;
+      if (classified.signals.includes("agent_coauthor_trailer")) hasAgentCoauthorSignal = true;
+      if (classified.signals.includes("known_human_author")) hasKnownHumanSignal = true;
+      if (classified.classification === "human_authored") hasHumanSignal = true;
       if (seenAgentAssistedCommit && classified.classification === "human_authored") {
         humanAfterAgentCommitCount += 1;
       }
@@ -249,7 +312,50 @@ function computeCommitAttribution(commits: GitHubPrCommitRow[], actors: ReturnTy
     coauthoredCommitCount,
     unknownCommitCount,
     humanAfterAgentCommitCount,
+    hasAgentAuthorSignal,
+    hasAgentCoauthorSignal,
+    hasKnownHumanSignal,
+    hasHumanSignal,
     classifications,
+  };
+}
+
+function computeAttributionConfidence(input: {
+  hasValidPrArtifact: boolean;
+  prAuthorConfidence: LlmAttributionConfidence;
+  hasAgentAuthorSignal: boolean;
+  hasAgentCoauthorSignal: boolean;
+  hasKnownHumanSignal: boolean;
+  hasHumanSignal: boolean;
+  commitCount: number;
+}): { confidence: LlmAttributionConfidence; reason: string } {
+  if (input.hasAgentAuthorSignal || input.prAuthorConfidence === "high" || input.hasKnownHumanSignal) {
+    return {
+      confidence: "high",
+      reason: "Attribution is backed by a bot or connected-user GitHub login/email signal.",
+    };
+  }
+  if (input.hasAgentCoauthorSignal) {
+    return {
+      confidence: "medium",
+      reason: "Attribution is backed by an Archie co-author trailer.",
+    };
+  }
+  if (input.prAuthorConfidence === "medium" || input.hasHumanSignal) {
+    return {
+      confidence: "medium",
+      reason: "Attribution is backed by GitHub user evidence that is not mapped to a connected Archie user.",
+    };
+  }
+  if (input.hasValidPrArtifact || input.commitCount > 0) {
+    return {
+      confidence: "low",
+      reason: "Attribution is inferred from incomplete local or commit evidence.",
+    };
+  }
+  return {
+    confidence: "unknown",
+    reason: "No reliable attribution evidence is available.",
   };
 }
 
@@ -343,20 +449,31 @@ function computeQuality(input: {
   };
 }
 
-function loadCandidates(apps: AppRow[], workItemIds?: number[]): SnapshotCandidate[] {
+function loadCandidates(apps: AppRow[], options: Pick<RecomputeOutcomeSnapshotsOptions, "workItemIds" | "rangeStart" | "rangeEnd" | "rangeDays">): SnapshotCandidate[] {
   if (apps.length === 0) return [];
   const appIds = apps.map((app) => app.id);
   const conditions = [`wi.app_id IN (${placeholders(appIds.length)})`];
   const params: unknown[] = [...appIds];
-  if (workItemIds && workItemIds.length > 0) {
-    conditions.push(`wi.id IN (${placeholders(workItemIds.length)})`);
-    params.push(...workItemIds);
+  if (options.workItemIds && options.workItemIds.length > 0) {
+    conditions.push(`wi.id IN (${placeholders(options.workItemIds.length)})`);
+    params.push(...options.workItemIds);
+  }
+  const rangeEnd = options.rangeEnd || null;
+  const rangeStart = options.rangeStart || (options.rangeDays && options.rangeDays > 0 ? isoDaysAgo(options.rangeDays) : null);
+  if (rangeStart) {
+    conditions.push("datetime(wi.updated_at) >= datetime(?)");
+    params.push(rangeStart);
+  }
+  if (rangeEnd) {
+    conditions.push("datetime(wi.updated_at) <= datetime(?)");
+    params.push(rangeEnd);
   }
 
   return getDb().prepare(`
     SELECT
       wi.app_id AS app_id,
       wi.id AS work_item_id,
+      wi.updated_at AS work_item_updated_at,
       wi.primary_conversation_id AS conversation_id,
       latest_session.id AS session_id,
       pr.id AS pr_artifact_id,
@@ -366,7 +483,8 @@ function loadCandidates(apps: AppRow[], workItemIds?: number[]): SnapshotCandida
       evidence.issue_comments_count AS evidence_issue_comments_count,
       evidence.review_comments_count AS evidence_review_comments_count,
       evidence.reviews_count AS evidence_reviews_count,
-      evidence.commits_count AS evidence_commits_count
+      evidence.commits_count AS evidence_commits_count,
+      evidence.author_login AS evidence_author_login
     FROM work_items wi
     LEFT JOIN agent_sessions latest_session ON latest_session.id = (
       SELECT id FROM agent_sessions
@@ -392,7 +510,7 @@ function loadCandidates(apps: AppRow[], workItemIds?: number[]): SnapshotCandida
 }
 
 export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOptions): RecomputeOutcomeSnapshotsResult {
-  const candidates = loadCandidates(options.apps, options.workItemIds);
+  const candidates = loadCandidates(options.apps, options);
   if (candidates.length === 0) {
     return { recomputed_count: 0, snapshots: [], generated_at: new Date().toISOString() };
   }
@@ -439,6 +557,7 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
     const commitCount = commits.length || candidate.evidence_commits_count || 0;
     const changesRequestedCount = reviews.filter((review) => normalize(review.state) === "changes_requested").length;
     const attribution = computeCommitAttribution(commits, actors);
+    const prAuthor = classifyPrAuthor(candidate.evidence_author_login, actors, hasValidPrArtifact);
     const outcomeState = hasGitHubEvidence
       ? outcomeFromPrState(candidate.evidence_state === "MERGED" || candidate.evidence_state === "CLOSED" || candidate.evidence_state === "OPEN" ? candidate.evidence_state : null)
       : hasValidPrArtifact
@@ -456,6 +575,15 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
       changesRequestedCount,
       humanAfterAgentCommitCount: attribution.humanAfterAgentCommitCount,
     });
+    const attributionConfidence = computeAttributionConfidence({
+      hasValidPrArtifact,
+      prAuthorConfidence: prAuthor.confidence,
+      hasAgentAuthorSignal: attribution.hasAgentAuthorSignal,
+      hasAgentCoauthorSignal: attribution.hasAgentCoauthorSignal,
+      hasKnownHumanSignal: attribution.hasKnownHumanSignal,
+      hasHumanSignal: attribution.hasHumanSignal,
+      commitCount,
+    });
 
     const snapshot = dal.upsertLlmOutcomeSnapshot({
       app_id: candidate.app_id,
@@ -463,6 +591,10 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
       conversation_id: candidate.conversation_id,
       session_id: candidate.session_id,
       pr_snapshot_id: candidate.pr_snapshot_id,
+      pr_author_login: candidate.evidence_author_login,
+      pr_author_classification: prAuthor.classification,
+      pr_author_confidence: prAuthor.confidence,
+      attribution_confidence: attributionConfidence.confidence,
       outcome_state: outcomeState,
       quality_band: quality.qualityBand,
       confidence: quality.confidence,
@@ -480,8 +612,21 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
       correction_burden_score: quality.correctionBurdenScore,
       evidence_json: JSON.stringify({
         rules_version: 1,
-        reason: quality.reason,
+        quality_reason: quality.reason,
+        attribution_reason: attributionConfidence.reason,
         changes_requested_count: changesRequestedCount,
+        correction_burden_inputs: {
+          review_comment_count: reviewCommentCount,
+          changes_requested_count: changesRequestedCount,
+          human_after_agent_commit_count: attribution.humanAfterAgentCommitCount,
+          extra_issue_comment_count: Math.max(0, issueCommentCount - 1),
+        },
+        pr_author: {
+          login: candidate.evidence_author_login,
+          classification: prAuthor.classification,
+          confidence: prAuthor.confidence,
+          reason: prAuthor.reason,
+        },
         pr_artifact_warnings: pr.warnings,
         commit_classifications: attribution.classifications,
       }),

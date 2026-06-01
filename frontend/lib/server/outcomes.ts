@@ -61,7 +61,12 @@ type OutcomeRecord = {
   snapshot_outcome_state: string | null;
   snapshot_quality_band: string | null;
   snapshot_confidence: string | null;
+  snapshot_pr_author_login: string | null;
+  snapshot_pr_author_classification: string | null;
+  snapshot_pr_author_confidence: string | null;
+  snapshot_attribution_confidence: string | null;
   snapshot_computed_at: string | null;
+  snapshot_evidence_json: string | null;
   snapshot_correction_burden_score: number | null;
   snapshot_human_commit_count: number | null;
   snapshot_agent_commit_count: number | null;
@@ -192,6 +197,53 @@ function asOutcomeState(value: string | null): OutcomeState | null {
   return null;
 }
 
+function parseSnapshotEvidence(value: string | null): OutcomeRow["snapshot_evidence"] {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      rules_version: Number(parsed.rules_version) || 1,
+      quality_reason: String(parsed.quality_reason || parsed.reason || ""),
+      attribution_reason: String(parsed.attribution_reason || ""),
+      changes_requested_count: Number(parsed.changes_requested_count) || 0,
+      correction_burden_inputs: {
+        review_comment_count: Number(parsed.correction_burden_inputs?.review_comment_count) || 0,
+        changes_requested_count: Number(parsed.correction_burden_inputs?.changes_requested_count) || 0,
+        human_after_agent_commit_count: Number(parsed.correction_burden_inputs?.human_after_agent_commit_count) || 0,
+        extra_issue_comment_count: Number(parsed.correction_burden_inputs?.extra_issue_comment_count) || 0,
+      },
+      pr_author: {
+        login: typeof parsed.pr_author?.login === "string" ? parsed.pr_author.login : null,
+        classification: parsed.pr_author?.classification === "agent" || parsed.pr_author?.classification === "known_user" || parsed.pr_author?.classification === "human" || parsed.pr_author?.classification === "unknown"
+          ? parsed.pr_author.classification
+          : "unknown",
+        confidence: parsed.pr_author?.confidence === "unknown" || parsed.pr_author?.confidence === "low" || parsed.pr_author?.confidence === "medium" || parsed.pr_author?.confidence === "high"
+          ? parsed.pr_author.confidence
+          : "unknown",
+      },
+      pr_artifact_warnings: Array.isArray(parsed.pr_artifact_warnings)
+        ? parsed.pr_artifact_warnings.map((entry: unknown) => String(entry)).filter(Boolean)
+        : [],
+      commit_classifications: Array.isArray(parsed.commit_classifications)
+        ? parsed.commit_classifications.map((entry: any) => ({
+          sha: String(entry?.sha || ""),
+          classification: entry?.classification === "agent_authored" || entry?.classification === "agent_coauthored" || entry?.classification === "human_authored" || entry?.classification === "unknown"
+            ? entry.classification
+            : "unknown",
+          signals: Array.isArray(entry?.signals) ? entry.signals.map((signal: unknown) => String(signal)).filter(Boolean) : [],
+          author_login: typeof entry?.author_login === "string" ? entry.author_login : null,
+          author_email: typeof entry?.author_email === "string" ? entry.author_email : null,
+          committer_login: typeof entry?.committer_login === "string" ? entry.committer_login : null,
+          authored_at: typeof entry?.authored_at === "string" ? entry.authored_at : null,
+        }))
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 function costBucketForState(state: OutcomeState): keyof OutcomeCostBuckets | null {
   if (state === "pending_pr") return "pending_pr_cost_usd";
   if (state === "merged") return "merged_pr_cost_usd";
@@ -271,7 +323,12 @@ export async function buildOutcomesSummary({
       snapshot.outcome_state AS snapshot_outcome_state,
       snapshot.quality_band AS snapshot_quality_band,
       snapshot.confidence AS snapshot_confidence,
+      snapshot.pr_author_login AS snapshot_pr_author_login,
+      snapshot.pr_author_classification AS snapshot_pr_author_classification,
+      snapshot.pr_author_confidence AS snapshot_pr_author_confidence,
+      snapshot.attribution_confidence AS snapshot_attribution_confidence,
       snapshot.computed_at AS snapshot_computed_at,
+      snapshot.evidence_json AS snapshot_evidence_json,
       snapshot.correction_burden_score AS snapshot_correction_burden_score,
       snapshot.human_commit_count AS snapshot_human_commit_count,
       snapshot.agent_commit_count AS snapshot_agent_commit_count,
@@ -375,7 +432,18 @@ export async function buildOutcomesSummary({
       quality_confidence: record.snapshot_confidence === "low" || record.snapshot_confidence === "medium" || record.snapshot_confidence === "high"
         ? record.snapshot_confidence
         : null,
+      pr_author_login: record.snapshot_pr_author_login,
+      pr_author_classification: record.snapshot_pr_author_classification === "agent" || record.snapshot_pr_author_classification === "known_user" || record.snapshot_pr_author_classification === "human" || record.snapshot_pr_author_classification === "unknown"
+        ? record.snapshot_pr_author_classification
+        : null,
+      pr_author_confidence: record.snapshot_pr_author_confidence === "unknown" || record.snapshot_pr_author_confidence === "low" || record.snapshot_pr_author_confidence === "medium" || record.snapshot_pr_author_confidence === "high"
+        ? record.snapshot_pr_author_confidence
+        : null,
+      attribution_confidence: record.snapshot_attribution_confidence === "unknown" || record.snapshot_attribution_confidence === "low" || record.snapshot_attribution_confidence === "medium" || record.snapshot_attribution_confidence === "high"
+        ? record.snapshot_attribution_confidence
+        : null,
       snapshot_computed_at: record.snapshot_computed_at,
+      snapshot_evidence: parseSnapshotEvidence(record.snapshot_evidence_json),
       correction_burden_score: record.snapshot_correction_burden_score,
       human_commit_count: record.snapshot_human_commit_count,
       agent_commit_count: record.snapshot_agent_commit_count,

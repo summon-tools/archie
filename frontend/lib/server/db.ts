@@ -336,6 +336,10 @@ function initDb(db: Database.Database): void {
       conversation_id INTEGER DEFAULT NULL,
       session_id INTEGER DEFAULT NULL,
       pr_snapshot_id INTEGER DEFAULT NULL,
+      pr_author_login TEXT DEFAULT NULL,
+      pr_author_classification TEXT NOT NULL DEFAULT 'unknown' CHECK(pr_author_classification IN ('agent', 'known_user', 'human', 'unknown')),
+      pr_author_confidence TEXT NOT NULL DEFAULT 'unknown' CHECK(pr_author_confidence IN ('unknown', 'low', 'medium', 'high')),
+      attribution_confidence TEXT NOT NULL DEFAULT 'unknown' CHECK(attribution_confidence IN ('unknown', 'low', 'medium', 'high')),
       outcome_state TEXT NOT NULL CHECK(outcome_state IN ('no_pr', 'pending_pr', 'merged', 'closed_unmerged', 'unknown')),
       quality_band TEXT NOT NULL CHECK(quality_band IN ('pending', 'strong', 'useful', 'costly_reworked', 'abandoned', 'unknown')),
       confidence TEXT NOT NULL CHECK(confidence IN ('low', 'medium', 'high')),
@@ -642,6 +646,11 @@ function initDb(db: Database.Database): void {
 
   addColumnIfMissing(db, "work_item_env", "branch_source", "TEXT NOT NULL DEFAULT 'generated'");
   addColumnIfMissing(db, "work_item_env", "delete_branch_on_remove", "INTEGER NOT NULL DEFAULT 1");
+
+  addColumnIfMissing(db, "llm_outcome_snapshots", "pr_author_login", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "llm_outcome_snapshots", "pr_author_classification", "TEXT NOT NULL DEFAULT 'unknown'");
+  addColumnIfMissing(db, "llm_outcome_snapshots", "pr_author_confidence", "TEXT NOT NULL DEFAULT 'unknown'");
+  addColumnIfMissing(db, "llm_outcome_snapshots", "attribution_confidence", "TEXT NOT NULL DEFAULT 'unknown'");
 
   addColumnIfMissing(db, "conversations", "origin_type", "TEXT NOT NULL DEFAULT 'user'");
   addColumnIfMissing(db, "conversations", "origin_automation_key", "TEXT DEFAULT NULL");

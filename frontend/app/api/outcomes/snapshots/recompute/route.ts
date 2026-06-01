@@ -18,6 +18,31 @@ function parseWorkItemIds(value: unknown): number[] | undefined {
   return Array.from(new Set(ids));
 }
 
+function parseRange(body: Record<string, unknown>): {
+  rangeDays: number | null;
+  rangeStart: string | null;
+  rangeEnd: string | null;
+} {
+  const rawDays = body.range_days;
+  const rangeDays = rawDays === undefined || rawDays === null ? null : Number(rawDays);
+  if (rangeDays !== null && (!Number.isInteger(rangeDays) || rangeDays < 1 || rangeDays > 365)) {
+    throw new Error("range_days must be an integer from 1 to 365");
+  }
+
+  const rangeStart = typeof body.range_start === "string" && body.range_start.trim()
+    ? body.range_start.trim()
+    : null;
+  const rangeEnd = typeof body.range_end === "string" && body.range_end.trim()
+    ? body.range_end.trim()
+    : null;
+  for (const [label, value] of [["range_start", rangeStart], ["range_end", rangeEnd]] as const) {
+    if (value && Number.isNaN(Date.parse(value))) {
+      throw new Error(`${label} must be a valid date`);
+    }
+  }
+  return { rangeDays, rangeStart, rangeEnd };
+}
+
 export async function POST(request: NextRequest) {
   let user: Awaited<ReturnType<typeof getAuthUser>>;
   try {
@@ -38,8 +63,10 @@ export async function POST(request: NextRequest) {
   }
 
   let workItemIds: number[] | undefined;
+  let range;
   try {
     workItemIds = parseWorkItemIds(body.work_item_ids);
+    range = parseRange(body);
   } catch (error) {
     return NextResponse.json(
       { detail: error instanceof Error ? error.message : "Invalid recompute request" },
@@ -48,7 +75,13 @@ export async function POST(request: NextRequest) {
   }
 
   const apps = filterAppsForUser(user, dal.getApps());
-  const result = recomputeOutcomeSnapshots({ apps, workItemIds });
+  const result = recomputeOutcomeSnapshots({
+    apps,
+    workItemIds,
+    rangeDays: range.rangeStart ? null : range.rangeDays,
+    rangeStart: range.rangeStart,
+    rangeEnd: range.rangeEnd,
+  });
   return NextResponse.json({
     recomputed_count: result.recomputed_count,
     snapshot_ids: result.snapshots.map((snapshot) => snapshot.id),

@@ -138,6 +138,9 @@ export async function syncOutcomesGitHubEvidence(data: {
 
 export async function recomputeOutcomeSnapshots(data: {
   work_item_ids?: number[];
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
 } = {}): Promise<OutcomesSnapshotRecomputeResponse> {
   return fetchJSON(`${BASE}/outcomes/snapshots/recompute`, {
     method: "POST",

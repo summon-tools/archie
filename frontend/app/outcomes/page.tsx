@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
 import { getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import type { OutcomeAttributionClassification, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 
@@ -72,6 +73,25 @@ function qualityClass(band: OutcomeQualityBand | null): string {
   }
 }
 
+function attributionLabel(value: OutcomeAttributionClassification | null): string {
+  switch (value) {
+    case "agent": return "Agent";
+    case "known_user": return "Known user";
+    case "human": return "Human";
+    case "unknown": return "Unknown";
+    default: return "Not computed";
+  }
+}
+
+function commitClassificationLabel(value: string): string {
+  switch (value) {
+    case "agent_authored": return "Agent authored";
+    case "agent_coauthored": return "Agent coauthored";
+    case "human_authored": return "Human authored";
+    default: return "Unknown";
+  }
+}
+
 function StatCard({
   label,
   value,
@@ -117,6 +137,7 @@ export default function OutcomesPage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
   const [syncRangeDays, setSyncRangeDays] = useState("14");
+  const [snapshotRangeDays, setSnapshotRangeDays] = useState("14");
   const [appFilter, setAppFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
@@ -131,6 +152,7 @@ export default function OutcomesPage() {
         setData(summary);
         setSettings(loadedSettings);
         setSyncRangeDays(String(loadedSettings.observation_window_days));
+        setSnapshotRangeDays(String(loadedSettings.observation_window_days));
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load outcomes"))
@@ -190,10 +212,12 @@ export default function OutcomesPage() {
   }
 
   async function handleRecomputeSnapshots() {
+    const days = Number(snapshotRangeDays);
+    if (!Number.isInteger(days) || days < 1) return;
     setRecomputing(true);
     setSnapshotMessage(null);
     try {
-      const result = await recomputeOutcomeSnapshots();
+      const result = await recomputeOutcomeSnapshots({ range_days: days });
       setSnapshotMessage(`Recomputed ${result.recomputed_count} outcome snapshot${result.recomputed_count === 1 ? "" : "s"}.`);
       const summary = await getOutcomesSummary();
       setData(summary);
@@ -351,13 +375,27 @@ export default function OutcomesPage() {
                     {computedSnapshotRows} computed. Strong {qualityCounts.get("strong") || 0}, useful {qualityCounts.get("useful") || 0}, costly rework {qualityCounts.get("costly_reworked") || 0}, pending {qualityCounts.get("pending") || 0}.
                   </div>
                 </div>
-                <button
-                  onClick={handleRecomputeSnapshots}
-                  disabled={recomputing}
-                  className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
-                >
-                  {recomputing ? "Computing..." : "Recompute"}
-                </button>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <FilterSelect
+                    label="Window"
+                    value={snapshotRangeDays}
+                    onChange={setSnapshotRangeDays}
+                    includeAll={false}
+                    options={[
+                      { value: "14", label: "Last 14 days" },
+                      { value: "30", label: "Last 30 days" },
+                      { value: "60", label: "Last 60 days" },
+                      { value: "90", label: "Last 90 days" },
+                    ]}
+                  />
+                  <button
+                    onClick={handleRecomputeSnapshots}
+                    disabled={recomputing}
+                    className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
+                  >
+                    {recomputing ? "Computing..." : "Recompute"}
+                  </button>
+                </div>
               </div>
               {snapshotMessage && (
                 <div className="mt-3 text-xs text-th-muted">{snapshotMessage}</div>
@@ -469,6 +507,17 @@ function FilterSelect({
 }
 
 function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[] }) {
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  function toggleRow(rowId: string) {
+    setExpandedRows((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }
+
   return (
     <section className="border border-th rounded-xl bg-th-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-th flex items-center justify-between">
@@ -496,8 +545,11 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
             </tr>
           </thead>
           <tbody className="divide-y divide-th">
-            {rows.map((row) => (
-              <tr key={row.id} className="hover:bg-th-subtle/60">
+            {rows.map((row) => {
+              const expanded = expandedRows.has(row.id);
+              return (
+              <Fragment key={row.id}>
+              <tr className="hover:bg-th-subtle/60">
                 <td className="px-4 py-3 align-top">
                   <Link href={`/apps/${row.app_id}/conversation/${row.work_item_id}`} className="font-medium text-th-primary hover:underline">
                     {row.work_item_title}
@@ -551,6 +603,13 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                       <div className="mt-1 text-xs text-th-muted">
                         Human {row.human_commit_count ?? 0}, after agent {row.human_after_agent_commit_count ?? 0}
                       </div>
+                      <div className="mt-1 text-xs text-th-muted">
+                        PR {attributionLabel(row.pr_author_classification)}
+                        {row.pr_author_login ? ` (${row.pr_author_login})` : ""}
+                      </div>
+                      {row.attribution_confidence && (
+                        <div className="mt-1 text-xs text-th-muted">{row.attribution_confidence} attribution</div>
+                      )}
                       {(row.unknown_commit_count || 0) > 0 && (
                         <div className="mt-1 text-xs text-st-yellow">{row.unknown_commit_count} unknown commits</div>
                       )}
@@ -578,15 +637,91 @@ function OutcomeGroup({ state, rows }: { state: OutcomeState; rows: OutcomeRow[]
                   {row.snapshot_computed_at && (
                     <div className="mt-1 text-xs text-th-muted">Snapshot {formatDate(row.snapshot_computed_at)}</div>
                   )}
+                  {row.snapshot_evidence && (
+                    <button
+                      onClick={() => toggleRow(row.id)}
+                      aria-expanded={expanded}
+                      className="mt-2 inline-flex items-center gap-1 h-7 px-2 rounded-md bg-btn-secondary text-btn-secondary text-xs font-medium hover:bg-btn-secondary-hover transition-colors"
+                    >
+                      {expanded ? <CaretDown size={12} weight="bold" /> : <CaretRight size={12} weight="bold" />}
+                      Details
+                    </button>
+                  )}
                 </td>
                 <td className="px-4 py-3 align-top text-th-muted text-xs">
                   {formatDate(row.updated_at)}
                 </td>
               </tr>
-            ))}
+              {expanded && row.snapshot_evidence && (
+                <tr>
+                  <td colSpan={10} className="px-4 py-4 bg-th-subtle/60">
+                    <OutcomeEvidenceDetails row={row} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
+            );})}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+function OutcomeEvidenceDetails({ row }: { row: OutcomeRow }) {
+  const evidence = row.snapshot_evidence;
+  if (!evidence) return null;
+  const commits = evidence.commit_classifications.slice(0, 8);
+  const hiddenCommitCount = Math.max(0, evidence.commit_classifications.length - commits.length);
+
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Quality rule</div>
+        <div className="mt-2 text-sm text-th-secondary">{evidence.quality_reason || "No quality reason recorded."}</div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-th-muted">
+          <div>Review comments: {evidence.correction_burden_inputs.review_comment_count}</div>
+          <div>Changes requested: {evidence.correction_burden_inputs.changes_requested_count}</div>
+          <div>Human after agent: {evidence.correction_burden_inputs.human_after_agent_commit_count}</div>
+          <div>Extra issue comments: {evidence.correction_burden_inputs.extra_issue_comment_count}</div>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Attribution</div>
+        <div className="mt-2 text-sm text-th-secondary">{evidence.attribution_reason || "No attribution reason recorded."}</div>
+        <div className="mt-3 text-xs text-th-muted">
+          PR author: {attributionLabel(evidence.pr_author.classification)}
+          {evidence.pr_author.login ? ` (${evidence.pr_author.login})` : ""}, {evidence.pr_author.confidence} confidence
+        </div>
+        {evidence.pr_artifact_warnings.length > 0 && (
+          <div className="mt-2 text-xs text-st-yellow">{evidence.pr_artifact_warnings[0]}</div>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Commit evidence</div>
+        {commits.length === 0 ? (
+          <div className="mt-2 text-sm text-th-muted">No synced commit classifications.</div>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {commits.map((commit) => (
+              <div key={commit.sha} className="text-xs text-th-muted">
+                <span className="font-mono text-th-secondary">{commit.sha.slice(0, 7)}</span>
+                {" - "}
+                <span>{commitClassificationLabel(commit.classification)}</span>
+                {commit.author_login ? <span> by {commit.author_login}</span> : null}
+                {commit.signals.length > 0 && (
+                  <div className="mt-0.5 text-th-dimmed">{commit.signals.join(", ")}</div>
+                )}
+              </div>
+            ))}
+            {hiddenCommitCount > 0 && (
+              <div className="text-xs text-th-muted">+{hiddenCommitCount} more commit{hiddenCommitCount === 1 ? "" : "s"}</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

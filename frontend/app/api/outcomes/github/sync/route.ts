@@ -79,7 +79,12 @@ export async function POST(request: NextRequest) {
     rangeEnd: range.rangeEnd,
     maxPrs: 50,
   });
-  const recomputed = recomputeOutcomeSnapshots({ apps });
+  const recomputed = recomputeOutcomeSnapshots({
+    apps,
+    rangeDays: range.rangeStart ? null : range.rangeDays,
+    rangeStart: range.rangeStart,
+    rangeEnd: range.rangeEnd,
+  });
 
   return NextResponse.json({ ...result, recomputed_snapshots: recomputed.recomputed_count });
 }

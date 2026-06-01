@@ -415,6 +415,38 @@ export type OutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged"
 export type OutcomeEvidenceCompleteness = "no_pr_artifact" | "local_pr_artifact" | "github_enriched" | "incomplete";
 export type OutcomeQualityBand = "pending" | "strong" | "useful" | "costly_reworked" | "abandoned" | "unknown";
 export type OutcomeConfidence = "low" | "medium" | "high";
+export type OutcomeAttributionClassification = "agent" | "known_user" | "human" | "unknown";
+export type OutcomeAttributionConfidence = "unknown" | "low" | "medium" | "high";
+
+export interface OutcomeCommitClassification {
+  sha: string;
+  classification: "agent_authored" | "agent_coauthored" | "human_authored" | "unknown";
+  signals: string[];
+  author_login: string | null;
+  author_email: string | null;
+  committer_login: string | null;
+  authored_at: string | null;
+}
+
+export interface OutcomeSnapshotEvidence {
+  rules_version: number;
+  quality_reason: string;
+  attribution_reason: string;
+  changes_requested_count: number;
+  correction_burden_inputs: {
+    review_comment_count: number;
+    changes_requested_count: number;
+    human_after_agent_commit_count: number;
+    extra_issue_comment_count: number;
+  };
+  pr_author: {
+    login: string | null;
+    classification: OutcomeAttributionClassification;
+    confidence: OutcomeAttributionConfidence;
+  };
+  pr_artifact_warnings: string[];
+  commit_classifications: OutcomeCommitClassification[];
+}
 
 export interface OutcomeSummaryCounts {
   total_work_items: number;
@@ -469,7 +501,12 @@ export interface OutcomeRow {
   snapshot_id: number | null;
   quality_band: OutcomeQualityBand | null;
   quality_confidence: OutcomeConfidence | null;
+  pr_author_login: string | null;
+  pr_author_classification: OutcomeAttributionClassification | null;
+  pr_author_confidence: OutcomeAttributionConfidence | null;
+  attribution_confidence: OutcomeAttributionConfidence | null;
   snapshot_computed_at: string | null;
+  snapshot_evidence: OutcomeSnapshotEvidence | null;
   correction_burden_score: number | null;
   human_commit_count: number | null;
   agent_commit_count: number | null;
