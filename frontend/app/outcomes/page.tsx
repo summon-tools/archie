@@ -870,73 +870,72 @@ function LearningReportPreview({ report }: { report: OutcomeLearningReportRun | 
   }
 
   return (
-    <div className="mt-4 border-t border-th pt-4">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-        <div className="bg-th-subtle rounded-lg p-3">
-          <div className="text-xs text-th-muted">Resolved PRs</div>
-          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.resolved_prs}</div>
-          <div className="mt-1 text-xs text-th-muted">{content.counts.pending_prs_excluded} pending excluded</div>
+    <div className="mt-4 border-t border-th pt-5 text-sm">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Executive report</div>
+          <h3 className="mt-1 text-lg font-semibold text-th-primary">LLM outcome learning report</h3>
         </div>
-        <div className="bg-th-subtle rounded-lg p-3">
-          <div className="text-xs text-th-muted">Merged</div>
-          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.merged_prs}</div>
-          <div className="mt-1 text-xs text-th-muted">{content.counts.closed_unmerged_prs} closed unmerged</div>
-        </div>
-        <div className="bg-th-subtle rounded-lg p-3">
-          <div className="text-xs text-th-muted">Resolved cost</div>
-          <div className="mt-1 text-lg font-semibold text-th-primary">{formatCurrency(content.costs.resolved_known_cost_usd)}</div>
-          <div className="mt-1 text-xs text-th-muted">{content.costs.unknown_cost_rows} rows incomplete</div>
-        </div>
-        <div className="bg-th-subtle rounded-lg p-3">
-          <div className="text-xs text-th-muted">Assessed</div>
-          <div className="mt-1 text-lg font-semibold text-th-primary">{content.counts.assessed_resolved_prs}</div>
-          <div className="mt-1 text-xs text-th-muted">resolved PRs</div>
-        </div>
-        <div className="bg-th-subtle rounded-lg p-3">
-          <div className="text-xs text-th-muted">At-risk cost</div>
-          <div className="mt-1 text-lg font-semibold text-th-primary">{formatCurrency(content.costs.likely_regression_known_cost_usd ?? 0)}</div>
-          <div className="mt-1 text-xs text-th-muted">{content.counts.likely_regression_followups} likely fixes</div>
+        <div className="text-xs text-th-muted">
+          {formatDate(report.generated_at)} - {report.mode} - {report.status} - {content.range.days ? `last ${content.range.days} days` : "custom range"}
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Summary</div>
-          <ul className="mt-2 space-y-1 text-sm text-th-secondary">
-            {content.summary_bullets.map((bullet) => (
-              <li key={bullet}>{bullet}</li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Latest run</div>
-          <div className="mt-2 text-sm text-th-secondary">
-            {formatDate(report.generated_at)} - {report.mode} - {report.status}
-          </div>
-          <div className="mt-1 text-xs text-th-muted">
-            Range {content.range.days ? `last ${content.range.days} days` : "custom"}; generated from session/PR examples, not developer ranking.
-          </div>
-          {content.warnings.length > 0 && (
-            <div className="mt-2 text-xs text-st-yellow">{content.warnings[0]}</div>
-          )}
-        </div>
+      <div className="mt-5 overflow-x-auto">
+        <table className="w-full min-w-[760px] text-left text-sm">
+          <thead className="border-b border-th text-xs uppercase tracking-wider text-th-dimmed">
+            <tr>
+              <th className="py-2 pr-4 font-semibold">Resolved PRs</th>
+              <th className="py-2 pr-4 font-semibold">Merged</th>
+              <th className="py-2 pr-4 font-semibold">Resolved cost</th>
+              <th className="py-2 pr-4 font-semibold">At-risk cost</th>
+              <th className="py-2 pr-4 font-semibold">Assessment coverage</th>
+              <th className="py-2 font-semibold">Excluded</th>
+            </tr>
+          </thead>
+          <tbody className="text-th-secondary">
+            <tr className="border-b border-th">
+              <td className="py-3 pr-4 text-th-primary font-semibold">{content.counts.resolved_prs}</td>
+              <td className="py-3 pr-4">{content.counts.merged_prs} merged, {content.counts.closed_unmerged_prs} closed</td>
+              <td className="py-3 pr-4">{formatCurrency(content.costs.resolved_known_cost_usd)}</td>
+              <td className="py-3 pr-4">{formatCurrency(content.costs.likely_regression_known_cost_usd ?? 0)} from {content.counts.likely_regression_followups} likely fix{content.counts.likely_regression_followups === 1 ? "" : "es"}</td>
+              <td className="py-3 pr-4">{content.counts.assessed_resolved_prs} assessed, {content.costs.unknown_cost_rows} incomplete cost row{content.costs.unknown_cost_rows === 1 ? "" : "s"}</td>
+              <td className="py-3">{content.counts.pending_prs_excluded} pending, {content.counts.no_pr_excluded} no PR, {content.counts.unknown_excluded} unknown</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <div className="mt-4 space-y-3">
+      <section className="mt-5">
+        <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Executive summary</div>
+        <ul className="mt-2 space-y-1 text-sm text-th-secondary">
+          {content.summary_bullets.map((bullet) => (
+            <li key={bullet}>{bullet}</li>
+          ))}
+        </ul>
+        {content.warnings.length > 0 && (
+          <div className="mt-2 text-xs text-st-yellow">{content.warnings[0]}</div>
+        )}
+      </section>
+
+      <section className="mt-5">
+        <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Findings</div>
+        <div className="mt-2 space-y-4">
         {content.insights.map((insight) => (
           <ReportInsight key={insight.id} insight={insight} />
         ))}
-      </div>
+        </div>
+      </section>
 
       {(content.recommendations || []).length > 0 && (
-        <div className="mt-4">
+        <section className="mt-5">
           <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">Recommended next actions</div>
-          <div className="mt-2 space-y-3">
+          <div className="mt-2 space-y-5">
             {(content.recommendations || []).map((recommendation) => (
               <ReportRecommendation key={recommendation.id} recommendation={recommendation} />
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );
@@ -944,64 +943,59 @@ function LearningReportPreview({ report }: { report: OutcomeLearningReportRun | 
 
 function ReportInsight({ insight }: { insight: OutcomeLearningReportInsight }) {
   return (
-    <div className="rounded-lg border border-th bg-th-surface p-3">
-      <div className="text-sm font-semibold text-th-primary">{insight.title}</div>
-      <div className="mt-1 text-sm text-th-secondary">{insight.summary}</div>
-      {insight.evidence.length > 0 && (
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-          {insight.evidence.map((example) => (
-            <ReportExample key={`${insight.id}-${example.work_item_id}`} example={example} />
-          ))}
-        </div>
-      )}
-    </div>
+    <section className="border-t border-th pt-3">
+      <h4 className="text-sm font-semibold text-th-primary">{insight.title}</h4>
+      <p className="mt-1 text-sm text-th-secondary">{insight.summary}</p>
+      <ReportEvidenceInline examples={insight.evidence} />
+    </section>
   );
 }
 
 function ReportRecommendation({ recommendation }: { recommendation: NonNullable<OutcomeLearningReportRun["report"]>["recommendations"][number] }) {
   return (
-    <div className="rounded-lg border border-th bg-th-surface p-3">
-      <div className="text-sm font-semibold text-th-primary">{recommendation.title}</div>
-      <div className="mt-1 text-sm text-th-secondary">{recommendation.summary}</div>
-      <div className="mt-2 text-sm text-th-muted">{recommendation.action}</div>
-      {recommendation.evidence.length > 0 && (
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-          {recommendation.evidence.map((example) => (
-            <ReportExample key={`${recommendation.id}-${example.work_item_id}`} example={example} />
-          ))}
+    <section className="border-t border-th pt-4">
+      <h4 className="text-sm font-semibold text-th-primary">{recommendation.title}</h4>
+      <p className="mt-1 text-sm text-th-secondary">{recommendation.summary}</p>
+      <p className="mt-2 text-sm text-th-muted">{recommendation.action}</p>
+      <ReportEvidenceInline examples={recommendation.evidence} />
+      {recommendation.artifact && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-th-dimmed">{recommendation.artifact.title}</div>
+          <pre className="mt-2 max-h-[420px] overflow-auto rounded-lg border border-th bg-th-subtle p-3 text-xs leading-relaxed text-th-secondary whitespace-pre-wrap">
+            {recommendation.artifact.body}
+          </pre>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
-function ReportExample({ example }: { example: OutcomeLearningReportExample }) {
+function ReportEvidenceInline({ examples }: { examples: OutcomeLearningReportExample[] }) {
+  if (examples.length === 0) return null;
   return (
-    <div className="rounded-lg bg-th-subtle p-3 text-xs">
-      <Link href={`/apps/${example.app_id}/conversation/${example.work_item_id}`} className="font-semibold text-th-primary hover:underline">
-        {example.work_item_title}
-      </Link>
-      <div className="mt-1 text-th-muted">{example.app_name}</div>
-      <div className="mt-2 text-th-secondary">
-        {qualityLabel(example.quality_band)} - {example.known_cost_usd === null ? "unknown cost" : formatCurrency(example.known_cost_usd)}
-      </div>
-      {example.regression_followup_count > 0 && (
-        <div className="mt-1 text-st-yellow">
-          {example.regression_followup_count} likely post-merge fix{example.regression_followup_count === 1 ? "" : "es"}
-        </div>
-      )}
-      {example.pr_url && (
-        <a href={example.pr_url} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-th-secondary hover:underline">
-          PR #{example.pr_number || "?"}
-        </a>
-      )}
-      {example.assessment_summary && (
-        <div className="mt-2 text-th-muted">{example.assessment_summary}</div>
-      )}
-      {example.prompt_excerpt && (
-        <div className="mt-2 text-th-dimmed">{example.prompt_excerpt}</div>
-      )}
-    </div>
+    <p className="mt-2 text-xs leading-relaxed text-th-muted">
+      Evidence: {examples.map((example, index) => (
+        <Fragment key={`${example.work_item_id}-${index}`}>
+          {index > 0 ? "; " : ""}
+          <Link href={`/apps/${example.app_id}/conversation/${example.work_item_id}`} className="text-th-primary hover:underline">
+            {example.work_item_title}
+          </Link>
+          {" "}
+          ({example.app_name}, {qualityLabel(example.quality_band)}, {example.known_cost_usd === null ? "unknown cost" : formatCurrency(example.known_cost_usd)}
+          {example.pr_url ? (
+            <>
+              {", "}
+              <a href={example.pr_url} target="_blank" rel="noreferrer" className="text-th-secondary hover:underline">
+                PR #{example.pr_number || "?"}
+              </a>
+            </>
+          ) : null}
+          {example.regression_followup_count > 0 ? `, ${example.regression_followup_count} likely post-merge fix${example.regression_followup_count === 1 ? "" : "es"}` : ""})
+          {example.prompt_excerpt ? ` Prompt: "${example.prompt_excerpt}"` : ""}
+          {example.assessment_summary ? ` Assessment: ${example.assessment_summary}` : ""}
+        </Fragment>
+      ))}
+    </p>
   );
 }
 
