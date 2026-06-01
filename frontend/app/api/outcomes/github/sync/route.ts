@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { GitHubAppError, getValidGitHubUserToken } from "@/lib/server/github-app";
-import { recomputeOutcomeSnapshots } from "@/lib/server/outcome-snapshots";
+import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
-import { getOutcomesGitHubSyncSettings, runGitHubEvidenceSync } from "@/lib/server/outcomes-github-sync";
+import { getOutcomesGitHubSyncSettings } from "@/lib/server/outcomes-github-sync";
 
 function parseRange(body: Record<string, unknown>): {
   rangeDays: number | null;
@@ -58,32 +57,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ detail: error instanceof Error ? error.message : "Invalid sync range" }, { status: 400 });
   }
 
-  let githubAuth;
-  try {
-    githubAuth = await getValidGitHubUserToken(user.id);
-  } catch (error) {
-    if (error instanceof GitHubAppError) {
-      return NextResponse.json({ detail: error.message }, { status: error.status });
-    }
-    throw error;
-  }
-
   const apps = filterAppsForUser(user, dal.getApps());
-  const result = await runGitHubEvidenceSync({
-    apps,
+  const job = enqueueOutcomeJob({
+    kind: "github_sync",
     userId: user.id,
-    githubToken: githubAuth.token,
-    mode: "manual",
-    rangeDays: range.rangeStart ? null : range.rangeDays,
-    rangeStart: range.rangeStart,
-    rangeEnd: range.rangeEnd,
-  });
-  const recomputed = recomputeOutcomeSnapshots({
     apps,
-    rangeDays: range.rangeStart ? null : range.rangeDays,
-    rangeStart: range.rangeStart,
-    rangeEnd: range.rangeEnd,
+    input: {
+      rangeDays: range.rangeStart ? null : range.rangeDays,
+      rangeStart: range.rangeStart,
+      rangeEnd: range.rangeEnd,
+    },
   });
-
-  return NextResponse.json({ ...result, recomputed_snapshots: recomputed.recomputed_count });
+  return NextResponse.json({ job: serializeOutcomeJob(job) }, { status: 202 });
 }

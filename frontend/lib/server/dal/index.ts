@@ -13,6 +13,7 @@ export * from "./outcome-snapshots";
 export * from "./outcome-assessments";
 export * from "./outcome-followups";
 export * from "./outcome-reports";
+export * from "./outcome-jobs";
 export * from "./notifications";
 export * from "./automation-configs";
 export * from "./rooms";

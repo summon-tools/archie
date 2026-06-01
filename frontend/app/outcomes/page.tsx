@@ -4,8 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import Link from "next/link";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
-import { detectOutcomeFollowups, getLatestOutcomeLearningReport, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import { detectOutcomeFollowups, getLatestOutcomeLearningReport, getOutcomeJob, getOutcomesSettings, getOutcomesSummary, recomputeOutcomeSnapshots, runOutcomeLearningReport, runOutcomesEvidenceAssessment, syncOutcomesGitHubEvidence, updateOutcomesSettings } from "@/lib/api";
+import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeJob, OutcomeLearningReportExample, OutcomeLearningReportInsight, OutcomeLearningReportRun, OutcomeQualityBand, OutcomeRow, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 const PAGE_SIZE_OPTIONS = ["25", "50", "100", "200"];
@@ -116,6 +116,19 @@ function followupRelationLabel(value: OutcomeFollowupRelation | string): string 
   }
 }
 
+function isJobActive(job: OutcomeJob | null): boolean {
+  return job?.status === "queued" || job?.status === "running";
+}
+
+function jobButtonLabel(job: OutcomeJob | null, idle: string, active: string): string {
+  if (!job || job.status === "completed" || job.status === "failed") return idle;
+  return job.status === "queued" ? "Queued..." : active;
+}
+
+function jobResult(job: OutcomeJob): any {
+  return job.result && typeof job.result === "object" ? job.result as any : {};
+}
+
 function StatCard({
   label,
   value,
@@ -157,11 +170,11 @@ export default function OutcomesPage() {
   const [latestReport, setLatestReport] = useState<OutcomeLearningReportRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [recomputing, setRecomputing] = useState(false);
-  const [assessing, setAssessing] = useState(false);
-  const [generatingReport, setGeneratingReport] = useState(false);
-  const [detectingFollowups, setDetectingFollowups] = useState(false);
+  const [syncJob, setSyncJob] = useState<OutcomeJob | null>(null);
+  const [snapshotJob, setSnapshotJob] = useState<OutcomeJob | null>(null);
+  const [assessmentJob, setAssessmentJob] = useState<OutcomeJob | null>(null);
+  const [reportJob, setReportJob] = useState<OutcomeJob | null>(null);
+  const [followupJob, setFollowupJob] = useState<OutcomeJob | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
   const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
@@ -180,6 +193,11 @@ export default function OutcomesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("25");
   const initializedSettingsRef = useRef(false);
+  const syncing = isJobActive(syncJob);
+  const recomputing = isJobActive(snapshotJob);
+  const assessing = isJobActive(assessmentJob);
+  const generatingReport = isJobActive(reportJob);
+  const detectingFollowups = isJobActive(followupJob);
 
   const summaryQuery = useMemo(() => ({
     page,
@@ -213,6 +231,91 @@ export default function OutcomesPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const refreshDashboardData = useCallback(async () => {
+    const [summary, reportResponse] = await Promise.all([
+      getOutcomesSummary(summaryQuery),
+      getLatestOutcomeLearningReport(),
+    ]);
+    setData(summary);
+    setLatestReport(reportResponse.report);
+  }, [summaryQuery]);
+
+  const setJobForKind = useCallback((job: OutcomeJob) => {
+    if (job.kind === "github_sync") setSyncJob(job);
+    if (job.kind === "snapshot_recompute") setSnapshotJob(job);
+    if (job.kind === "evidence_assessment") setAssessmentJob(job);
+    if (job.kind === "learning_report") setReportJob(job);
+    if (job.kind === "followup_detection") setFollowupJob(job);
+  }, []);
+
+  const setMessageForJob = useCallback((job: OutcomeJob) => {
+    if (job.status === "failed") {
+      const message = job.error_text || "Background job failed";
+      if (job.kind === "github_sync") setSyncMessage(message);
+      if (job.kind === "snapshot_recompute") setSnapshotMessage(message);
+      if (job.kind === "evidence_assessment") setAssessmentMessage(message);
+      if (job.kind === "learning_report") setReportMessage(message);
+      if (job.kind === "followup_detection") setFollowupMessage(message);
+      return;
+    }
+    if (job.status !== "completed") return;
+    const result = jobResult(job);
+    if (job.kind === "github_sync") {
+      setSyncMessage(`Synced ${result.run?.synced_count ?? 0} of ${result.run?.scanned_count ?? 0} PRs${result.run?.failed_count ? `, ${result.run.failed_count} failed` : ""}. Recomputed ${result.recomputed_snapshots ?? 0} snapshots.`);
+    }
+    if (job.kind === "snapshot_recompute") {
+      setSnapshotMessage(`Recomputed ${result.recomputed_count ?? 0} outcome snapshot${result.recomputed_count === 1 ? "" : "s"}.`);
+    }
+    if (job.kind === "evidence_assessment") {
+      setAssessmentMessage(`Assessed ${result.assessed_count ?? 0} PR${result.assessed_count === 1 ? "" : "s"}, skipped ${result.skipped_count ?? 0}, failed ${result.failed_count ?? 0}. Recomputed ${result.recomputed_snapshots ?? 0} snapshot${result.recomputed_snapshots === 1 ? "" : "s"}.`);
+    }
+    if (job.kind === "learning_report") {
+      const report = result.report?.report;
+      setReportMessage(`Generated report with ${report?.counts?.resolved_prs ?? 0} resolved PR${report?.counts?.resolved_prs === 1 ? "" : "s"} and ${report?.insights?.length ?? 0} insight${report?.insights?.length === 1 ? "" : "s"}.`);
+    }
+    if (job.kind === "followup_detection") {
+      setFollowupMessage(`Scanned ${result.scanned_source_prs ?? 0} merged PR${result.scanned_source_prs === 1 ? "" : "s"}, checked ${result.candidate_count ?? 0} candidate${result.candidate_count === 1 ? "" : "s"}, detected ${result.detected_count ?? 0} follow-up${result.detected_count === 1 ? "" : "s"} including ${result.regression_count ?? 0} likely fix${result.regression_count === 1 ? "" : "es"}.`);
+    }
+  }, []);
+
+  useEffect(() => {
+    const activeJobs = [syncJob, snapshotJob, assessmentJob, reportJob, followupJob].filter(isJobActive);
+    if (activeJobs.length === 0) return;
+    let cancelled = false;
+
+    async function pollJobs() {
+      const updates = await Promise.all(activeJobs.map(async (job) => {
+        try {
+          return (await getOutcomeJob(job!.id)).job;
+        } catch {
+          return null;
+        }
+      }));
+      if (cancelled) return;
+      let shouldRefresh = false;
+      for (const job of updates) {
+        if (!job) continue;
+        setJobForKind(job);
+        if (job.status === "completed" || job.status === "failed") {
+          setMessageForJob(job);
+          shouldRefresh = true;
+        }
+      }
+      if (shouldRefresh) {
+        await refreshDashboardData().catch((err) => setError(err instanceof Error ? err.message : "Failed to refresh outcomes"));
+      }
+    }
+
+    pollJobs();
+    const timer = window.setInterval(() => {
+      pollJobs();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [assessmentJob, followupJob, refreshDashboardData, reportJob, setJobForKind, setMessageForJob, snapshotJob, syncJob]);
 
   const syncedEvidenceRows = useMemo(() => {
     return data?.coverage.github_evidence_synced_rows || 0;
@@ -266,89 +369,65 @@ export default function OutcomesPage() {
   async function handleSyncNow() {
     const days = Number(syncRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setSyncing(true);
     setSyncMessage(null);
     try {
       const result = await syncOutcomesGitHubEvidence({ range_days: days });
-      setSyncMessage(`Synced ${result.run.synced_count} of ${result.run.scanned_count} PRs${result.run.failed_count ? `, ${result.run.failed_count} failed` : ""}. Recomputed ${result.recomputed_snapshots ?? 0} snapshots.`);
-      const [summary, loadedSettings] = await Promise.all([getOutcomesSummary(summaryQuery), getOutcomesSettings()]);
-      setData(summary);
-      setSettings(loadedSettings);
+      setSyncJob(result.job);
+      setSyncMessage("Queued GitHub evidence sync. The dashboard will refresh when it finishes.");
     } catch (err) {
       setSyncMessage(err instanceof Error ? err.message : "GitHub evidence sync failed");
-    } finally {
-      setSyncing(false);
     }
   }
 
   async function handleRecomputeSnapshots() {
     const days = Number(snapshotRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setRecomputing(true);
     setSnapshotMessage(null);
     try {
       const result = await recomputeOutcomeSnapshots({ range_days: days });
-      setSnapshotMessage(`Recomputed ${result.recomputed_count} outcome snapshot${result.recomputed_count === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary(summaryQuery);
-      setData(summary);
+      setSnapshotJob(result.job);
+      setSnapshotMessage("Queued snapshot recompute. The dashboard will refresh when it finishes.");
     } catch (err) {
       setSnapshotMessage(err instanceof Error ? err.message : "Outcome snapshot recompute failed");
-    } finally {
-      setRecomputing(false);
     }
   }
 
   async function handleAssessEvidence() {
     const days = Number(snapshotRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setAssessing(true);
     setAssessmentMessage(null);
     try {
       const result = await runOutcomesEvidenceAssessment({ range_days: days, max_items: 25 });
-      setAssessmentMessage(`Assessed ${result.assessed_count} PR${result.assessed_count === 1 ? "" : "s"}, skipped ${result.skipped_count}, failed ${result.failed_count}. Recomputed ${result.recomputed_snapshots} snapshot${result.recomputed_snapshots === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary(summaryQuery);
-      setData(summary);
+      setAssessmentJob(result.job);
+      setAssessmentMessage("Queued evidence assessment. The dashboard will refresh when it finishes.");
     } catch (err) {
       setAssessmentMessage(err instanceof Error ? err.message : "Outcome evidence assessment failed");
-    } finally {
-      setAssessing(false);
     }
   }
 
   async function handleRunReport() {
     const days = Number(reportRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setGeneratingReport(true);
     setReportMessage(null);
     try {
       const result = await runOutcomeLearningReport({ range_days: days });
-      setLatestReport(result.report);
-      const report = result.report.report;
-      setReportMessage(`Generated report with ${report?.counts.resolved_prs ?? 0} resolved PR${report?.counts.resolved_prs === 1 ? "" : "s"} and ${report?.insights.length ?? 0} insight${report?.insights.length === 1 ? "" : "s"}.`);
-      const summary = await getOutcomesSummary(summaryQuery);
-      setData(summary);
+      setReportJob(result.job);
+      setReportMessage("Queued learning report generation. The report panel will refresh when it finishes.");
     } catch (err) {
       setReportMessage(err instanceof Error ? err.message : "Outcome learning report failed");
-    } finally {
-      setGeneratingReport(false);
     }
   }
 
   async function handleDetectFollowups() {
     const days = Number(followupRangeDays);
     if (!Number.isInteger(days) || days < 1) return;
-    setDetectingFollowups(true);
     setFollowupMessage(null);
     try {
       const result = await detectOutcomeFollowups({ range_days: days, max_candidates: 40 });
-      setFollowupMessage(`Scanned ${result.scanned_source_prs} merged PR${result.scanned_source_prs === 1 ? "" : "s"}, checked ${result.candidate_count} candidate${result.candidate_count === 1 ? "" : "s"}, detected ${result.detected_count} follow-up${result.detected_count === 1 ? "" : "s"} including ${result.regression_count} likely fix${result.regression_count === 1 ? "" : "es"}.`);
-      const [summary, reportResponse] = await Promise.all([getOutcomesSummary(summaryQuery), getLatestOutcomeLearningReport()]);
-      setData(summary);
-      setLatestReport(reportResponse.report);
+      setFollowupJob(result.job);
+      setFollowupMessage("Queued follow-up detection. The dashboard will refresh when it finishes.");
     } catch (err) {
       setFollowupMessage(err instanceof Error ? err.message : "Follow-up detection failed");
-    } finally {
-      setDetectingFollowups(false);
     }
   }
 
@@ -464,7 +543,7 @@ export default function OutcomesPage() {
                     disabled={syncing}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {syncing ? "Syncing..." : "Sync now"}
+                    {jobButtonLabel(syncJob, "Sync now", "Syncing...")}
                   </button>
                 </div>
               </div>
@@ -499,14 +578,14 @@ export default function OutcomesPage() {
                     disabled={recomputing || assessing}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {recomputing ? "Computing..." : "Recompute"}
+                    {jobButtonLabel(snapshotJob, "Recompute", "Computing...")}
                   </button>
                   <button
                     onClick={handleAssessEvidence}
                     disabled={assessing || recomputing}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {assessing ? "Assessing..." : "Assess evidence"}
+                    {jobButtonLabel(assessmentJob, "Assess evidence", "Assessing...")}
                   </button>
                 </div>
               </div>
@@ -544,7 +623,7 @@ export default function OutcomesPage() {
                     disabled={detectingFollowups}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {detectingFollowups ? "Detecting..." : "Detect follow-ups"}
+                    {jobButtonLabel(followupJob, "Detect follow-ups", "Detecting...")}
                   </button>
                 </div>
               </div>
@@ -581,7 +660,7 @@ export default function OutcomesPage() {
                     disabled={generatingReport}
                     className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover disabled:opacity-50 transition-colors"
                   >
-                    {generatingReport ? "Generating..." : "Generate report"}
+                    {jobButtonLabel(reportJob, "Generate report", "Generating...")}
                   </button>
                 </div>
               </div>

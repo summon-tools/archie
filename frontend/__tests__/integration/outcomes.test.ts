@@ -1249,7 +1249,7 @@ describe("POST /api/outcomes/snapshots/recompute", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns recompute metadata for authenticated users", async () => {
+  it("queues recompute work and stores result metadata when the job runs", async () => {
     const token = await createAuthToken();
     const work = createWorkItem({ appName: "Snapshot API App" });
     addRun({
@@ -1263,9 +1263,18 @@ describe("POST /api/outcomes/snapshots/recompute", () => {
     const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/snapshots/recompute", token));
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.recomputed_count).toBe(1);
-    expect(body.snapshot_ids).toHaveLength(1);
+    expect(response.status).toBe(202);
+    expect(body.job).toMatchObject({
+      kind: "snapshot_recompute",
+      status: "queued",
+    });
+
+    const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
+    const completed = await runOutcomeJobNow(body.job.id);
+    const result = JSON.parse(completed.result_json || "{}");
+    expect(completed.status).toBe("completed");
+    expect(result.recomputed_count).toBe(1);
+    expect(result.snapshot_ids).toHaveLength(1);
   });
 });
 
@@ -1278,15 +1287,24 @@ describe("POST /api/outcomes/assessments/run", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns assessment metadata for authenticated users without eligible snapshots", async () => {
+  it("queues assessment work and stores result metadata when the job runs", async () => {
     const token = await createAuthToken();
     const { POST } = await import("@/app/api/outcomes/assessments/run/route");
 
     const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/assessments/run", token, { range_days: 14 }));
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
+    expect(response.status).toBe(202);
+    expect(body.job).toMatchObject({
+      kind: "evidence_assessment",
+      status: "queued",
+    });
+
+    const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
+    const completed = await runOutcomeJobNow(body.job.id);
+    const result = JSON.parse(completed.result_json || "{}");
+    expect(completed.status).toBe("completed");
+    expect(result).toMatchObject({
       assessed_count: 0,
       skipped_count: 0,
       failed_count: 0,
@@ -1313,7 +1331,7 @@ describe("outcome report APIs", () => {
     expect(response.status).toBe(401);
   });
 
-  it("generates and returns the latest authenticated report", async () => {
+  it("queues report generation and exposes the latest report after the job runs", async () => {
     const token = await createAuthToken();
     const work = createWorkItem({ appName: "Report API App" });
     addRun({
@@ -1327,19 +1345,62 @@ describe("outcome report APIs", () => {
 
     const runResponse = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/reports/run", token, { range_days: 30 }));
     const runBody = await runResponse.json();
+    const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
+    const completed = await runOutcomeJobNow(runBody.job.id);
+    const jobResult = JSON.parse(completed.result_json || "{}");
     const latestResponse = await GET(makeRequest("http://localhost:8080/api/outcomes/reports/latest", token));
     const latestBody = await latestResponse.json();
 
-    expect(runResponse.status).toBe(200);
-    expect(runBody.report).toMatchObject({
+    expect(runResponse.status).toBe(202);
+    expect(runBody.job).toMatchObject({
+      kind: "learning_report",
+      status: "queued",
+    });
+    expect(completed.status).toBe("completed");
+    expect(jobResult.report).toMatchObject({
       status: "completed",
       range_days: 30,
       total_work_items: 1,
       resolved_pr_count: 0,
     });
     expect(latestResponse.status).toBe(200);
-    expect(latestBody.report.id).toBe(runBody.report.id);
+    expect(latestBody.report.id).toBe(jobResult.report.id);
     expect(latestBody.report.report.counts.no_pr_excluded).toBe(1);
+  });
+});
+
+describe("GET /api/outcomes/jobs/[jobId]", () => {
+  it("requires authentication", async () => {
+    const { GET } = await import("@/app/api/outcomes/jobs/[jobId]/route");
+
+    const response = await GET(
+      makeRequest("http://localhost:8080/api/outcomes/jobs/1"),
+      { params: Promise.resolve({ jobId: "1" }) },
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns queued job status for the requesting user", async () => {
+    const token = await createAuthToken();
+    const work = createWorkItem({ appName: "Job API App" });
+    const apps = getAppRows().filter((app) => app.id === work.appId);
+    const { enqueueOutcomeJob } = await import("@/lib/server/outcome-jobs");
+    const job = enqueueOutcomeJob({ kind: "snapshot_recompute", userId: 1, apps });
+    const { GET } = await import("@/app/api/outcomes/jobs/[jobId]/route");
+
+    const response = await GET(
+      makeRequest(`http://localhost:8080/api/outcomes/jobs/${job.id}`, token),
+      { params: Promise.resolve({ jobId: String(job.id) }) },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.job).toMatchObject({
+      id: job.id,
+      kind: "snapshot_recompute",
+      status: "queued",
+    });
   });
 });
 

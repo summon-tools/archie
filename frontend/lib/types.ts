@@ -645,6 +645,33 @@ export interface OutcomesGitHubSyncResponse {
   recomputed_snapshots?: number;
 }
 
+export type OutcomeJobKind = "github_sync" | "snapshot_recompute" | "evidence_assessment" | "learning_report" | "followup_detection";
+export type OutcomeJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface OutcomeJob {
+  id: number;
+  kind: OutcomeJobKind;
+  requested_by_user_id: number | null;
+  status: OutcomeJobStatus;
+  input_json: string | null;
+  result_json: string | null;
+  result: unknown;
+  progress_text: string | null;
+  error_text: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+}
+
+export interface OutcomesJobEnqueueResponse {
+  job: OutcomeJob;
+}
+
+export interface OutcomesJobStatusResponse {
+  job: OutcomeJob;
+}
+
 export interface OutcomesSnapshotRecomputeResponse {
   recomputed_count: number;
   snapshot_ids: number[];

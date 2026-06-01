@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { recomputeOutcomeSnapshots } from "@/lib/server/outcome-snapshots";
+import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
 
 function parseWorkItemIds(value: unknown): number[] | undefined {
@@ -75,16 +75,16 @@ export async function POST(request: NextRequest) {
   }
 
   const apps = filterAppsForUser(user, dal.getApps());
-  const result = recomputeOutcomeSnapshots({
+  const job = enqueueOutcomeJob({
+    kind: "snapshot_recompute",
+    userId: user.id,
     apps,
-    workItemIds,
-    rangeDays: range.rangeStart ? null : range.rangeDays,
-    rangeStart: range.rangeStart,
-    rangeEnd: range.rangeEnd,
+    input: {
+      workItemIds,
+      rangeDays: range.rangeStart ? null : range.rangeDays,
+      rangeStart: range.rangeStart,
+      rangeEnd: range.rangeEnd,
+    },
   });
-  return NextResponse.json({
-    recomputed_count: result.recomputed_count,
-    snapshot_ids: result.snapshots.map((snapshot) => snapshot.id),
-    generated_at: result.generated_at,
-  });
+  return NextResponse.json({ job: serializeOutcomeJob(job) }, { status: 202 });
 }
