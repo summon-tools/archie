@@ -7,6 +7,7 @@ import { cleanupMaterializedFilesForContext, formatAttachmentContext, materializ
 import { refreshRoomPlanningContext } from "./room-planning-context";
 import { generateRoomPlanFromDiscussion, shouldGenerateRoomPlan } from "./room-plan-generator";
 import type { AppRow, HomeRoomRow, RoomMessageRow } from "./types";
+import { buildGlobalSkillPromptContext } from "./global-skills";
 
 const MAX_ROOM_CONTEXT_MESSAGES = 16;
 const MAX_CONTEXT_CHARS = 5000;
@@ -46,6 +47,7 @@ function buildRoomAgentPrompt({
   const recentMessages = dal.getRoomMessages(room.id, MAX_ROOM_CONTEXT_MESSAGES);
   const isCoordinator = agent.key === "coordinator";
   const agentTeam = resolveHomeAgents();
+  const globalSkillsContext = buildGlobalSkillPromptContext(userMessage.body_md);
   const attachmentContext = formatAttachmentContext(materializeFilesForContext({
     appId: app.id,
     targetDirectory: app.directory,
@@ -79,6 +81,8 @@ function buildRoomAgentPrompt({
     "",
     "Agent team:",
     ...agentTeam.map((agent) => `- ${agent.name}: ${agent.role}`),
+    globalSkillsContext.promptText ? "" : null,
+    globalSkillsContext.promptText || null,
     "",
     `App: ${app.name}`,
     `Room: ${room.title}`,

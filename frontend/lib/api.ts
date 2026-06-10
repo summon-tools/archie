@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillSummary, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
 
 const BASE = "/api";
 
@@ -905,6 +905,45 @@ export async function updateHomeAgent(
   return fetchJSON<HomeAgentsResponse>(`${BASE}/settings/agents`, {
     method: "PUT",
     body: JSON.stringify(agent),
+  });
+}
+
+// --- Global skill endpoints ---
+
+export interface GlobalSkillPayload {
+  slug: string;
+  name: string;
+  description: string;
+  body_md: string;
+  trigger_phrases: string[];
+  enabled: boolean;
+}
+
+export async function fetchGlobalSkillSummaries(): Promise<{ skills: GlobalSkillSummary[] }> {
+  return fetchJSON<{ skills: GlobalSkillSummary[] }>(`${BASE}/skills`);
+}
+
+export async function fetchGlobalSkillsAdmin(): Promise<{ skills: GlobalSkill[] }> {
+  return fetchJSON<{ skills: GlobalSkill[] }>(`${BASE}/settings/skills`);
+}
+
+export async function createGlobalSkill(payload: GlobalSkillPayload): Promise<{ skill: GlobalSkill }> {
+  return fetchJSON<{ skill: GlobalSkill }>(`${BASE}/settings/skills`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateGlobalSkill(slug: string, payload: GlobalSkillPayload): Promise<{ skill: GlobalSkill }> {
+  return fetchJSON<{ skill: GlobalSkill }>(`${BASE}/settings/skills/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteGlobalSkill(slug: string): Promise<{ deleted: string }> {
+  return fetchJSON<{ deleted: string }>(`${BASE}/settings/skills/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
   });
 }
 

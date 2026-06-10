@@ -23,6 +23,7 @@ import { buildConversationSystemPromptBase } from "./prompts/conversation";
 import { cleanupMaterializedFilesForContext, formatAttachmentContext, materializeFilesForContext, serializeAppFile } from "./file-storage";
 import type { AppFileRow } from "./types";
 import { detectGitChatIntent, type GitChatIntent } from "./chat-git-intents";
+import { buildGlobalSkillPromptContext } from "./global-skills";
 import {
   pullAppDefaultBranch,
   pullWorkItemBranch,
@@ -340,6 +341,10 @@ function buildFallbackAssistantResponse(request: string, cwd?: string): string {
   return lines.join("\n");
 }
 
+function prependPromptContext(prompt: string, context: string): string {
+  return context ? `${context}\n\n---\n\n${prompt}` : prompt;
+}
+
 
 // =====================================================================
 // Conversation runner — unified for task, chat, and conversation types
@@ -619,6 +624,7 @@ export async function streamConversationMessage(
     workItemId: workItem?.id ?? null,
     targetDirectory: effectiveCwd,
   }) : "";
+  const globalSkillsContext = buildGlobalSkillPromptContext(content);
   if (effectiveCwd) {
     try {
       const { capturePlanStepBaseCommitForConversation } = await import("./plan-execution");
@@ -656,22 +662,22 @@ export async function streamConversationMessage(
     }
 
     if (contextMessages.length > 0) {
-      prompt = `Here is the recent team discussion for context:\n\n${contextMessages.join("\n\n")}${briefContext}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\nNow the user asks:\n${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`;
+      prompt = prependPromptContext(`Here is the recent team discussion for context:\n\n${contextMessages.join("\n\n")}${briefContext}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\nNow the user asks:\n${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`, globalSkillsContext.promptText);
     } else {
-      prompt = `${briefContext ? briefContext + "\n\n" : ""}${attachmentContext ? attachmentContext + "\n\n" : ""}${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`;
+      prompt = prependPromptContext(`${briefContext ? briefContext + "\n\n" : ""}${attachmentContext ? attachmentContext + "\n\n" : ""}${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`, globalSkillsContext.promptText);
     }
   } else if (conversation.kind === "task" && workItem) {
     const systemPrompt = await buildConversationSystemPrompt(conversation.app_id, appName, effectiveCwd || directory, workItem.id);
     const taskDescription = workItem.summary || "";
 
     if (taskDescription && taskDescription !== content) {
-      prompt = `${systemPrompt}\n\n---\n\nTask instructions:\n${taskDescription}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\n---\n\nUser message:\n${content}`;
+      prompt = `${systemPrompt}${globalSkillsContext.promptText ? `\n\n${globalSkillsContext.promptText}` : ""}\n\n---\n\nTask instructions:\n${taskDescription}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\n---\n\nUser message:\n${content}`;
     } else {
-      prompt = `${systemPrompt}\n\n---\n\n${attachmentContext ? `${attachmentContext}\n\n` : ""}User task request:\n${content}`;
+      prompt = `${systemPrompt}${globalSkillsContext.promptText ? `\n\n${globalSkillsContext.promptText}` : ""}\n\n---\n\n${attachmentContext ? `${attachmentContext}\n\n` : ""}User task request:\n${content}`;
     }
   } else {
     // Chat or conversation type — just pass the message
-    prompt = `${attachmentContext ? `${attachmentContext}\n\n` : ""}${content}`;
+    prompt = prependPromptContext(`${attachmentContext ? `${attachmentContext}\n\n` : ""}${content}`, globalSkillsContext.promptText);
   }
 
   // Preflight check
@@ -715,7 +721,10 @@ export async function streamConversationMessage(
     status: "running",
     provider_id: resolvedProviderId,
     model_id: model || null,
-    input_json: JSON.stringify({ content }),
+    input_json: JSON.stringify({
+      content,
+      global_skill_slugs: globalSkillsContext.activeSkills.map((skill) => skill.slug),
+    }),
     budget_json: JSON.stringify(budget),
   });
 
@@ -743,6 +752,13 @@ export async function streamConversationMessage(
       };
 
       try {
+        if (globalSkillsContext.activeSkills.length > 0) {
+          safeEnqueue(`event: activity\ndata: ${JSON.stringify({
+            kind: "status",
+            key: "global-skills",
+            message: `Using ${globalSkillsContext.activeSkills.length === 1 ? "skill" : "skills"}: ${globalSkillsContext.activeSkills.map((skill) => `/${skill.slug}`).join(", ")}`,
+          })}\n\n`);
+        }
         for await (const event of events) {
           switch (event.type) {
             case "text":

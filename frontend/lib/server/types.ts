@@ -437,6 +437,20 @@ export interface HomeAgentConfigRow {
   updated_at: string;
 }
 
+export interface GlobalSkillRow {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  body_md: string;
+  trigger_phrases_json: string;
+  enabled: number;
+  created_by: number | null;
+  updated_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface HomeRoomRow {
   id: number;
   app_id: number;

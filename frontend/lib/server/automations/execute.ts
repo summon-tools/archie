@@ -10,6 +10,7 @@ import * as dal from "../dal";
 import { readSpecIndex, readPrinciples } from "../spec";
 import { readSkillsIndex } from "../skills";
 import { generateWorkItemBrief } from "../knowledge/brief";
+import { buildGlobalSkillPromptContext } from "../global-skills";
 
 export interface AutomationExecutionResult {
   success: boolean;
@@ -23,6 +24,11 @@ export interface AutomationExecutionResult {
 function buildAutomationPrompt(directory: string, appName: string, taskDescription: string): string {
   let prompt = `You are an AI assistant working on the "${appName}" project at ${directory}.\n\n`;
   prompt += `## Task\n${taskDescription}\n\n`;
+
+  const globalSkillsContext = buildGlobalSkillPromptContext(taskDescription);
+  if (globalSkillsContext.promptText) {
+    prompt += `${globalSkillsContext.promptText}\n\n`;
+  }
 
   // Inject spec context
   try {
