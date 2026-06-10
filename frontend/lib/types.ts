@@ -58,6 +58,23 @@ export interface HomeAgentConfig {
   isCustomized: boolean;
 }
 
+export interface GlobalSkillSummary {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  trigger_phrases: string[];
+  enabled: boolean;
+}
+
+export interface GlobalSkill extends GlobalSkillSummary {
+  body_md: string;
+  created_by: number | null;
+  updated_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DemoPersona {
   name: string;
   email?: string;

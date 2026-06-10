@@ -3,7 +3,8 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { Stop, SpinnerGap, ArrowUp, Lightning, X, CaretDown } from "@phosphor-icons/react";
 import { AttachmentUploadTray } from "@/components/Attachments";
-import type { AppFile } from "@/lib/types";
+import { fetchGlobalSkillSummaries } from "@/lib/api";
+import type { AppFile, GlobalSkillSummary } from "@/lib/types";
 import type { Tool } from "@/tools/types";
 
 interface ChatInputProps {
@@ -57,6 +58,7 @@ export default function ChatInput({
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showToolPicker, setShowToolPicker] = useState(false);
+  const [globalSkills, setGlobalSkills] = useState<GlobalSkillSummary[]>([]);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   const pinnedTool = pinnedToolId && availableTools
@@ -75,6 +77,18 @@ export default function ChatInput({
   useEffect(() => {
     adjustHeight();
   }, [value, adjustHeight]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchGlobalSkillSummaries()
+      .then((data) => {
+        if (!cancelled) setGlobalSkills(data.skills);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Close picker on click outside
   useEffect(() => {
@@ -109,6 +123,22 @@ export default function ChatInput({
   };
 
   const canSend = (value.trim() || attachments.length > 0) && !disabled && !isLoading;
+  const skillQueryMatch = value.match(/(^|\s)\/([a-z0-9._-]*)$/i);
+  const skillQuery = skillQueryMatch ? skillQueryMatch[2].toLowerCase() : null;
+  const skillSuggestions = skillQuery === null || disabled || isLoading
+    ? []
+    : globalSkills
+        .filter((skill) => (
+          skill.slug.includes(skillQuery) ||
+          skill.name.toLowerCase().includes(skillQuery)
+        ))
+        .slice(0, 6);
+
+  const insertGlobalSkill = (skill: GlobalSkillSummary) => {
+    const nextValue = value.replace(/(^|\s)\/([a-z0-9._-]*)$/i, `$1/${skill.slug} `);
+    onChange(nextValue);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  };
 
   return (
     <div className="flex-shrink-0 bg-transparent px-4 py-3">
@@ -146,6 +176,28 @@ export default function ChatInput({
                 : "border-th focus-within:border-th-strong"
           }`}
         >
+          {skillSuggestions.length > 0 && (
+            <div className="absolute bottom-full left-3 mb-2 w-72 overflow-hidden rounded-xl border border-th bg-th-elevated shadow-xl z-50">
+              {skillSuggestions.map((skill) => (
+                <button
+                  key={skill.slug}
+                  type="button"
+                  onClick={() => insertGlobalSkill(skill)}
+                  className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-th-muted"
+                >
+                  <Lightning size={15} weight="bold" className="mt-0.5 flex-shrink-0 text-th-muted" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-th-dimmed">/{skill.slug}</span>
+                      <span className="truncate text-sm font-medium text-th-primary">{skill.name}</span>
+                    </div>
+                    <p className="line-clamp-2 text-xs leading-5 text-th-muted">{skill.description}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
           {appId && onAttachmentsChange && (
             <div className="pb-2">
               <AttachmentUploadTray

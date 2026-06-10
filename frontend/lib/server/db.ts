@@ -575,6 +575,23 @@ function initDb(db: Database.Database): void {
       PRIMARY KEY (agent_key)
     );
 
+    CREATE TABLE IF NOT EXISTS global_skills (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      body_md TEXT NOT NULL DEFAULT '',
+      trigger_phrases_json TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_by INTEGER DEFAULT NULL,
+      updated_by INTEGER DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (created_by) REFERENCES users(id),
+      FOREIGN KEY (updated_by) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_global_skills_enabled ON global_skills(enabled);
+
     CREATE TABLE IF NOT EXISTS system_settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL DEFAULT '{}'
