@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillSummary, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
 
 const BASE = "/api";
 
@@ -915,6 +915,7 @@ export interface GlobalSkillPayload {
   name: string;
   description: string;
   body_md: string;
+  parts: GlobalSkillPart[];
   trigger_phrases: string[];
   enabled: boolean;
 }

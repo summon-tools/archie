@@ -43,8 +43,8 @@ export default function Header() {
   }
 
   return (
-    <header className="bg-th-surface border-b border-th px-6 py-4 flex-shrink-0 relative z-[9999]">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+    <header className="bg-th-surface border-b border-th px-6 md:px-10 py-4 flex-shrink-0 relative z-[9999]">
+      <div className="flex w-full items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Link href="/" className="hover:opacity-80 transition-opacity">
             {/* Light-mode logo (dark text) / Dark-mode logo (light text) — toggled via data-theme in globals.css */}

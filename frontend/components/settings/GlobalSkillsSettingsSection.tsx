@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle, Lightning, Plus, SpinnerGap, Trash } from "@phosphor-icons/react";
-import type { GlobalSkill } from "@/lib/types";
+import type { GlobalSkill, GlobalSkillPart } from "@/lib/types";
 import {
   createGlobalSkill,
   deleteGlobalSkill,
@@ -21,6 +21,7 @@ interface SkillDraft {
   name: string;
   description: string;
   body_md: string;
+  parts: GlobalSkillPart[];
   triggerText: string;
   enabled: boolean;
 }
@@ -31,6 +32,7 @@ const EMPTY_DRAFT: SkillDraft = {
   name: "",
   description: "",
   body_md: "",
+  parts: [],
   triggerText: "",
   enabled: true,
 };
@@ -51,9 +53,19 @@ function draftFromSkill(skill: GlobalSkill): SkillDraft {
     name: skill.name,
     description: skill.description,
     body_md: skill.body_md,
+    parts: skill.parts || [],
     triggerText: skill.trigger_phrases.join("\n"),
     enabled: skill.enabled,
   };
+}
+
+function cleanParts(parts: GlobalSkillPart[]): GlobalSkillPart[] {
+  return parts
+    .map((part) => ({
+      name: part.name.trim().replace(/\s+/g, " "),
+      body_md: part.body_md.trim(),
+    }))
+    .filter((part) => part.name && part.body_md);
 }
 
 function payloadFromDraft(draft: SkillDraft): GlobalSkillPayload {
@@ -62,6 +74,7 @@ function payloadFromDraft(draft: SkillDraft): GlobalSkillPayload {
     name: draft.name.trim(),
     description: draft.description.trim(),
     body_md: draft.body_md.trim(),
+    parts: cleanParts(draft.parts),
     trigger_phrases: draft.triggerText
       .split("\n")
       .map((line) => line.trim())
@@ -144,11 +157,40 @@ export default function GlobalSkillsSettingsSection({ onNotify }: GlobalSkillsSe
     }
   };
 
+  const updatePart = (index: number, patch: Partial<GlobalSkillPart>) => {
+    setDraft((current) => ({
+      ...current,
+      parts: current.parts.map((part, partIndex) => (
+        partIndex === index ? { ...part, ...patch } : part
+      )),
+    }));
+  };
+
+  const addPart = () => {
+    setDraft((current) => ({
+      ...current,
+      parts: [...current.parts, { name: "", body_md: "" }],
+    }));
+  };
+
+  const removePart = (index: number) => {
+    setDraft((current) => ({
+      ...current,
+      parts: current.parts.filter((_, partIndex) => partIndex !== index),
+    }));
+  };
+
+  const partsAreValid = draft.parts.every((part) => {
+    const hasName = Boolean(part.name.trim());
+    const hasBody = Boolean(part.body_md.trim());
+    return hasName === hasBody;
+  });
   const canSave = Boolean(
     slugify(draft.slug) &&
     draft.name.trim() &&
     draft.description.trim() &&
     draft.body_md.trim() &&
+    partsAreValid &&
     !saving,
   );
 
@@ -264,7 +306,7 @@ export default function GlobalSkillsSettingsSection({ onNotify }: GlobalSkillsSe
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-th-secondary">Instructions</label>
+              <label className="mb-1 block text-sm font-medium text-th-secondary">Main instructions</label>
               <textarea
                 value={draft.body_md}
                 onChange={(event) => setDraft((current) => ({ ...current, body_md: event.target.value }))}
@@ -272,6 +314,61 @@ export default function GlobalSkillsSettingsSection({ onNotify }: GlobalSkillsSe
                 className="w-full resize-y rounded-lg border border-th bg-th-subtle px-3 py-2 font-mono text-sm leading-6 text-th-primary focus:border-transparent focus:ring-2 focus:ring-th"
                 placeholder={"# Review Working Tree\n\nFindings first. Prioritize bugs, regressions, risky behavior, and missing tests."}
               />
+            </div>
+
+            <div className="rounded-xl border border-th bg-th-subtle p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <label className="text-sm font-medium text-th-secondary">Named parts</label>
+                <button
+                  type="button"
+                  onClick={addPart}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-th-secondary hover:bg-th-muted hover:text-th-primary"
+                >
+                  <Plus size={12} weight="bold" />
+                  Add part
+                </button>
+              </div>
+
+              {draft.parts.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-th px-3 py-4 text-sm text-th-muted">
+                  No named parts.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {draft.parts.map((part, index) => (
+                    <div key={index} className="rounded-lg border border-th bg-th-elevated p-3">
+                      <div className="mb-2 flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <label className="mb-1 block text-xs font-medium text-th-muted">Part name</label>
+                          <input
+                            value={part.name}
+                            onChange={(event) => updatePart(index, { name: event.target.value })}
+                            className="w-full rounded-lg border border-th bg-th-subtle px-3 py-2 text-sm text-th-primary focus:border-transparent focus:ring-2 focus:ring-th"
+                            placeholder="testing-details"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removePart(index)}
+                          className="mt-6 rounded-lg p-2 text-th-muted hover:bg-st-red-hover hover:text-st-red"
+                          title="Remove part"
+                          aria-label="Remove part"
+                        >
+                          <Trash size={14} weight="bold" />
+                        </button>
+                      </div>
+                      <label className="mb-1 block text-xs font-medium text-th-muted">Part instructions</label>
+                      <textarea
+                        value={part.body_md}
+                        onChange={(event) => updatePart(index, { body_md: event.target.value })}
+                        rows={5}
+                        className="w-full resize-y rounded-lg border border-th bg-th-subtle px-3 py-2 font-mono text-sm leading-6 text-th-primary focus:border-transparent focus:ring-2 focus:ring-th"
+                        placeholder="Detailed instructions for this named part."
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">

@@ -125,6 +125,21 @@ export default function ChatInput({
   const canSend = (value.trim() || attachments.length > 0) && !disabled && !isLoading;
   const skillQueryMatch = value.match(/(^|\s)\/([a-z0-9._-]*)$/i);
   const skillQuery = skillQueryMatch ? skillQueryMatch[2].toLowerCase() : null;
+  const isSkillQueryActive = skillQuery !== null;
+
+  useEffect(() => {
+    if (!isSkillQueryActive) return;
+    let cancelled = false;
+    fetchGlobalSkillSummaries()
+      .then((data) => {
+        if (!cancelled) setGlobalSkills(data.skills);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isSkillQueryActive]);
+
   const skillSuggestions = skillQuery === null || disabled || isLoading
     ? []
     : globalSkills
