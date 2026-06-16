@@ -581,6 +581,7 @@ function initDb(db: Database.Database): void {
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       body_md TEXT NOT NULL DEFAULT '',
+      parts_json TEXT NOT NULL DEFAULT '[]',
       trigger_phrases_json TEXT NOT NULL DEFAULT '[]',
       enabled INTEGER NOT NULL DEFAULT 1,
       created_by INTEGER DEFAULT NULL,
@@ -815,6 +816,8 @@ function initDb(db: Database.Database): void {
 
   addColumnIfMissing(db, "home_rooms", "planning_context_md", "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, "home_rooms", "planning_context_updated_at", "TEXT DEFAULT NULL");
+
+  addColumnIfMissing(db, "global_skills", "parts_json", "TEXT NOT NULL DEFAULT '[]'");
 
   addColumnIfMissing(db, "plans", "execution_state", "TEXT NOT NULL DEFAULT 'idle'");
   addColumnIfMissing(db, "plans", "execution_started_at", "TEXT DEFAULT NULL");

@@ -67,8 +67,14 @@ export interface GlobalSkillSummary {
   enabled: boolean;
 }
 
+export interface GlobalSkillPart {
+  name: string;
+  body_md: string;
+}
+
 export interface GlobalSkill extends GlobalSkillSummary {
   body_md: string;
+  parts: GlobalSkillPart[];
   created_by: number | null;
   updated_by: number | null;
   created_at: string;

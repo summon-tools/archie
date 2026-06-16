@@ -443,6 +443,7 @@ export interface GlobalSkillRow {
   name: string;
   description: string;
   body_md: string;
+  parts_json: string;
   trigger_phrases_json: string;
   enabled: number;
   created_by: number | null;

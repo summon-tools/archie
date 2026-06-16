@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
         name: payload.name,
         description: payload.description,
         body_md: payload.body_md,
+        parts: payload.parts ?? [],
         trigger_phrases: payload.trigger_phrases,
         enabled: payload.enabled,
         created_by: user.id,
