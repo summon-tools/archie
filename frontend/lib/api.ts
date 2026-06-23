@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
 
 const BASE = "/api";
 
@@ -944,6 +944,51 @@ export async function updateGlobalSkill(slug: string, payload: GlobalSkillPayloa
 
 export async function deleteGlobalSkill(slug: string): Promise<{ deleted: string }> {
   return fetchJSON<{ deleted: string }>(`${BASE}/settings/skills/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+  });
+}
+
+// --- MCP token endpoints ---
+
+export const MCP_SCOPES = [
+  "apps:read",
+  "skills:read",
+  "project:read",
+  "tasks:read",
+  "tasks:write",
+  "tasks:stop",
+  "servers:read",
+  "servers:start",
+  "servers:stop",
+  "activity:read",
+] as const;
+
+export interface McpTokenPayload {
+  name: string;
+  scopes: string[];
+  allowed_app_ids: number[];
+  expires_at?: string | null;
+}
+
+export async function fetchMcpTokens(): Promise<{ tokens: McpToken[] }> {
+  return fetchJSON<{ tokens: McpToken[] }>(`${BASE}/settings/mcp-tokens`);
+}
+
+export async function createMcpToken(payload: McpTokenPayload): Promise<{ token: McpToken; secret: string }> {
+  return fetchJSON<{ token: McpToken; secret: string }>(`${BASE}/settings/mcp-tokens`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function revokeMcpToken(id: number): Promise<{ success: boolean }> {
+  return fetchJSON<{ success: boolean }>(`${BASE}/settings/mcp-tokens/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function deleteMcpToken(id: number): Promise<{ success: boolean }> {
+  return fetchJSON<{ success: boolean }>(`${BASE}/settings/mcp-tokens/${id}?hard=1`, {
     method: "DELETE",
   });
 }

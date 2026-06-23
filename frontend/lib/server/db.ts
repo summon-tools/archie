@@ -598,6 +598,42 @@ function initDb(db: Database.Database): void {
       value_json TEXT NOT NULL DEFAULT '{}'
     );
 
+    CREATE TABLE IF NOT EXISTS mcp_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      token_prefix TEXT NOT NULL,
+      created_by_user_id INTEGER DEFAULT NULL,
+      scopes_json TEXT NOT NULL DEFAULT '[]',
+      allowed_app_ids_json TEXT NOT NULL DEFAULT '[]',
+      last_used_at TEXT DEFAULT NULL,
+      expires_at TEXT DEFAULT NULL,
+      revoked_at TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mcp_tokens_hash ON mcp_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_mcp_tokens_revoked ON mcp_tokens(revoked_at);
+
+    CREATE TABLE IF NOT EXISTS mcp_audit_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_id INTEGER DEFAULT NULL,
+      app_id INTEGER DEFAULT NULL,
+      tool_name TEXT NOT NULL,
+      input_summary_json TEXT DEFAULT NULL,
+      result_summary_json TEXT DEFAULT NULL,
+      status TEXT NOT NULL CHECK(status IN ('success', 'error')),
+      error_text TEXT DEFAULT NULL,
+      duration_ms INTEGER DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (token_id) REFERENCES mcp_tokens(id),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mcp_audit_events_token ON mcp_audit_events(token_id);
+    CREATE INDEX IF NOT EXISTS idx_mcp_audit_events_app ON mcp_audit_events(app_id);
+    CREATE INDEX IF NOT EXISTS idx_mcp_audit_events_tool ON mcp_audit_events(tool_name);
+
     -- Terminal & process console tables
     CREATE TABLE IF NOT EXISTS terminal_sessions (
       id TEXT PRIMARY KEY,
