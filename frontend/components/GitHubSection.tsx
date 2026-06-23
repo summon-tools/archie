@@ -25,6 +25,7 @@ export default function GitHubSection({
   const [showRepoForm, setShowRepoForm] = useState(false);
   const [repoUrl, setRepoUrl] = useState(githubRepo);
   const [savingRemote, setSavingRemote] = useState(false);
+  const [discardLocalChanges, setDiscardLocalChanges] = useState(false);
   const [message, setMessage] = useState<{
     type: "success" | "error";
     text: string;
@@ -36,6 +37,14 @@ export default function GitHubSection({
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  const canDiscardLocalChanges = !!gitStatus?.has_changes && (gitStatus.branch === "main" || gitStatus.branch === "master");
+
+  useEffect(() => {
+    if (!canDiscardLocalChanges) {
+      setDiscardLocalChanges(false);
+    }
+  }, [canDiscardLocalChanges]);
 
   const handleInit = async () => {
     setInitLoading(true);
@@ -75,11 +84,14 @@ export default function GitHubSection({
     setPullLoading(true);
     setMessage(null);
     try {
-      const result = await pullFromGitHub(appId);
+      const result = await pullFromGitHub(appId, {
+        discardLocalChanges: canDiscardLocalChanges && discardLocalChanges,
+      });
       setMessage({
         type: "success",
         text: result.message,
       });
+      setDiscardLocalChanges(false);
       reloadStatus();
     } catch (err) {
       setMessage({
@@ -255,6 +267,23 @@ export default function GitHubSection({
           </>
         )}
       </div>
+
+      {canDiscardLocalChanges && (
+        <label className="flex items-start gap-2 rounded-lg border border-st-amber/30 bg-st-amber/10 px-3 py-2 text-xs text-th-secondary">
+          <input
+            type="checkbox"
+            checked={discardLocalChanges}
+            onChange={(e) => setDiscardLocalChanges(e.target.checked)}
+            className="mt-0.5 h-3.5 w-3.5 rounded border-th bg-th-surface text-th-primary focus:ring-th"
+          />
+          <span>
+            <span className="font-medium text-th-primary">
+              Discard local changes on {gitStatus.branch} before pulling.
+            </span>{" "}
+            This deletes uncommitted edits and untracked files outside <code className="font-mono">.archie</code>.
+          </span>
+        </label>
+      )}
 
       {/* Row 3: Sync/Pull button (always visible when connected) */}
       <button

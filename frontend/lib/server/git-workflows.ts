@@ -365,23 +365,30 @@ export async function pullAppDefaultBranch({
   appId,
   user,
   branch,
+  discardLocalChanges = false,
 }: {
   appId: number;
   user: GitWorkflowUser;
   branch?: string;
+  discardLocalChanges?: boolean;
 }): Promise<PullBranchResult> {
   const app = requireApp(appId);
   if (!app.directory) throw new GitWorkflowError("App has no directory configured", 400);
   if (!isGitInitialized(app.directory)) throw new GitWorkflowError("Git not initialized", 400);
 
   const branchName = branch || getGitDefaultBranchName(app.directory);
+  const isDefaultBranch = branchName === "main" || branchName === "master";
+  if (discardLocalChanges && !isDefaultBranch) {
+    throw new GitWorkflowError("Discarding local changes is only supported on main or master.", 400);
+  }
+
   const githubAuth = await getValidGitHubUserToken(user.id);
   const result = gitPull(app.directory, {
     branch: branchName,
     token: githubAuth.token,
     fastForwardOnly: true,
-    requireClean: true,
-    allowDefaultBranchHardReset: false,
+    requireClean: !discardLocalChanges,
+    allowDefaultBranchHardReset: discardLocalChanges,
   });
   if (!result.success) throw new GitWorkflowError(result.message, 409);
 

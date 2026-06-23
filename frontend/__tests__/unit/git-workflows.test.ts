@@ -96,6 +96,37 @@ describe("git workflows", () => {
     }));
   });
 
+  it("allows app-level default branch pulls to discard local changes when requested", async () => {
+    const { pull } = mockWorkflowDependencies();
+    const { pullAppDefaultBranch } = await import("@/lib/server/git-workflows");
+
+    await pullAppDefaultBranch({
+      appId: 1,
+      user: { id: 1, name: "Test User" },
+      discardLocalChanges: true,
+    });
+
+    expect(pull).toHaveBeenCalledWith("/repo", expect.objectContaining({
+      branch: "main",
+      requireClean: false,
+      allowDefaultBranchHardReset: true,
+    }));
+  });
+
+  it("rejects discard-local-changes pulls outside main or master", async () => {
+    const { pull } = mockWorkflowDependencies();
+    const { pullAppDefaultBranch } = await import("@/lib/server/git-workflows");
+
+    await expect(pullAppDefaultBranch({
+      appId: 1,
+      user: { id: 1, name: "Test User" },
+      branch: "feature/test",
+      discardLocalChanges: true,
+    })).rejects.toThrow("Discarding local changes is only supported on main or master.");
+
+    expect(pull).not.toHaveBeenCalled();
+  });
+
   it("disables deleted-branch fallback for worktree pulls", async () => {
     const { pull } = mockWorkflowDependencies();
     const { pullWorkItemBranch } = await import("@/lib/server/git-workflows");

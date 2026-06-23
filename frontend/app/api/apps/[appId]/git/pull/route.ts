@@ -21,12 +21,14 @@ export async function POST(
 
   const body = await request.json().catch(() => ({}));
   const { branch } = body;
+  const discardLocalChanges = body.discardLocalChanges === true;
 
   try {
     const result = await pullAppDefaultBranch({
       appId: Number(appId),
       user: currentUser,
       branch,
+      discardLocalChanges,
     });
     return NextResponse.json({ message: result.message });
   } catch (e) {
