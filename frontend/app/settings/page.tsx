@@ -6,11 +6,12 @@ import Header from "@/components/Header";
 import type { GitSettings, HomeAgentConfig } from "@/lib/types";
 import { getMe, getGitSettings, updateGitSettings, generateSSHKey, getSettings, getUsers, updateUserRole, deleteUser, restoreUser, createInvitation, getInvitations, revokeInvitation, getModelConfig, updateModelConfig, getHomeAgents, getGitHubAppSettings, updateGitHubAppSettings } from "@/lib/api";
 import type { GitHubAppSettings, UserInfo, InvitationInfo } from "@/lib/api";
-import { GitBranch, CheckCircle, Users, Gear, Heartbeat, Warning, XCircle, Robot, PencilSimple, Copy, Lightning } from "@phosphor-icons/react";
+import { GitBranch, CheckCircle, Users, Gear, Heartbeat, Warning, XCircle, Robot, PencilSimple, Copy, Lightning, Key } from "@phosphor-icons/react";
 import { useToast } from "@/components/Toast";
 import GlobalSkillsSettingsSection from "@/components/settings/GlobalSkillsSettingsSection";
+import McpTokensSettingsSection from "@/components/settings/McpTokensSettingsSection";
 
-const SETTINGS_SECTIONS = ["git", "team", "models", "agents", "skills", "system"] as const;
+const SETTINGS_SECTIONS = ["git", "team", "models", "agents", "skills", "mcp", "system"] as const;
 type Section = (typeof SETTINGS_SECTIONS)[number];
 
 function isSettingsSection(value: string | null): value is Section {
@@ -625,6 +626,11 @@ export default function SettingsPage() {
       icon: <Lightning size={20} />,
     },
     {
+      key: "mcp",
+      label: "MCP",
+      icon: <Key size={20} />,
+    },
+    {
       key: "system",
       label: "System",
       icon: <Heartbeat size={20} />,
@@ -957,6 +963,10 @@ export default function SettingsPage() {
 
             {activeSection === "skills" && (
               <GlobalSkillsSettingsSection onNotify={showMessage} />
+            )}
+
+            {activeSection === "mcp" && (
+              <McpTokensSettingsSection onNotify={showMessage} />
             )}
 
             {activeSection === "system" && (

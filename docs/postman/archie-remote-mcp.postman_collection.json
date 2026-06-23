@@ -1,0 +1,569 @@
+{
+  "info": {
+    "_postman_id": "d2f6fd2b-cd46-4dfb-9fdc-archie-mcp-local",
+    "name": "Archie Remote MCP",
+    "description": "Reusable Postman requests for Archie's remote MCP JSON-RPC endpoint. Set collection variables before running requests; do not store real tokens in this file.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{archie_mcp_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('HTTP status is successful', function () {",
+          "  pm.expect(pm.response.code).to.be.oneOf([200, 202]);",
+          "});",
+          "",
+          "if (pm.response.code === 200 && pm.response.headers.get('content-type') && pm.response.headers.get('content-type').includes('application/json')) {",
+          "  const json = pm.response.json();",
+          "  pm.test('JSON-RPC response is valid', function () {",
+          "    pm.expect(json.jsonrpc).to.eql('2.0');",
+          "    pm.expect(json.error, json.error && json.error.message).to.be.undefined;",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "archie_base_url",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "archie_mcp_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "archie_app_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "archie_task_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "archie_conversation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "archie_run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "archie_skill_slug",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "archie_project_question",
+      "value": "What framework does this project use, and where is the app entrypoint?",
+      "type": "string"
+    },
+    {
+      "key": "archie_task_prompt",
+      "value": "Inspect the project and summarize the current architecture. Do not edit files.",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Handshake",
+      "item": [
+        {
+          "name": "Initialize",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"initialize\",\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": {\n      \"name\": \"Postman\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Ping",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"ping\",\n  \"method\": \"ping\"\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "List Tools",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"tools-list\",\n  \"method\": \"tools/list\"\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read Only Tools",
+      "item": [
+        {
+          "name": "List Apps",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const apps = json.result && json.result.structuredContent && json.result.structuredContent.apps;",
+                  "if (Array.isArray(apps) && apps.length > 0 && !pm.collectionVariables.get('archie_app_id')) {",
+                  "  pm.collectionVariables.set('archie_app_id', String(apps[0].app_id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-list-apps\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_list_apps\",\n    \"arguments\": {}\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Get App",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-get-app\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_get_app\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}}\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "List Skills",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-list-skills\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_list_skills\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"scope\": \"all\",\n      \"enabled_only\": true\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Ask Project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-ask-project\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_ask_project\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"question\": \"{{archie_project_question}}\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "List Tasks",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const tasks = json.result && json.result.structuredContent && json.result.structuredContent.tasks;",
+                  "if (Array.isArray(tasks) && tasks.length > 0) {",
+                  "  const first = tasks[0];",
+                  "  if (first.task_id && !pm.collectionVariables.get('archie_task_id')) pm.collectionVariables.set('archie_task_id', String(first.task_id));",
+                  "  if (first.conversation_id && !pm.collectionVariables.get('archie_conversation_id')) pm.collectionVariables.set('archie_conversation_id', String(first.conversation_id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-list-tasks\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_list_tasks\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"status\": \"all\",\n      \"limit\": 25\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "List Activity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-list-activity\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_list_activity\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}}\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Long Running Tasks",
+      "item": [
+        {
+          "name": "Start Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const content = json.result && json.result.structuredContent;",
+                  "if (content) {",
+                  "  if (content.run_id) pm.collectionVariables.set('archie_run_id', String(content.run_id));",
+                  "  if (content.conversation_id) pm.collectionVariables.set('archie_conversation_id', String(content.conversation_id));",
+                  "  if (content.task_id) pm.collectionVariables.set('archie_task_id', String(content.task_id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-start-task\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_start_task\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"title\": \"Postman MCP test\",\n      \"prompt\": \"{{archie_task_prompt}}\",\n      \"wait_seconds\": 0\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Start Task With Skill",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const content = json.result && json.result.structuredContent;",
+                  "if (content) {",
+                  "  if (content.run_id) pm.collectionVariables.set('archie_run_id', String(content.run_id));",
+                  "  if (content.conversation_id) pm.collectionVariables.set('archie_conversation_id', String(content.conversation_id));",
+                  "  if (content.task_id) pm.collectionVariables.set('archie_task_id', String(content.task_id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-start-task-with-skill\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_start_task\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"title\": \"Postman MCP skill test\",\n      \"skill_slug\": \"{{archie_skill_slug}}\",\n      \"prompt\": \"{{archie_task_prompt}}\",\n      \"wait_seconds\": 0\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Get Task Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const content = json.result && json.result.structuredContent;",
+                  "if (content) {",
+                  "  if (content.run_id) pm.collectionVariables.set('archie_run_id', String(content.run_id));",
+                  "  if (content.conversation_id) pm.collectionVariables.set('archie_conversation_id', String(content.conversation_id));",
+                  "  if (content.task_id) pm.collectionVariables.set('archie_task_id', String(content.task_id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-get-task-status\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_get_task_status\",\n    \"arguments\": {\n      \"run_id\": {{archie_run_id}},\n      \"include_messages\": true,\n      \"include_activity\": true\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Get Task Result",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-get-task-result\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_get_task_result\",\n    \"arguments\": {\n      \"run_id\": {{archie_run_id}}\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Continue Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const content = json.result && json.result.structuredContent;",
+                  "if (content) {",
+                  "  if (content.run_id) pm.collectionVariables.set('archie_run_id', String(content.run_id));",
+                  "  if (content.conversation_id) pm.collectionVariables.set('archie_conversation_id', String(content.conversation_id));",
+                  "  if (content.task_id) pm.collectionVariables.set('archie_task_id', String(content.task_id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-continue-task\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_continue_task\",\n    \"arguments\": {\n      \"conversation_id\": {{archie_conversation_id}},\n      \"prompt\": \"Continue from the previous result and list the next concrete implementation steps.\",\n      \"wait_seconds\": 0\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Stop Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-stop-task\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_stop_task\",\n    \"arguments\": {\n      \"conversation_id\": {{archie_conversation_id}}\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Servers",
+      "item": [
+        {
+          "name": "Start App Server",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-start-server\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_start_server\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}}\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Start Task Preview",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-start-preview\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_start_preview\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"task_id\": {{archie_task_id}}\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Stop App Server",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-stop-server\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_stop_server\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"kind\": \"app\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        },
+        {
+          "name": "Stop Task Preview",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"archie-stop-preview\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"archie_stop_server\",\n    \"arguments\": {\n      \"app_id\": {{archie_app_id}},\n      \"task_id\": {{archie_task_id}},\n      \"kind\": \"preview\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{archie_base_url}}/api/mcp"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
