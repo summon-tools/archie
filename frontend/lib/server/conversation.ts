@@ -246,7 +246,7 @@ function buildMetaLine(result: AgentResult): string {
     parts.push(mins ? `duration=${mins}m${secs}s` : `duration=${secs}s`);
   }
   if (result.numTurns) parts.push(`turns=${result.numTurns}`);
-  if (result.costUsd) parts.push(`cost=$${result.costUsd.toFixed(4)}`);
+  if (result.costUsd !== null) parts.push(`cost=$${result.costUsd.toFixed(4)}`);
 
   if (result.usage) {
     const { inputTokens, outputTokens } = result.usage;
@@ -819,6 +819,12 @@ export async function streamConversationMessage(
                   status: "completed",
                   result_json: JSON.stringify({
                     cost: agentResult.costUsd,
+                    usage: agentResult.usage
+                      ? {
+                        inputTokens: agentResult.usage.inputTokens,
+                        outputTokens: agentResult.usage.outputTokens,
+                      }
+                      : null,
                     duration_ms: agentResult.durationMs,
                     num_turns: agentResult.numTurns,
                   }),

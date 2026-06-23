@@ -55,9 +55,11 @@ export default function Header() {
             <Link href="/" className={navLinkClass(pathname === "/")}>
               Projects
             </Link>
-            <Link href="/outcomes" className={navLinkClass(pathname === "/outcomes")}>
-              Outcomes
-            </Link>
+            {role === "admin" && (
+              <Link href="/outcomes" className={navLinkClass(pathname === "/outcomes")}>
+                Outcomes
+              </Link>
+            )}
           </nav>
         </div>
 

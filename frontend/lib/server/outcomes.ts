@@ -2,6 +2,7 @@ import { getDb } from "@/lib/server/db";
 import { getPullRequest } from "@/lib/server/github";
 import { normalizeOutcomeEvidenceAssessment, parseOutcomeEvidenceAssessment } from "@/lib/server/outcome-assessment-rules";
 import { parsePullRequestMetadata, resolvePullRequestRepo } from "@/lib/server/github-pr-utils";
+import { summarizeRunCosts, type CostMetaRecord } from "@/lib/server/run-costs";
 import type { AppRow, RunRow } from "@/lib/server/types";
 import type {
   OutcomeCoverageCounts,
@@ -126,6 +127,10 @@ type FollowupRecord = {
   followup_title: string | null;
 };
 
+type MatchedCostMetaRecord = CostMetaRecord & {
+  matched_work_item_id: number;
+};
+
 function placeholders(count: number): string {
   return Array(count).fill("?").join(", ");
 }
@@ -148,9 +153,13 @@ function emptySummary(apps: AppRow[], warnings: string[] = []): OutcomesSummaryR
       unknown_outcome: 0,
       rows_with_unknown_cost: 0,
       unknown_cost_runs: 0,
+      reported_cost_runs: 0,
+      estimated_cost_runs: 0,
     },
     costs: {
       total_known_cost_usd: 0,
+      total_reported_cost_usd: 0,
+      total_estimated_cost_usd: 0,
       pending_pr_cost_usd: 0,
       merged_pr_cost_usd: 0,
       closed_unmerged_cost_usd: 0,
@@ -204,17 +213,6 @@ function emptyCoverage(): OutcomeCoverageCounts {
   };
 }
 
-function parseCost(resultJson: string | null): number | null {
-  if (!resultJson) return null;
-  try {
-    const parsed = JSON.parse(resultJson);
-    const value = parsed?.cost;
-    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-  } catch {
-    return null;
-  }
-}
-
 function groupRunsByWorkItem(workItemIds: number[]): Map<number, MatchedRun[]> {
   const grouped = new Map<number, MatchedRun[]>();
   if (workItemIds.length === 0) return grouped;
@@ -233,6 +231,36 @@ function groupRunsByWorkItem(workItemIds: number[]): Map<number, MatchedRun[]> {
     const list = grouped.get(run.matched_work_item_id) || [];
     list.push(run);
     grouped.set(run.matched_work_item_id, list);
+  }
+  return grouped;
+}
+
+function groupCostMetasByWorkItem(workItemIds: number[]): Map<number, CostMetaRecord[]> {
+  const grouped = new Map<number, CostMetaRecord[]>();
+  if (workItemIds.length === 0) return grouped;
+
+  const rows = getDb().prepare(`
+    SELECT
+      message.id AS message_id,
+      message.body_md AS body_md,
+      message.created_at AS created_at,
+      wi.id AS matched_work_item_id
+    FROM messages message
+    JOIN work_items wi ON message.conversation_id = wi.primary_conversation_id
+    WHERE wi.id IN (${placeholders(workItemIds.length)})
+      AND message.role = 'assistant'
+      AND message.body_md LIKE '%<!-- meta:%'
+    ORDER BY message.id ASC
+  `).all(...workItemIds) as MatchedCostMetaRecord[];
+
+  for (const row of rows) {
+    const list = grouped.get(row.matched_work_item_id) || [];
+    list.push({
+      message_id: row.message_id,
+      body_md: row.body_md,
+      created_at: row.created_at,
+    });
+    grouped.set(row.matched_work_item_id, list);
   }
   return grouped;
 }
@@ -266,33 +294,24 @@ function groupFollowupsByWorkItem(workItemIds: number[]): Map<number, FollowupRe
   return grouped;
 }
 
-function summarizeRuns(runs: MatchedRun[]): {
+function summarizeRuns(runs: MatchedRun[], costMetas: CostMetaRecord[] = []): {
   latestRun: MatchedRun | null;
   knownCost: number | null;
+  reportedCost: number;
+  estimatedCost: number;
   unknownCostRuns: number;
+  reportedCostRuns: number;
+  estimatedCostRuns: number;
 } {
-  if (runs.length === 0) {
-    return { latestRun: null, knownCost: null, unknownCostRuns: 0 };
-  }
-
-  let knownCost = 0;
-  let hasKnownCost = false;
-  let unknownCostRuns = 0;
-
-  for (const run of runs) {
-    const cost = parseCost(run.result_json);
-    if (cost === null) {
-      unknownCostRuns += 1;
-    } else {
-      hasKnownCost = true;
-      knownCost += cost;
-    }
-  }
-
+  const cost = summarizeRunCosts(runs, costMetas);
   return {
     latestRun: runs[runs.length - 1] || null,
-    knownCost: hasKnownCost ? knownCost : null,
-    unknownCostRuns,
+    knownCost: cost.knownCost,
+    reportedCost: cost.reportedCost,
+    estimatedCost: cost.estimatedCost,
+    unknownCostRuns: cost.unknownCostRuns,
+    reportedCostRuns: cost.reportedCostRuns,
+    estimatedCostRuns: cost.estimatedCostRuns,
   };
 }
 
@@ -646,11 +665,21 @@ export async function buildOutcomesSummary({
 
   if (records.length === 0) return emptySummary(apps);
 
-  const runsByWorkItem = groupRunsByWorkItem(records.map((record) => record.work_item_id));
-  const followupsByWorkItem = groupFollowupsByWorkItem(records.map((record) => record.work_item_id));
+  const workItemIds = records.map((record) => record.work_item_id);
+  const runsByWorkItem = groupRunsByWorkItem(workItemIds);
+  const costMetasByWorkItem = groupCostMetasByWorkItem(workItemIds);
+  const followupsByWorkItem = groupFollowupsByWorkItem(workItemIds);
   const rows: OutcomeRow[] = records.map((record) => {
     const runs = runsByWorkItem.get(record.work_item_id) || [];
-    const { latestRun, knownCost, unknownCostRuns } = summarizeRuns(runs);
+    const {
+      latestRun,
+      knownCost,
+      reportedCost,
+      estimatedCost,
+      unknownCostRuns,
+      reportedCostRuns,
+      estimatedCostRuns,
+    } = summarizeRuns(runs, costMetasByWorkItem.get(record.work_item_id) || []);
     const pr = parsePullRequestMetadata(record.pr_metadata_json);
     const rowWarnings = [...pr.warnings];
     const hasPrArtifact = record.pr_artifact_id !== null;
@@ -703,7 +732,11 @@ export async function buildOutcomesSummary({
       latest_run_workflow_key: latestRun?.workflow_key || null,
       run_count: runs.length,
       known_cost_usd: knownCost,
+      reported_cost_usd: reportedCost,
+      estimated_cost_usd: estimatedCost,
       unknown_cost_runs: unknownCostRuns,
+      reported_cost_runs: reportedCostRuns,
+      estimated_cost_runs: estimatedCostRuns,
       pr_number: pr.prNumber,
       pr_url: record.evidence_pr_url || pr.prUrl,
       pr_title: record.evidence_title || null,
@@ -840,9 +873,13 @@ export async function buildOutcomesSummary({
     if (row.outcome_state === "unknown") counts.unknown_outcome += 1;
     if (row.known_cost_usd === null || row.unknown_cost_runs > 0) counts.rows_with_unknown_cost += 1;
     counts.unknown_cost_runs += row.unknown_cost_runs;
+    counts.reported_cost_runs += row.reported_cost_runs;
+    counts.estimated_cost_runs += row.estimated_cost_runs;
 
     if (row.known_cost_usd !== null) {
       costs.total_known_cost_usd += row.known_cost_usd;
+      costs.total_reported_cost_usd += row.reported_cost_usd;
+      costs.total_estimated_cost_usd += row.estimated_cost_usd;
       const bucket = costBucketForState(row.outcome_state);
       if (bucket) costs[bucket] += row.known_cost_usd;
     }

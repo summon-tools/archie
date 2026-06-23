@@ -99,10 +99,14 @@ function makeJsonRequest(url: string, token?: string, body: Record<string, unkno
   } as any;
 }
 
-async function createAuthToken() {
-  const user = seedUser(db, { name: "Outcome Tester", role: "admin" });
+async function createAuthToken(role: "admin" | "member" = "admin") {
+  const user = seedUser(db, {
+    username: `outcome-${role}-${Date.now()}-${Math.random()}`,
+    name: "Outcome Tester",
+    role,
+  });
   const { createToken } = await import("@/lib/server/auth");
-  return createToken(user.id, "Outcome Tester", "admin");
+  return createToken(user.id, "Outcome Tester", role);
 }
 
 describe("outcomes summary aggregation", () => {
@@ -153,6 +157,57 @@ describe("outcomes summary aggregation", () => {
       outcome_state: "no_pr",
       known_cost_usd: 0.42,
     });
+  });
+
+  it("estimates Codex run cost from persisted token usage", async () => {
+    const work = createWorkItem({ appName: "Estimated Cost App", branchName: "feature/estimate" });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      provider: "codex",
+      model: "gpt-5.5",
+      resultJson: JSON.stringify({
+        cost: null,
+        usage: { inputTokens: 1000, outputTokens: 200 },
+      }),
+    });
+    const { buildOutcomesSummary } = await loadOutcomes();
+
+    const summary = await buildOutcomesSummary({ apps: getAppRows() });
+
+    expect(summary.counts.unknown_cost_runs).toBe(0);
+    expect(summary.counts.estimated_cost_runs).toBe(1);
+    expect(summary.costs.total_estimated_cost_usd).toBeCloseTo(0.011, 6);
+    expect(summary.costs.total_known_cost_usd).toBeCloseTo(0.011, 6);
+    expect(summary.rows[0].known_cost_usd).toBeCloseTo(0.011, 6);
+    expect(summary.rows[0].estimated_cost_usd).toBeCloseTo(0.011, 6);
+    expect(summary.rows[0]).toMatchObject({
+      estimated_cost_runs: 1,
+      unknown_cost_runs: 0,
+    });
+  });
+
+  it("recovers older Codex token usage from assistant meta footers", async () => {
+    const work = createWorkItem({ appName: "Footer Cost App" });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      provider: "codex",
+      model: "gpt-5.5",
+      resultJson: JSON.stringify({ cost: null, duration_ms: null, num_turns: 1 }),
+    });
+    db.prepare("INSERT INTO messages (conversation_id, seq, role, kind, body_md) VALUES (?, 1, 'assistant', 'text', ?)")
+      .run(work.conversationId, "Done.\n<!-- meta: turns=1 | in=1000 | out=200 -->");
+    const { buildOutcomesSummary } = await loadOutcomes();
+
+    const summary = await buildOutcomesSummary({ apps: getAppRows() });
+
+    expect(summary.counts.unknown_cost_runs).toBe(0);
+    expect(summary.counts.estimated_cost_runs).toBe(1);
+    expect(summary.rows[0].known_cost_usd).toBeCloseTo(0.011, 6);
+    expect(summary.rows[0].estimated_cost_usd).toBeCloseTo(0.011, 6);
   });
 
   it("counts missing and malformed run cost as unknown cost evidence", async () => {
@@ -547,6 +602,158 @@ describe("outcomes summary aggregation", () => {
   });
 });
 
+describe("outcome refresh", () => {
+  it("uses the last successful refresh as the default incremental range and advances it", async () => {
+    const user = seedUser(db, { username: "refresh-user", email: "refresh@example.com" });
+    setSetting("outcomes_last_successful_refresh_at", "2026-05-01T00:00:00Z");
+    const work = createWorkItem({ appName: "Refresh App" });
+    db.prepare("UPDATE work_items SET updated_at = ? WHERE id = ?").run("2026-05-02 10:00:00", work.workItemId);
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/61",
+      pr_number: 61,
+    });
+    const { runOutcomeRefresh } = await import("@/lib/server/outcome-refresh");
+
+    const result = await runOutcomeRefresh({
+      apps: getAppRows(),
+      userId: user.id,
+      githubToken: "token",
+      mode: "manual",
+      rangeEnd: "2026-05-03T00:00:00Z",
+      fetchEvidence: async (params) => ({
+        pr: {
+          number: params.pr_number,
+          html_url: `https://github.com/acme/repo/pull/${params.pr_number}`,
+          title: "Refresh PR",
+          state: "open",
+          merged_at: null,
+          closed_at: null,
+          created_at: "2026-05-02T09:00:00Z",
+          updated_at: "2026-05-02T10:00:00Z",
+          additions: 3,
+          deletions: 1,
+          changed_files: 1,
+          commits: 1,
+          user: { login: "archie-bot" },
+          head: { ref: "feature/refresh" },
+          base: { ref: "main" },
+        },
+        issue_comments: [],
+        review_comments: [],
+        reviews: [],
+        commits: [],
+      }),
+      assessor: async () => ({
+        review_pressure: "low",
+        comment_categories: {
+          clarification: 0,
+          requested_change: 0,
+          bug_or_regression: 0,
+          nit: 0,
+          approval_or_positive: 0,
+          other: 0,
+        },
+        human_followup_type: "none",
+        agent_correction_commit_count: 0,
+        confidence: "high",
+        evidence_ids: [],
+        summary: "No correction evidence found.",
+      }),
+    });
+
+    expect(result.range_start).toBe("2026-05-01T00:00:00Z");
+    expect(result.range_end).toBe("2026-05-03T00:00:00Z");
+    expect(result.sync.run.synced_count).toBe(1);
+    expect(result.snapshots.recomputed_count).toBe(1);
+    expect(result.assessment.assessed_count).toBe(1);
+    expect(result.followups.scanned_source_prs).toBe(0);
+    expect(result.settings).toMatchObject({
+      sync_user_id: user.id,
+      last_successful_refresh_at: "2026-05-03T00:00:00Z",
+      last_refresh_completed_at: result.generated_at,
+    });
+  });
+
+  it("does not advance the successful refresh checkpoint when GitHub sync has failed items", async () => {
+    const user = seedUser(db, { username: "refresh-sync-failure", email: "sync-failure@example.com" });
+    setSetting("outcomes_last_successful_refresh_at", "2026-05-01T00:00:00Z");
+    const work = createWorkItem({ appName: "Refresh Sync Failure App" });
+    db.prepare("UPDATE work_items SET updated_at = ? WHERE id = ?").run("2026-05-02 10:00:00", work.workItemId);
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/62",
+      pr_number: 62,
+    });
+    const { runOutcomeRefresh } = await import("@/lib/server/outcome-refresh");
+    const { getOutcomesGitHubSyncSettings } = await import("@/lib/server/outcomes-github-sync");
+
+    await expect(runOutcomeRefresh({
+      apps: getAppRows(),
+      userId: user.id,
+      githubToken: "token",
+      mode: "manual",
+      rangeEnd: "2026-05-03T00:00:00Z",
+      fetchEvidence: async () => {
+        throw new Error("GitHub unavailable");
+      },
+    })).rejects.toThrow("GitHub evidence sync had 1 failed item");
+
+    const settings = getOutcomesGitHubSyncSettings();
+    expect(settings.last_successful_refresh_at).toBe("2026-05-01T00:00:00Z");
+    expect(settings.last_refresh_completed_at).toBeNull();
+  });
+
+  it("does not advance the successful refresh checkpoint when evidence assessment fails", async () => {
+    const user = seedUser(db, { username: "refresh-assessment-failure", email: "assessment-failure@example.com" });
+    setSetting("outcomes_last_successful_refresh_at", "2026-05-01T00:00:00Z");
+    const work = createWorkItem({ appName: "Refresh Assessment Failure App" });
+    db.prepare("UPDATE work_items SET updated_at = ? WHERE id = ?").run("2026-05-02 10:00:00", work.workItemId);
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/63",
+      pr_number: 63,
+    });
+    const { runOutcomeRefresh } = await import("@/lib/server/outcome-refresh");
+    const { getOutcomesGitHubSyncSettings } = await import("@/lib/server/outcomes-github-sync");
+
+    await expect(runOutcomeRefresh({
+      apps: getAppRows(),
+      userId: user.id,
+      githubToken: "token",
+      mode: "manual",
+      rangeEnd: "2026-05-03T00:00:00Z",
+      fetchEvidence: async (params) => ({
+        pr: {
+          number: params.pr_number,
+          html_url: `https://github.com/acme/repo/pull/${params.pr_number}`,
+          title: "Assessment failure PR",
+          state: "closed",
+          merged_at: "2026-05-02T12:00:00Z",
+          closed_at: "2026-05-02T12:00:00Z",
+          created_at: "2026-05-02T09:00:00Z",
+          updated_at: "2026-05-02T12:00:00Z",
+          additions: 3,
+          deletions: 1,
+          changed_files: 1,
+          commits: 1,
+          user: { login: "archie-bot" },
+          head: { ref: "feature/assessment-failure" },
+          base: { ref: "main" },
+        },
+        issue_comments: [],
+        review_comments: [],
+        reviews: [],
+        commits: [],
+      }),
+      assessor: async () => {
+        throw new Error("model unavailable");
+      },
+    })).rejects.toThrow("Outcome evidence assessment had 1 failed item");
+
+    const settings = getOutcomesGitHubSyncSettings();
+    expect(settings.last_successful_refresh_at).toBe("2026-05-01T00:00:00Z");
+    expect(settings.last_refresh_completed_at).toBeNull();
+  });
+});
+
 describe("outcome snapshot recompute", () => {
   it("creates idempotent pending snapshots from local PR artifacts", async () => {
     const work = createWorkItem({ appName: "Snapshot Pending App" });
@@ -591,6 +798,30 @@ describe("outcome snapshot recompute", () => {
       quality_reason: "A local pull request artifact exists, but GitHub evidence has not been synced.",
       pr_author: { classification: "unknown", confidence: "low" },
     });
+  });
+
+  it("uses assistant meta footer usage when recomputing snapshot cost", async () => {
+    const work = createWorkItem({ appName: "Snapshot Estimated App" });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      provider: "codex",
+      model: "gpt-5.5",
+      resultJson: JSON.stringify({ cost: null, duration_ms: null, num_turns: 1 }),
+    });
+    db.prepare("INSERT INTO messages (conversation_id, seq, role, kind, body_md) VALUES (?, 1, 'assistant', 'text', ?)")
+      .run(work.conversationId, "Implemented.\n<!-- meta: turns=1 | in=1000 | out=200 -->");
+    addPullRequestArtifact(work.appId, work.workItemId, {
+      pr_url: "https://github.com/acme/repo/pull/22",
+      pr_number: 22,
+    });
+    const { recomputeOutcomeSnapshots } = await import("@/lib/server/outcome-snapshots");
+
+    const result = recomputeOutcomeSnapshots({ apps: getAppRows(), computedAt: "2026-05-31T12:00:00Z" });
+
+    expect(result.snapshots[0].known_cost_usd).toBeCloseTo(0.011, 6);
+    expect(result.snapshots[0].unknown_cost_runs).toBe(0);
   });
 
   it("classifies merged low-rework agent PRs as strong", async () => {
@@ -1088,193 +1319,6 @@ describe("outcome evidence assessment", () => {
   });
 });
 
-describe("outcome learning reports", () => {
-  it("generates a persisted report from resolved PR evidence and excludes pending work from conclusions", async () => {
-    setSetting("github_bot_username", "archie-bot");
-    setSetting("github_bot_display_name", "Archie");
-    setSetting("github_bot_email", "bot@example.com");
-    const resolved = createWorkItem({ appName: "Report App", title: "Resolved Report Work" });
-    db.prepare("INSERT INTO messages (conversation_id, seq, role, kind, body_md) VALUES (?, 1, 'user', 'text', ?)")
-      .run(resolved.conversationId, "Build a focused billing export with tests and keep the UI unchanged.");
-    addRun({
-      appId: resolved.appId,
-      workItemId: resolved.workItemId,
-      conversationId: resolved.conversationId,
-      resultJson: JSON.stringify({ cost: 0.5 }),
-    });
-    addPullRequestArtifact(resolved.appId, resolved.workItemId, {
-      pr_url: "https://github.com/acme/repo/pull/41",
-      pr_number: 41,
-    });
-    const pending = createWorkItem({ appName: "Report App", title: "Pending Report Work" });
-    addPullRequestArtifact(pending.appId, pending.workItemId, {
-      pr_url: "https://github.com/acme/repo/pull/42",
-      pr_number: 42,
-    });
-    const dal = await import("@/lib/server/dal");
-    dal.replaceGitHubPrEvidence({
-      snapshot: {
-        app_id: resolved.appId,
-        work_item_id: resolved.workItemId,
-        owner: "acme",
-        repo: "repo",
-        pr_number: 41,
-        pr_url: "https://github.com/acme/repo/pull/41",
-        title: "Resolved report PR",
-        state: "MERGED",
-        author_login: "archie-bot",
-        commits_count: 1,
-        issue_comments_count: 0,
-        review_comments_count: 0,
-        reviews_count: 0,
-      },
-      issue_comments: [],
-      review_comments: [],
-      reviews: [],
-      commits: [{
-        sha: "report-agent",
-        author: { login: "archie-bot" },
-        committer: { login: "archie-bot" },
-        commit: {
-          message: "Implement billing export",
-          author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
-          committer: { date: "2026-05-31T09:01:00Z" },
-        },
-      }],
-    });
-    dal.replaceGitHubPrEvidence({
-      snapshot: {
-        app_id: pending.appId,
-        work_item_id: pending.workItemId,
-        owner: "acme",
-        repo: "repo",
-        pr_number: 42,
-        pr_url: "https://github.com/acme/repo/pull/42",
-        title: "Pending report PR",
-        state: "OPEN",
-        commits_count: 1,
-        issue_comments_count: 0,
-        review_comments_count: 0,
-        reviews_count: 0,
-      },
-      issue_comments: [],
-      review_comments: [],
-      reviews: [],
-      commits: [],
-    });
-    db.prepare("UPDATE work_items SET updated_at = ? WHERE id IN (?, ?)")
-      .run("2026-05-31 12:00:00", resolved.workItemId, pending.workItemId);
-    const { runOutcomeLearningReport } = await import("@/lib/server/outcome-reports");
-
-    const report = await runOutcomeLearningReport({
-      apps: getAppRows(),
-      rangeStart: "2026-05-01T00:00:00Z",
-      rangeEnd: "2026-06-02T00:00:00Z",
-      generatedAt: "2026-06-01T12:00:00Z",
-      userId: null,
-    });
-
-    expect(report.status).toBe("completed");
-    expect(report.report).toMatchObject({
-      version: 2,
-      counts: {
-        total_work_items: 2,
-        resolved_prs: 1,
-        merged_prs: 1,
-        pending_prs_excluded: 1,
-      },
-      costs: {
-        resolved_known_cost_usd: 0.5,
-        strong_known_cost_usd: 0.5,
-        likely_regression_known_cost_usd: 0,
-      },
-    });
-    expect(report.report?.insights[0]).toMatchObject({
-      id: "strong_outcomes",
-      summary: expect.stringContaining("asked for tests"),
-      evidence: [{
-        work_item_id: resolved.workItemId,
-        prompt_excerpt: "Build a focused billing export with tests and keep the UI unchanged.",
-      }],
-    });
-    expect(report.report?.recommendations[0]).toMatchObject({
-      id: "create_team_skill_from_strong_examples",
-      action: expect.stringContaining("Draft a Codex/Archie skill"),
-      artifact: {
-        title: "Draft team skill",
-        language: "markdown",
-        body: expect.stringContaining("# Skill: High-quality Archie implementation prompt"),
-      },
-    });
-    const stored = db.prepare("SELECT * FROM llm_outcome_reports").all() as any[];
-    expect(stored).toHaveLength(1);
-    expect(JSON.parse(stored[0].report_json).counts.resolved_prs).toBe(1);
-  });
-
-  it("includes every resolved row in the report instead of only the first dashboard page", async () => {
-    setSetting("github_bot_username", "archie-bot");
-    for (let index = 1; index <= 26; index += 1) {
-      const work = createWorkItem({ appName: `Full Report App ${index}`, title: `Merged Report Work ${index}` });
-      addRun({
-        appId: work.appId,
-        workItemId: work.workItemId,
-        conversationId: work.conversationId,
-        resultJson: JSON.stringify({ cost: 0.1 }),
-      });
-      addPullRequestArtifact(work.appId, work.workItemId, {
-        pr_url: `https://github.com/acme/repo/pull/${700 + index}`,
-        pr_number: 700 + index,
-      });
-      const dal = await import("@/lib/server/dal");
-      dal.replaceGitHubPrEvidence({
-        snapshot: {
-          app_id: work.appId,
-          work_item_id: work.workItemId,
-          owner: "acme",
-          repo: "repo",
-          pr_number: 700 + index,
-          pr_url: `https://github.com/acme/repo/pull/${700 + index}`,
-          title: `Merged report PR ${index}`,
-          state: "MERGED",
-          author_login: "archie-bot",
-          commits_count: 1,
-          issue_comments_count: 0,
-          review_comments_count: 0,
-          reviews_count: 0,
-        },
-        issue_comments: [],
-        review_comments: [],
-        reviews: [],
-        commits: [{
-          sha: `full-report-${index}`,
-          author: { login: "archie-bot" },
-          committer: { login: "archie-bot" },
-          commit: {
-            message: `Implement report work ${index}`,
-            author: { name: "Archie", email: "bot@example.com", date: "2026-05-31T09:00:00Z" },
-            committer: { date: "2026-05-31T09:01:00Z" },
-          },
-        }],
-      });
-      db.prepare("UPDATE work_items SET updated_at = ? WHERE id = ?").run("2026-05-31 12:00:00", work.workItemId);
-    }
-    const { runOutcomeLearningReport } = await import("@/lib/server/outcome-reports");
-
-    const report = await runOutcomeLearningReport({
-      apps: getAppRows(),
-      rangeStart: "2026-05-01T00:00:00Z",
-      rangeEnd: "2026-06-02T00:00:00Z",
-      generatedAt: "2026-06-01T12:00:00Z",
-      userId: null,
-    });
-
-    expect(report.status).toBe("completed");
-    expect(report.report?.counts.resolved_prs).toBe(26);
-    expect(report.report?.counts.merged_prs).toBe(26);
-    expect(report.report?.costs.resolved_known_cost_usd).toBeCloseTo(2.6);
-  });
-});
-
 describe("outcome follow-up detection", () => {
   it("links later PRs that likely fix regressions from merged Archie PRs", async () => {
     setSetting("github_bot_username", "archie-bot");
@@ -1410,6 +1454,15 @@ describe("GET /api/outcomes/summary", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const { GET } = await import("@/app/api/outcomes/summary/route");
+
+    const response = await GET(makeRequest("http://localhost:8080/api/outcomes/summary", token));
+
+    expect(response.status).toBe(403);
+  });
+
   it("returns an authenticated summary response", async () => {
     const token = await createAuthToken();
     const work = createWorkItem({ appName: "API App" });
@@ -1446,6 +1499,55 @@ describe("GET /api/outcomes/summary", () => {
   });
 });
 
+describe("POST /api/outcomes/github/sync", () => {
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const { POST } = await import("@/app/api/outcomes/github/sync/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/github/sync", token));
+
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("POST /api/outcomes/refresh/run", () => {
+  it("requires authentication", async () => {
+    const { POST } = await import("@/app/api/outcomes/refresh/run/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/refresh/run"));
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const { POST } = await import("@/app/api/outcomes/refresh/run/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/refresh/run", token));
+
+    expect(response.status).toBe(403);
+  });
+
+  it("queues a unified outcome refresh job", async () => {
+    const token = await createAuthToken();
+    const work = createWorkItem({ appName: "Refresh API App" });
+    const { POST } = await import("@/app/api/outcomes/refresh/run/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/refresh/run", token));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.job).toMatchObject({
+      kind: "outcome_refresh",
+      status: "queued",
+    });
+    expect(JSON.parse(body.job.input_json)).toMatchObject({
+      appIds: [work.appId],
+      fullRefresh: false,
+    });
+  });
+});
+
 describe("POST /api/outcomes/snapshots/recompute", () => {
   it("requires authentication", async () => {
     const { POST } = await import("@/app/api/outcomes/snapshots/recompute/route");
@@ -1453,6 +1555,15 @@ describe("POST /api/outcomes/snapshots/recompute", () => {
     const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/snapshots/recompute"));
 
     expect(response.status).toBe(401);
+  });
+
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const { POST } = await import("@/app/api/outcomes/snapshots/recompute/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/snapshots/recompute", token));
+
+    expect(response.status).toBe(403);
   });
 
   it("queues recompute work and stores result metadata when the job runs", async () => {
@@ -1493,6 +1604,15 @@ describe("POST /api/outcomes/assessments/run", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const { POST } = await import("@/app/api/outcomes/assessments/run/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/assessments/run", token));
+
+    expect(response.status).toBe(403);
+  });
+
   it("queues assessment work and stores result metadata when the job runs", async () => {
     const token = await createAuthToken();
     const { POST } = await import("@/app/api/outcomes/assessments/run/route");
@@ -1521,61 +1641,6 @@ describe("POST /api/outcomes/assessments/run", () => {
   });
 });
 
-describe("outcome report APIs", () => {
-  it("requires authentication for latest reports", async () => {
-    const { GET } = await import("@/app/api/outcomes/reports/latest/route");
-
-    const response = await GET(makeRequest("http://localhost:8080/api/outcomes/reports/latest"));
-
-    expect(response.status).toBe(401);
-  });
-
-  it("requires authentication for report generation", async () => {
-    const { POST } = await import("@/app/api/outcomes/reports/run/route");
-
-    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/reports/run"));
-
-    expect(response.status).toBe(401);
-  });
-
-  it("queues report generation and exposes the latest report after the job runs", async () => {
-    const token = await createAuthToken();
-    const work = createWorkItem({ appName: "Report API App" });
-    addRun({
-      appId: work.appId,
-      workItemId: work.workItemId,
-      conversationId: work.conversationId,
-      resultJson: JSON.stringify({ cost: 0.2 }),
-    });
-    const { POST } = await import("@/app/api/outcomes/reports/run/route");
-    const { GET } = await import("@/app/api/outcomes/reports/latest/route");
-
-    const runResponse = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/reports/run", token, { range_days: 30 }));
-    const runBody = await runResponse.json();
-    const { runOutcomeJobNow } = await import("@/lib/server/outcome-jobs");
-    const completed = await runOutcomeJobNow(runBody.job.id);
-    const jobResult = JSON.parse(completed.result_json || "{}");
-    const latestResponse = await GET(makeRequest("http://localhost:8080/api/outcomes/reports/latest", token));
-    const latestBody = await latestResponse.json();
-
-    expect(runResponse.status).toBe(202);
-    expect(runBody.job).toMatchObject({
-      kind: "learning_report",
-      status: "queued",
-    });
-    expect(completed.status).toBe("completed");
-    expect(jobResult.report).toMatchObject({
-      status: "completed",
-      range_days: 30,
-      total_work_items: 1,
-      resolved_pr_count: 0,
-    });
-    expect(latestResponse.status).toBe(200);
-    expect(latestBody.report.id).toBe(jobResult.report.id);
-    expect(latestBody.report.report.counts.no_pr_excluded).toBe(1);
-  });
-});
-
 describe("GET /api/outcomes/jobs/[jobId]", () => {
   it("requires authentication", async () => {
     const { GET } = await import("@/app/api/outcomes/jobs/[jobId]/route");
@@ -1586,6 +1651,21 @@ describe("GET /api/outcomes/jobs/[jobId]", () => {
     );
 
     expect(response.status).toBe(401);
+  });
+
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const apps = getAppRows();
+    const { enqueueOutcomeJob } = await import("@/lib/server/outcome-jobs");
+    const job = enqueueOutcomeJob({ kind: "snapshot_recompute", userId: null, apps });
+    const { GET } = await import("@/app/api/outcomes/jobs/[jobId]/route");
+
+    const response = await GET(
+      makeRequest(`http://localhost:8080/api/outcomes/jobs/${job.id}`, token),
+      { params: Promise.resolve({ jobId: String(job.id) }) },
+    );
+
+    expect(response.status).toBe(403);
   });
 
   it("returns queued job status for the requesting user", async () => {
@@ -1620,6 +1700,15 @@ describe("POST /api/outcomes/followups/detect", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const { POST } = await import("@/app/api/outcomes/followups/detect/route");
+
+    const response = await POST(makeJsonRequest("http://localhost:8080/api/outcomes/followups/detect", token));
+
+    expect(response.status).toBe(403);
+  });
+
   it("queues follow-up detection without a default candidate cap", async () => {
     const token = await createAuthToken();
     const { POST } = await import("@/app/api/outcomes/followups/detect/route");
@@ -1637,6 +1726,20 @@ describe("POST /api/outcomes/followups/detect", () => {
 });
 
 describe("GET/PUT /api/outcomes/settings", () => {
+  it("rejects non-admin users", async () => {
+    const token = await createAuthToken("member");
+    const { GET, PUT } = await import("@/app/api/outcomes/settings/route");
+
+    const getResponse = await GET(makeRequest("http://localhost:8080/api/outcomes/settings", token));
+    expect(getResponse.status).toBe(403);
+
+    const putResponse = await PUT({
+      ...makeRequest("http://localhost:8080/api/outcomes/settings", token),
+      json: async () => ({ daily_sync_enabled: false }),
+    } as any);
+    expect(putResponse.status).toBe(403);
+  });
+
   it("returns default settings and persists observation window updates", async () => {
     const token = await createAuthToken();
     const { GET, PUT } = await import("@/app/api/outcomes/settings/route");
@@ -1652,11 +1755,12 @@ describe("GET/PUT /api/outcomes/settings", () => {
 
     const putResponse = await PUT({
       ...makeRequest("http://localhost:8080/api/outcomes/settings", token),
-      json: async () => ({ observation_window_days: 30 }),
+      json: async () => ({ observation_window_days: 30, daily_sync_hour_utc: 0 }),
     } as any);
     await expect(putResponse.json()).resolves.toMatchObject({
       settings: {
         observation_window_days: 30,
+        daily_sync_hour_utc: 0,
       },
     });
   });

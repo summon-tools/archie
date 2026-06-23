@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AuthError, getAuthUser } from "@/lib/server/auth";
+import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 
@@ -7,12 +7,15 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> },
 ) {
-  let user: Awaited<ReturnType<typeof getAuthUser>>;
+  let user: Awaited<ReturnType<typeof requireAdmin>>;
   try {
-    user = await getAuthUser(request);
+    user = await requireAdmin(request);
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ detail: error.message }, { status: 401 });
+    }
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ detail: error.message }, { status: 403 });
     }
     throw error;
   }
@@ -27,9 +30,5 @@ export async function GET(
   if (!job) {
     return NextResponse.json({ detail: "Outcome job not found" }, { status: 404 });
   }
-  if (job.requested_by_user_id !== user.id && user.role !== "admin") {
-    return NextResponse.json({ detail: "Forbidden" }, { status: 403 });
-  }
-
   return NextResponse.json({ job: serializeOutcomeJob(job) });
 }

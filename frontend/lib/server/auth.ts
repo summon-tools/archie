@@ -70,6 +70,15 @@ export async function getAuthUser(
   if (!token) {
     throw new AuthError("Not authenticated");
   }
+  return getAuthUserFromToken(token);
+}
+
+export async function getAuthUserFromToken(
+  token: string | null | undefined,
+): Promise<{ id: number; name: string; email: string; role: UserRole; color: string | null }> {
+  if (!token) {
+    throw new AuthError("Not authenticated");
+  }
   const payload = await decodeToken(token);
   if (!payload) {
     throw new AuthError("Invalid or expired token");

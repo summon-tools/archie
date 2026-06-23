@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AuthError, getAuthUser } from "@/lib/server/auth";
+import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
@@ -53,12 +53,15 @@ function parseMaxItems(value: unknown): number | undefined {
 }
 
 export async function POST(request: NextRequest) {
-  let user: Awaited<ReturnType<typeof getAuthUser>>;
+  let user: Awaited<ReturnType<typeof requireAdmin>>;
   try {
-    user = await getAuthUser(request);
+    user = await requireAdmin(request);
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ detail: error.message }, { status: 401 });
+    }
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ detail: error.message }, { status: 403 });
     }
     throw error;
   }

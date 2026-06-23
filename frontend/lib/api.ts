@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesLearningReportResponse, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
 
 const BASE = "/api";
 
@@ -157,6 +157,18 @@ export async function updateOutcomesSettings(data: {
   return response.settings;
 }
 
+export async function runOutcomesRefresh(data: {
+  full_refresh?: boolean;
+  range_days?: number;
+  range_start?: string;
+  range_end?: string;
+} = {}): Promise<OutcomesJobEnqueueResponse> {
+  return fetchJSON(`${BASE}/outcomes/refresh/run`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function syncOutcomesGitHubEvidence(data: {
   range_days?: number;
   range_start?: string;
@@ -189,21 +201,6 @@ export async function runOutcomesEvidenceAssessment(data: {
   force?: boolean;
 } = {}): Promise<OutcomesJobEnqueueResponse> {
   return fetchJSON(`${BASE}/outcomes/assessments/run`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
-
-export async function getLatestOutcomeLearningReport(): Promise<OutcomesLearningReportResponse> {
-  return fetchJSON(`${BASE}/outcomes/reports/latest`);
-}
-
-export async function runOutcomeLearningReport(data: {
-  range_days?: number;
-  range_start?: string;
-  range_end?: string;
-} = {}): Promise<OutcomesJobEnqueueResponse> {
-  return fetchJSON(`${BASE}/outcomes/reports/run`, {
     method: "POST",
     body: JSON.stringify(data),
   });

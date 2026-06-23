@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AuthError, getAuthUser } from "@/lib/server/auth";
+import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { filterAppsForUser } from "@/lib/server/room-route-utils";
@@ -9,7 +9,7 @@ function parseRange(body: Record<string, unknown>): {
   rangeStart: string | null;
   rangeEnd: string | null;
 } {
-  const rawDays = body.range_days === undefined || body.range_days === null ? 30 : body.range_days;
+  const rawDays = body.range_days;
   const rangeDays = rawDays === undefined || rawDays === null ? null : Number(rawDays);
   if (rangeDays !== null && (!Number.isInteger(rangeDays) || rangeDays < 1 || rangeDays > 365)) {
     throw new Error("range_days must be an integer from 1 to 365");
@@ -30,12 +30,15 @@ function parseRange(body: Record<string, unknown>): {
 }
 
 export async function POST(request: NextRequest) {
-  let user: Awaited<ReturnType<typeof getAuthUser>>;
+  let user: Awaited<ReturnType<typeof requireAdmin>>;
   try {
-    user = await getAuthUser(request);
+    user = await requireAdmin(request);
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ detail: error.message }, { status: 401 });
+    }
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ detail: error.message }, { status: 403 });
     }
     throw error;
   }
@@ -53,20 +56,21 @@ export async function POST(request: NextRequest) {
     range = parseRange(body);
   } catch (error) {
     return NextResponse.json(
-      { detail: error instanceof Error ? error.message : "Invalid report request" },
+      { detail: error instanceof Error ? error.message : "Invalid refresh request" },
       { status: 400 },
     );
   }
 
   const apps = filterAppsForUser(user, dal.getApps());
   const job = enqueueOutcomeJob({
-    kind: "learning_report",
+    kind: "outcome_refresh",
     userId: user.id,
     apps,
     input: {
       rangeDays: range.rangeStart ? null : range.rangeDays,
       rangeStart: range.rangeStart,
       rangeEnd: range.rangeEnd,
+      fullRefresh: body.full_refresh === true,
     },
   });
   return NextResponse.json({ job: serializeOutcomeJob(job) }, { status: 202 });
