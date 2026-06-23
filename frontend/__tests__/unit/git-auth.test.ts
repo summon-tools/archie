@@ -36,7 +36,7 @@ describe("pull", () => {
       execSync(`git remote add origin ${remote}`, { cwd: repo, stdio: "ignore" });
       execSync("git push -u origin main", { cwd: repo, stdio: "ignore" });
 
-      execSync(`git clone ${remote} ${updater}`, { stdio: "ignore" });
+      execSync(`git clone --branch main ${remote} ${updater}`, { stdio: "ignore" });
       execSync('git config user.email "test@example.com"', { cwd: updater, stdio: "ignore" });
       execSync('git config user.name "Test User"', { cwd: updater, stdio: "ignore" });
       fs.writeFileSync(path.join(updater, "README.md"), "# Remote\n");
