@@ -230,6 +230,10 @@ describe("conversation streaming", () => {
       model_id: "gpt-5.5",
       status: "completed",
     });
+    expect(JSON.parse(run.result_json)).toMatchObject({
+      cost: 0.001,
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
   });
 
   it("persists failed provider diagnostics for the conversation status endpoint", async () => {

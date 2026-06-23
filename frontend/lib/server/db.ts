@@ -469,29 +469,9 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_followups_relation_type ON llm_outcome_followups(relation_type);
     CREATE INDEX IF NOT EXISTS idx_llm_outcome_followups_detected_at ON llm_outcome_followups(detected_at);
 
-    CREATE TABLE IF NOT EXISTS llm_outcome_reports (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      requested_by_user_id INTEGER DEFAULT NULL,
-      mode TEXT NOT NULL DEFAULT 'manual' CHECK(mode IN ('manual', 'scheduled')),
-      status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed', 'failed')),
-      range_start TEXT DEFAULT NULL,
-      range_end TEXT DEFAULT NULL,
-      range_days INTEGER DEFAULT NULL,
-      total_work_items INTEGER NOT NULL DEFAULT 0,
-      resolved_pr_count INTEGER NOT NULL DEFAULT 0,
-      report_json TEXT DEFAULT NULL,
-      warnings_json TEXT DEFAULT NULL,
-      error_text TEXT DEFAULT NULL,
-      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (requested_by_user_id) REFERENCES users(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_llm_outcome_reports_generated_at ON llm_outcome_reports(generated_at);
-    CREATE INDEX IF NOT EXISTS idx_llm_outcome_reports_status ON llm_outcome_reports(status);
-
     CREATE TABLE IF NOT EXISTS llm_outcome_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL CHECK(kind IN ('github_sync', 'snapshot_recompute', 'evidence_assessment', 'learning_report', 'followup_detection')),
+      kind TEXT NOT NULL CHECK(kind IN ('outcome_refresh', 'github_sync', 'snapshot_recompute', 'evidence_assessment', 'followup_detection')),
       requested_by_user_id INTEGER DEFAULT NULL,
       status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'completed', 'failed')),
       input_json TEXT DEFAULT NULL,
@@ -869,6 +849,9 @@ function initDb(db: Database.Database): void {
   // ── Migrate app file status constraints ───────────────────────
   ensureAppFilesUploadingStatus(db);
 
+  // ── Migrate outcome job kind constraints ──────────────────────
+  ensureOutcomeRefreshJobKind(db);
+
   // ── Clean stale agent sessions ────────────────────────────────
   db.exec("UPDATE agent_sessions SET status = 'idle' WHERE status = 'running'");
 
@@ -963,6 +946,53 @@ function ensureAppFilesUploadingStatus(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_app_files_app_id ON app_files(app_id);
     CREATE INDEX IF NOT EXISTS idx_app_files_status ON app_files(status);
     CREATE INDEX IF NOT EXISTS idx_app_files_sha256 ON app_files(app_id, sha256);
+  `);
+}
+
+function ensureOutcomeRefreshJobKind(db: Database.Database): void {
+  const row = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'llm_outcome_jobs'"
+  ).get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'outcome_refresh'")) return;
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS llm_outcome_jobs_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL CHECK(kind IN ('outcome_refresh', 'github_sync', 'snapshot_recompute', 'evidence_assessment', 'followup_detection')),
+        requested_by_user_id INTEGER DEFAULT NULL,
+        status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'completed', 'failed')),
+        input_json TEXT DEFAULT NULL,
+        result_json TEXT DEFAULT NULL,
+        progress_text TEXT DEFAULT NULL,
+        error_text TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        started_at TEXT DEFAULT NULL,
+        completed_at TEXT DEFAULT NULL,
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (requested_by_user_id) REFERENCES users(id)
+      );
+      INSERT INTO llm_outcome_jobs_new (
+        id, kind, requested_by_user_id, status, input_json, result_json,
+        progress_text, error_text, created_at, started_at, completed_at, updated_at
+      )
+      SELECT
+        id, kind, requested_by_user_id, status, input_json, result_json,
+        progress_text, error_text, created_at, started_at, completed_at, updated_at
+      FROM llm_outcome_jobs
+      WHERE kind IN ('github_sync', 'snapshot_recompute', 'evidence_assessment', 'followup_detection');
+      DROP TABLE llm_outcome_jobs;
+      ALTER TABLE llm_outcome_jobs_new RENAME TO llm_outcome_jobs;
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_jobs_kind ON llm_outcome_jobs(kind);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_jobs_status ON llm_outcome_jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_llm_outcome_jobs_created_at ON llm_outcome_jobs(created_at);
   `);
 }
 

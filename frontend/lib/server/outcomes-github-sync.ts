@@ -4,7 +4,6 @@ import { getPullRequestEvidence, type PullRequestEvidencePayload } from "@/lib/s
 import { getValidGitHubUserToken } from "@/lib/server/github-app";
 import { parsePullRequestMetadata, resolvePullRequestRepo } from "@/lib/server/github-pr-utils";
 import { logger } from "@/lib/server/logger";
-import { recomputeOutcomeSnapshots } from "@/lib/server/outcome-snapshots";
 import type { AppRow } from "@/lib/server/types";
 
 const OBSERVATION_WINDOW_SETTING = "outcomes_observation_window_days";
@@ -12,6 +11,9 @@ const DAILY_SYNC_ENABLED_SETTING = "outcomes_daily_github_sync_enabled";
 const DAILY_SYNC_HOUR_SETTING = "outcomes_daily_github_sync_hour_utc";
 const SYNC_USER_SETTING = "outcomes_github_sync_user_id";
 const LAST_SCHEDULED_SYNC_SETTING = "outcomes_last_scheduled_github_sync_at";
+const LAST_SUCCESSFUL_REFRESH_SETTING = "outcomes_last_successful_refresh_at";
+const LAST_REFRESH_STARTED_SETTING = "outcomes_last_refresh_started_at";
+const LAST_REFRESH_COMPLETED_SETTING = "outcomes_last_refresh_completed_at";
 
 export const DEFAULT_OBSERVATION_WINDOW_DAYS = 14;
 const DEFAULT_DAILY_SYNC_HOUR_UTC = 6;
@@ -40,6 +42,9 @@ export interface OutcomesGitHubSyncSettings {
   daily_sync_hour_utc: number;
   sync_user_id: number | null;
   last_scheduled_sync_at: string | null;
+  last_successful_refresh_at: string | null;
+  last_refresh_started_at: string | null;
+  last_refresh_completed_at: string | null;
 }
 
 export interface RunGitHubEvidenceSyncOptions {
@@ -59,6 +64,11 @@ function asPositiveInt(value: unknown, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function asNonNegativeInt(value: unknown, fallback: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function isoDaysAgo(days: number): string {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
@@ -73,9 +83,12 @@ export function getOutcomesGitHubSyncSettings(): OutcomesGitHubSyncSettings {
   return {
     observation_window_days: asPositiveInt(parseSettingJson(OBSERVATION_WINDOW_SETTING, DEFAULT_OBSERVATION_WINDOW_DAYS), DEFAULT_OBSERVATION_WINDOW_DAYS),
     daily_sync_enabled: dailySyncEnabled !== false,
-    daily_sync_hour_utc: Math.min(23, Math.max(0, asPositiveInt(parseSettingJson(DAILY_SYNC_HOUR_SETTING, DEFAULT_DAILY_SYNC_HOUR_UTC), DEFAULT_DAILY_SYNC_HOUR_UTC))),
+    daily_sync_hour_utc: Math.min(23, Math.max(0, asNonNegativeInt(parseSettingJson(DAILY_SYNC_HOUR_SETTING, DEFAULT_DAILY_SYNC_HOUR_UTC), DEFAULT_DAILY_SYNC_HOUR_UTC))),
     sync_user_id: parseSettingJson<number | null>(SYNC_USER_SETTING, null),
     last_scheduled_sync_at: parseSettingJson<string | null>(LAST_SCHEDULED_SYNC_SETTING, null),
+    last_successful_refresh_at: parseSettingJson<string | null>(LAST_SUCCESSFUL_REFRESH_SETTING, null),
+    last_refresh_started_at: parseSettingJson<string | null>(LAST_REFRESH_STARTED_SETTING, null),
+    last_refresh_completed_at: parseSettingJson<string | null>(LAST_REFRESH_COMPLETED_SETTING, null),
   };
 }
 
@@ -90,11 +103,34 @@ export function updateOutcomesGitHubSyncSettings(fields: Partial<Pick<
     dal.setSetting(DAILY_SYNC_ENABLED_SETTING, Boolean(fields.daily_sync_enabled));
   }
   if (fields.daily_sync_hour_utc !== undefined) {
-    dal.setSetting(DAILY_SYNC_HOUR_SETTING, Math.min(23, Math.max(0, asPositiveInt(fields.daily_sync_hour_utc, DEFAULT_DAILY_SYNC_HOUR_UTC))));
+    dal.setSetting(DAILY_SYNC_HOUR_SETTING, Math.min(23, Math.max(0, asNonNegativeInt(fields.daily_sync_hour_utc, DEFAULT_DAILY_SYNC_HOUR_UTC))));
   }
   if (fields.sync_user_id !== undefined) {
     dal.setSetting(SYNC_USER_SETTING, fields.sync_user_id);
   }
+  return getOutcomesGitHubSyncSettings();
+}
+
+export function markOutcomeRefreshStarted(startedAt: string): OutcomesGitHubSyncSettings {
+  dal.setSetting(LAST_REFRESH_STARTED_SETTING, startedAt);
+  return getOutcomesGitHubSyncSettings();
+}
+
+export function markOutcomeRefreshCompleted(fields: {
+  completedAt: string;
+  successfulThrough: string;
+  scheduled?: boolean;
+}): OutcomesGitHubSyncSettings {
+  dal.setSetting(LAST_REFRESH_COMPLETED_SETTING, fields.completedAt);
+  dal.setSetting(LAST_SUCCESSFUL_REFRESH_SETTING, fields.successfulThrough);
+  if (fields.scheduled) {
+    dal.setSetting(LAST_SCHEDULED_SYNC_SETTING, fields.completedAt);
+  }
+  return getOutcomesGitHubSyncSettings();
+}
+
+export function markOutcomeScheduledRefreshAttempt(at: string): OutcomesGitHubSyncSettings {
+  dal.setSetting(LAST_SCHEDULED_SYNC_SETTING, at);
   return getOutcomesGitHubSyncSettings();
 }
 
@@ -118,7 +154,7 @@ function getSyncCandidates(apps: AppRow[], rangeStart: string | null, rangeEnd: 
   const conditions = [`wi.app_id IN (${placeholders(appIds.length)})`, "pr.id IS NOT NULL"];
   const params: unknown[] = [...appIds];
   if (rangeStart) {
-    conditions.push("datetime(wi.updated_at) >= datetime(?)");
+    conditions.push("(datetime(wi.updated_at) >= datetime(?) OR evidence.id IS NULL OR evidence.state = 'OPEN')");
     params.push(rangeStart);
   }
   if (rangeEnd) {
@@ -143,6 +179,12 @@ function getSyncCandidates(apps: AppRow[], rangeStart: string | null, rangeEnd: 
       SELECT id FROM artifacts
       WHERE work_item_id = wi.id AND kind = 'pull_request'
       ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    )
+    LEFT JOIN github_pr_snapshots evidence ON evidence.id = (
+      SELECT id FROM github_pr_snapshots
+      WHERE work_item_id = wi.id
+      ORDER BY synced_at DESC, id DESC
       LIMIT 1
     )
     WHERE ${conditions.join(" AND ")}
@@ -195,11 +237,14 @@ export async function runGitHubEvidenceSync(options: RunGitHubEvidenceSyncOption
   let scanned = 0;
   let synced = 0;
   let failed = 0;
+  const scannedWorkItemIds: number[] = [];
+  const syncedWorkItemIds: number[] = [];
 
   try {
     const candidates = getSyncCandidates(options.apps, rangeStart, rangeEnd, maxPrs);
     for (const candidate of candidates) {
       scanned += 1;
+      scannedWorkItemIds.push(candidate.work_item_id);
       const pr = parsePullRequestMetadata(candidate.pr_metadata_json);
       if (!pr.prNumber) {
         warnings.push(`Work item ${candidate.work_item_id} has an invalid PR artifact.`);
@@ -228,6 +273,7 @@ export async function runGitHubEvidenceSync(options: RunGitHubEvidenceSyncOption
           commits: payload.commits,
         });
         synced += 1;
+        syncedWorkItemIds.push(candidate.work_item_id);
       } catch (error) {
         failed += 1;
         warnings.push(`Failed to sync PR for work item ${candidate.work_item_id}: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -245,7 +291,7 @@ export async function runGitHubEvidenceSync(options: RunGitHubEvidenceSyncOption
     if (options.mode === "manual" && options.userId) {
       updateOutcomesGitHubSyncSettings({ sync_user_id: options.userId });
     }
-    return { run: completed, warnings };
+    return { run: completed, warnings, scanned_work_item_ids: scannedWorkItemIds, synced_work_item_ids: syncedWorkItemIds };
   } catch (error) {
     const failedRun = dal.updateGitHubOutcomeSyncRun(syncRun.id, {
       status: "failed",
@@ -256,7 +302,7 @@ export async function runGitHubEvidenceSync(options: RunGitHubEvidenceSyncOption
       error_text: error instanceof Error ? error.message : "GitHub evidence sync failed",
       completed_at: new Date().toISOString(),
     });
-    return { run: failedRun, warnings };
+    return { run: failedRun, warnings, scanned_work_item_ids: scannedWorkItemIds, synced_work_item_ids: syncedWorkItemIds };
   }
 }
 
@@ -278,19 +324,18 @@ async function runScheduledSyncIfDue(): Promise<void> {
 
   schedulerRunning = true;
   try {
-    const githubAuth = await getValidGitHubUserToken(settings.sync_user_id!);
+    await getValidGitHubUserToken(settings.sync_user_id!);
     const apps = dal.getApps();
-    await runGitHubEvidenceSync({
-      apps,
+    markOutcomeScheduledRefreshAttempt(new Date().toISOString());
+    const { enqueueOutcomeJob } = await import("@/lib/server/outcome-jobs");
+    enqueueOutcomeJob({
+      kind: "outcome_refresh",
       userId: settings.sync_user_id,
-      githubToken: githubAuth.token,
-      mode: "scheduled",
-      rangeDays: settings.observation_window_days,
+      apps,
+      input: { scheduled: true },
     });
-    recomputeOutcomeSnapshots({ apps, rangeDays: settings.observation_window_days });
-    dal.setSetting(LAST_SCHEDULED_SYNC_SETTING, new Date().toISOString());
   } catch (error) {
-    logger.error({ err: error }, "scheduled GitHub outcome evidence sync failed");
+    logger.error({ err: error }, "scheduled outcome refresh failed");
   } finally {
     schedulerRunning = false;
   }

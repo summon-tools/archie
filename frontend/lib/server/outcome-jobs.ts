@@ -3,7 +3,7 @@ import { GitHubAppError, getValidGitHubUserToken } from "@/lib/server/github-app
 import { logger } from "@/lib/server/logger";
 import { runOutcomeEvidenceAssessment } from "@/lib/server/outcome-assessments";
 import { runOutcomeFollowupDetection } from "@/lib/server/outcome-followups";
-import { runOutcomeLearningReport } from "@/lib/server/outcome-reports";
+import { runOutcomeRefresh } from "@/lib/server/outcome-refresh";
 import { recomputeOutcomeSnapshots } from "@/lib/server/outcome-snapshots";
 import { runGitHubEvidenceSync } from "@/lib/server/outcomes-github-sync";
 import type { AppRow, LlmOutcomeJobKind, LlmOutcomeJobRow } from "@/lib/server/types";
@@ -26,6 +26,8 @@ export type OutcomeJobInput = {
   workItemIds?: number[];
   maxItems?: number;
   force?: boolean;
+  scheduled?: boolean;
+  fullRefresh?: boolean;
   observationDays?: number;
   maxCandidates?: number;
 };
@@ -55,6 +57,8 @@ function parseInput(job: LlmOutcomeJobRow): OutcomeJobInput {
         : undefined,
       maxItems: parsed.maxItems === undefined ? undefined : Number(parsed.maxItems),
       force: parsed.force === true,
+      scheduled: parsed.scheduled === true,
+      fullRefresh: parsed.fullRefresh === true,
       observationDays: parsed.observationDays === undefined ? undefined : Number(parsed.observationDays),
       maxCandidates: parsed.maxCandidates === undefined ? undefined : Number(parsed.maxCandidates),
     };
@@ -100,6 +104,17 @@ async function executeOutcomeJob(job: LlmOutcomeJobRow): Promise<unknown> {
   const apps = appsFromInput(input);
 
   switch (job.kind) {
+    case "outcome_refresh": {
+      const githubToken = await getGitHubTokenForJob(job);
+      return await runOutcomeRefresh({
+        apps,
+        userId: job.requested_by_user_id,
+        githubToken,
+        mode: input.scheduled ? "scheduled" : "manual",
+        ...rangeArgs(input),
+        fullRefresh: input.fullRefresh === true,
+      });
+    }
     case "github_sync": {
       const githubToken = await getGitHubTokenForJob(job);
       const sync = await runGitHubEvidenceSync({
@@ -133,15 +148,6 @@ async function executeOutcomeJob(job: LlmOutcomeJobRow): Promise<unknown> {
         maxItems: input.maxItems,
         force: input.force === true,
       });
-    }
-    case "learning_report": {
-      const report = await runOutcomeLearningReport({
-        apps,
-        userId: job.requested_by_user_id,
-        mode: "manual",
-        ...rangeArgs(input),
-      });
-      return { report };
     }
     case "followup_detection": {
       const githubToken = await getGitHubTokenForJob(job);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AuthError, getAuthUser } from "@/lib/server/auth";
+import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import {
   getOutcomesGitHubSyncSettings,
   updateOutcomesGitHubSyncSettings,
@@ -7,11 +7,14 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    await getAuthUser(request);
+    await requireAdmin(request);
     return NextResponse.json({ settings: getOutcomesGitHubSyncSettings() });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ detail: error.message }, { status: 401 });
+    }
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ detail: error.message }, { status: 403 });
     }
     throw error;
   }
@@ -19,7 +22,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    await getAuthUser(request);
+    await requireAdmin(request);
     const body = await request.json().catch(() => ({}));
     const observationWindowDays = body.observation_window_days === undefined
       ? undefined
@@ -50,6 +53,9 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ detail: error.message }, { status: 401 });
+    }
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ detail: error.message }, { status: 403 });
     }
     throw error;
   }

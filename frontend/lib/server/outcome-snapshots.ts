@@ -3,6 +3,7 @@ import { getDb } from "@/lib/server/db";
 import { getGitHubAppSettings } from "@/lib/server/github-app";
 import { applyOutcomeEvidenceAssessment, parseOutcomeEvidenceAssessment } from "@/lib/server/outcome-assessment-rules";
 import { parsePullRequestMetadata } from "@/lib/server/github-pr-utils";
+import { summarizeRunCosts, type CostMetaRecord } from "@/lib/server/run-costs";
 import type {
   AppRow,
   GitHubPrCommentRow,
@@ -36,6 +37,7 @@ type SnapshotCandidate = {
 
 type MatchedRun = RunRow & { matched_work_item_id: number };
 type CommitClassification = "agent_authored" | "agent_coauthored" | "human_authored" | "unknown";
+type MatchedCostMetaRecord = CostMetaRecord & { matched_work_item_id: number };
 
 export interface RecomputeOutcomeSnapshotsOptions {
   apps: AppRow[];
@@ -56,33 +58,9 @@ function placeholders(count: number): string {
   return Array(count).fill("?").join(", ");
 }
 
-function parseCost(resultJson: string | null): number | null {
-  if (!resultJson) return null;
-  try {
-    const parsed = JSON.parse(resultJson);
-    const value = parsed?.cost;
-    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function summarizeRuns(runs: MatchedRun[]): { knownCost: number | null; unknownCostRuns: number } {
-  let knownCost = 0;
-  let hasKnownCost = false;
-  let unknownCostRuns = 0;
-
-  for (const run of runs) {
-    const cost = parseCost(run.result_json);
-    if (cost === null) {
-      unknownCostRuns += 1;
-    } else {
-      hasKnownCost = true;
-      knownCost += cost;
-    }
-  }
-
-  return { knownCost: hasKnownCost ? knownCost : null, unknownCostRuns };
+function summarizeRuns(runs: MatchedRun[], costMetas: CostMetaRecord[] = []): { knownCost: number | null; unknownCostRuns: number } {
+  const cost = summarizeRunCosts(runs, costMetas);
+  return { knownCost: cost.knownCost, unknownCostRuns: cost.unknownCostRuns };
 }
 
 function outcomeFromPrState(state: string | null): LlmOutcomeState {
@@ -247,6 +225,36 @@ function groupRunsByWorkItem(workItemIds: number[]): Map<number, MatchedRun[]> {
     const list = grouped.get(run.matched_work_item_id) || [];
     list.push(run);
     grouped.set(run.matched_work_item_id, list);
+  }
+  return grouped;
+}
+
+function groupCostMetasByWorkItem(workItemIds: number[]): Map<number, CostMetaRecord[]> {
+  const grouped = new Map<number, CostMetaRecord[]>();
+  if (workItemIds.length === 0) return grouped;
+
+  const rows = getDb().prepare(`
+    SELECT
+      message.id AS message_id,
+      message.body_md AS body_md,
+      message.created_at AS created_at,
+      wi.id AS matched_work_item_id
+    FROM messages message
+    JOIN work_items wi ON message.conversation_id = wi.primary_conversation_id
+    WHERE wi.id IN (${placeholders(workItemIds.length)})
+      AND message.role = 'assistant'
+      AND message.body_md LIKE '%<!-- meta:%'
+    ORDER BY message.id ASC
+  `).all(...workItemIds) as MatchedCostMetaRecord[];
+
+  for (const row of rows) {
+    const list = grouped.get(row.matched_work_item_id) || [];
+    list.push({
+      message_id: row.message_id,
+      body_md: row.body_md,
+      created_at: row.created_at,
+    });
+    grouped.set(row.matched_work_item_id, list);
   }
   return grouped;
 }
@@ -521,6 +529,7 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
     .map((candidate) => candidate.pr_snapshot_id)
     .filter((id): id is number => typeof id === "number");
   const runsByWorkItem = groupRunsByWorkItem(workItemIds);
+  const costMetasByWorkItem = groupCostMetasByWorkItem(workItemIds);
   const assessmentsByWorkItem = new Map(
     dal.listLatestLlmOutcomeAssessmentsForWorkItems(workItemIds).map((assessment) => [assessment.work_item_id, assessment]),
   );
@@ -551,7 +560,7 @@ export function recomputeOutcomeSnapshots(options: RecomputeOutcomeSnapshotsOpti
     const hasValidPrArtifact = hasPrArtifact && pr.prNumber !== null;
     const hasGitHubEvidence = candidate.pr_snapshot_id !== null;
     const runs = runsByWorkItem.get(candidate.work_item_id) || [];
-    const cost = summarizeRuns(runs);
+    const cost = summarizeRuns(runs, costMetasByWorkItem.get(candidate.work_item_id) || []);
     const comments = candidate.pr_snapshot_id ? commentsBySnapshot.get(candidate.pr_snapshot_id) || [] : [];
     const reviews = candidate.pr_snapshot_id ? reviewsBySnapshot.get(candidate.pr_snapshot_id) || [] : [];
     const commits = candidate.pr_snapshot_id ? commitsBySnapshot.get(candidate.pr_snapshot_id) || [] : [];
