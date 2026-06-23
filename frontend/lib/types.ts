@@ -81,6 +81,21 @@ export interface GlobalSkill extends GlobalSkillSummary {
   updated_at: string;
 }
 
+export interface McpToken {
+  id: number;
+  name: string;
+  token_prefix: string;
+  created_by_user_id: number | null;
+  created_by_user_name: string | null;
+  scopes: string[];
+  allowed_app_ids: number[];
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DemoPersona {
   name: string;
   email?: string;

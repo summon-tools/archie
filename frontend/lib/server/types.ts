@@ -564,6 +564,34 @@ export interface SystemSettingRow {
   value_json: string;
 }
 
+export interface McpTokenRow {
+  id: number;
+  name: string;
+  token_hash: string;
+  token_prefix: string;
+  created_by_user_id: number | null;
+  scopes_json: string;
+  allowed_app_ids_json: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface McpAuditEventRow {
+  id: number;
+  token_id: number | null;
+  app_id: number | null;
+  tool_name: string;
+  input_summary_json: string | null;
+  result_summary_json: string | null;
+  status: "success" | "error";
+  error_text: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
 // ── Response types used by API routes ──────────────────────────────
 
 export interface WorkItemCounts {

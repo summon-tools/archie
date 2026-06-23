@@ -71,9 +71,10 @@ export function mockConfig(dbPath: string, overrides?: Record<string, unknown>) 
  * Get an initialised test database.
  * Must be called after vi.resetModules().
  */
-export async function getTestDb(ctx: TestContext) {
+export async function getTestDb(ctx: TestContext, configOverrides?: Record<string, unknown>) {
   vi.doMock("@/lib/server/config", () => mockConfig(ctx.dbPath, {
     getProjectsDir: () => ctx.tmpDir,
+    ...configOverrides,
   }));
   const { getDb } = await import("@/lib/server/db");
   return getDb();
