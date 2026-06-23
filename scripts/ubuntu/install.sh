@@ -348,6 +348,9 @@ Environment=PATH=$NVM_DIR_RESOLVED/versions/node/$(node -v)/bin:/usr/local/bin:/
 ExecStart=$NODE_BIN $NPX_BIN next start --hostname 127.0.0.1 -p $APP_PORT
 Restart=on-failure
 RestartSec=5
+# Archie starts user app and preview servers as managed child processes. Keep
+# those processes alive when only the dashboard service is restarted for updates.
+KillMode=process
 StandardOutput=append:$PROJECT_DIR/data/archie.log
 StandardError=append:$PROJECT_DIR/data/archie.log
 

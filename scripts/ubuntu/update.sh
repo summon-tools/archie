@@ -45,6 +45,31 @@ fi
 
 ARCHIE_MODE="${ARCHIE_MODE:-development}"
 
+ensure_systemd_preserves_managed_servers() {
+  local service_file="/etc/systemd/system/archie.service"
+
+  [ -f "$service_file" ] || return 0
+
+  if sudo grep -q '^KillMode=' "$service_file"; then
+    local kill_mode
+    kill_mode=$(sudo awk -F= '/^KillMode=/{ gsub(/[[:space:]]/, "", $2); print $2; exit }' "$service_file")
+    if [ "$kill_mode" != "process" ]; then
+      warn "archie.service uses KillMode=$kill_mode; restarting the dashboard may stop app/preview servers."
+      warn "Set KillMode=process in [Service] if you want managed servers to survive dashboard updates."
+    fi
+    return 0
+  fi
+
+  if sudo grep -q '^\[Service\]' "$service_file"; then
+    info "Configuring systemd to keep app/preview servers alive across dashboard restarts..."
+    sudo sed -i '/^\[Service\]/a KillMode=process' "$service_file"
+    sudo systemctl daemon-reload
+    ok "Configured archie.service with KillMode=process"
+  else
+    warn "Could not find [Service] in $service_file. Add KillMode=process manually to preserve app/preview servers."
+  fi
+}
+
 # Pull latest changes
 info "Pulling latest changes..."
 git pull origin main
@@ -74,6 +99,7 @@ if [ "$ARCHIE_MODE" = "production" ]; then
   echo ""
 
   if [ -f /etc/systemd/system/archie.service ]; then
+    ensure_systemd_preserves_managed_servers
     info "Restarting service..."
     sudo systemctl restart archie
     ok "Service restarted"
