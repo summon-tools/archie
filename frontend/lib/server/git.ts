@@ -504,9 +504,18 @@ export function pull(directory: string, branchOrOptions?: string | GitPullOption
     if (branch === "main" || branch === "master") {
       if (options.allowDefaultBranchHardReset !== false) {
         ensureGitignore(directory);
-        runGitSafe(directory, tokenizedGitArgs(options.token, ["fetch", "origin", branch]), 15000);
-        runGitSafe(directory, ["reset", "--hard", `origin/${branch}`]);
-        runGitSafe(directory, ["clean", "-fd", "--exclude=.archie"]);
+        const fetchResult = runGitSafe(directory, tokenizedGitArgs(options.token, ["fetch", "origin", branch]), 15000);
+        if (fetchResult.returncode !== 0) {
+          return { success: false, message: fetchResult.stdout.trim() || `Failed to fetch ${branch} from GitHub` };
+        }
+        const resetResult = runGitSafe(directory, ["reset", "--hard", `origin/${branch}`]);
+        if (resetResult.returncode !== 0) {
+          return { success: false, message: resetResult.stdout.trim() || `Failed to reset to origin/${branch}` };
+        }
+        const cleanResult = runGitSafe(directory, ["clean", "-fd", "--exclude=.archie"]);
+        if (cleanResult.returncode !== 0) {
+          return { success: false, message: cleanResult.stdout.trim() || "Failed to remove untracked files" };
+        }
         return { success: true, message: `Synced to latest ${branch} from GitHub` };
       }
     }

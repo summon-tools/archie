@@ -750,8 +750,14 @@ export async function pushToGitHub(appId: number): Promise<GitPushResult> {
   return fetchJSON(`${BASE}/apps/${appId}/git/push`, { method: "POST" });
 }
 
-export async function pullFromGitHub(appId: number): Promise<{ message: string }> {
-  return fetchJSON(`${BASE}/apps/${appId}/git/pull`, { method: "POST" });
+export async function pullFromGitHub(
+  appId: number,
+  options: { discardLocalChanges?: boolean } = {},
+): Promise<{ message: string }> {
+  return fetchJSON(`${BASE}/apps/${appId}/git/pull`, {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
 }
 
 // --- Environment variable endpoints ---

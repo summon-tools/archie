@@ -18,6 +18,52 @@ describe("githubTokenGitArgs", () => {
 });
 
 describe("pull", () => {
+  it("hard-resets main to origin when default branch reset is allowed", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "archie-main-reset-test-"));
+    const repo = path.join(root, "repo");
+    const remote = path.join(root, "remote.git");
+    const updater = path.join(root, "updater");
+
+    try {
+      fs.mkdirSync(repo);
+      execSync("git init -b main", { cwd: repo, stdio: "ignore" });
+      execSync('git config user.email "test@example.com"', { cwd: repo, stdio: "ignore" });
+      execSync('git config user.name "Test User"', { cwd: repo, stdio: "ignore" });
+      fs.writeFileSync(path.join(repo, "README.md"), "# Initial\n");
+      execSync("git add README.md", { cwd: repo, stdio: "ignore" });
+      execSync('git commit -m "initial"', { cwd: repo, stdio: "ignore" });
+      execSync(`git init --bare ${remote}`, { stdio: "ignore" });
+      execSync(`git remote add origin ${remote}`, { cwd: repo, stdio: "ignore" });
+      execSync("git push -u origin main", { cwd: repo, stdio: "ignore" });
+
+      execSync(`git clone ${remote} ${updater}`, { stdio: "ignore" });
+      execSync('git config user.email "test@example.com"', { cwd: updater, stdio: "ignore" });
+      execSync('git config user.name "Test User"', { cwd: updater, stdio: "ignore" });
+      fs.writeFileSync(path.join(updater, "README.md"), "# Remote\n");
+      execSync("git add README.md", { cwd: updater, stdio: "ignore" });
+      execSync('git commit -m "remote update"', { cwd: updater, stdio: "ignore" });
+      execSync("git push origin main", { cwd: updater, stdio: "ignore" });
+
+      fs.writeFileSync(path.join(repo, "README.md"), "# Local dirty change\n");
+      fs.writeFileSync(path.join(repo, "scratch.txt"), "delete me\n");
+      fs.mkdirSync(path.join(repo, ".archie"), { recursive: true });
+      fs.writeFileSync(path.join(repo, ".archie", "runtime.log"), "keep me\n");
+
+      const result = pull(repo, {
+        branch: "main",
+        requireClean: false,
+        allowDefaultBranchHardReset: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(fs.readFileSync(path.join(repo, "README.md"), "utf-8")).toBe("# Remote\n");
+      expect(fs.existsSync(path.join(repo, "scratch.txt"))).toBe(false);
+      expect(fs.existsSync(path.join(repo, ".archie", "runtime.log"))).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("does not switch/reset/delete a worktree branch when remote branch fallback is disabled", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "archie-pull-test-"));
     const repo = path.join(root, "repo");

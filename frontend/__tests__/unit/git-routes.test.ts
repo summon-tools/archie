@@ -118,6 +118,27 @@ describe("git route workflow delegation", () => {
       appId: 1,
       user: authUser,
       branch: "main",
+      discardLocalChanges: false,
+    });
+  });
+
+  it("passes discard-local-changes option for app pulls", async () => {
+    const { pullAppDefaultBranch } = mockRouteDependencies();
+    const { POST } = await import("@/app/api/apps/[appId]/git/pull/route");
+
+    const response = await POST(new Request("http://test.local", {
+      method: "POST",
+      body: JSON.stringify({ branch: "main", discardLocalChanges: true }),
+    }) as any, {
+      params: Promise.resolve({ appId: "1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(pullAppDefaultBranch).toHaveBeenCalledWith({
+      appId: 1,
+      user: authUser,
+      branch: "main",
+      discardLocalChanges: true,
     });
   });
 
