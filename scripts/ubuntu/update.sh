@@ -44,9 +44,12 @@ if [ -f ".env" ]; then
 fi
 
 ARCHIE_MODE="${ARCHIE_MODE:-development}"
+APP_PORT="${PORT:-8080}"
+SERVICE_EXECSTART_UPDATED=false
 
 ensure_systemd_preserves_managed_servers() {
   local service_file="/etc/systemd/system/archie.service"
+  local service_changed=false
 
   [ -f "$service_file" ] || return 0
 
@@ -54,20 +57,71 @@ ensure_systemd_preserves_managed_servers() {
     local kill_mode
     kill_mode=$(sudo awk -F= '/^KillMode=/{ gsub(/[[:space:]]/, "", $2); print $2; exit }' "$service_file")
     if [ "$kill_mode" != "process" ]; then
-      warn "archie.service uses KillMode=$kill_mode; restarting the dashboard may stop app/preview servers."
-      warn "Set KillMode=process in [Service] if you want managed servers to survive dashboard updates."
+      info "Configuring systemd to keep app/preview servers alive across dashboard restarts..."
+      sudo sed -i 's|^KillMode=.*|KillMode=process|' "$service_file"
+      service_changed=true
+      ok "Configured archie.service with KillMode=process"
     fi
-    return 0
-  fi
-
-  if sudo grep -q '^\[Service\]' "$service_file"; then
+  elif sudo grep -q '^\[Service\]' "$service_file"; then
     info "Configuring systemd to keep app/preview servers alive across dashboard restarts..."
     sudo sed -i '/^\[Service\]/a KillMode=process' "$service_file"
-    sudo systemctl daemon-reload
+    service_changed=true
     ok "Configured archie.service with KillMode=process"
   else
     warn "Could not find [Service] in $service_file. Add KillMode=process manually to preserve app/preview servers."
   fi
+
+  local node_bin
+  local next_bin
+  local expected_exec
+  local current_exec
+  node_bin=$(command -v node)
+  next_bin="$PROJECT_DIR/frontend/node_modules/next/dist/bin/next"
+  expected_exec="ExecStart=$node_bin $next_bin start --hostname 127.0.0.1 -p $APP_PORT"
+  current_exec=$(sudo awk '/^ExecStart=/{ print; exit }' "$service_file" || true)
+
+  if [ -f "$next_bin" ] && [ "$current_exec" != "$expected_exec" ]; then
+    info "Configuring systemd to run the dashboard directly instead of through npx..."
+    sudo sed -i "s|^ExecStart=.*|$expected_exec|" "$service_file"
+    service_changed=true
+    SERVICE_EXECSTART_UPDATED=true
+    ok "Updated archie.service ExecStart"
+  elif [ ! -f "$next_bin" ]; then
+    warn "Next.js CLI not found at $next_bin. Leaving archie.service ExecStart unchanged."
+  fi
+
+  if [ "$service_changed" = true ]; then
+    sudo systemctl daemon-reload
+  fi
+}
+
+free_dashboard_port_after_execstart_migration() {
+  [ "$SERVICE_EXECSTART_UPDATED" = true ] || return 0
+
+  local pids=""
+  if command -v lsof &>/dev/null; then
+    pids=$(sudo lsof -ti :"$APP_PORT" 2>/dev/null || true)
+  elif command -v ss &>/dev/null; then
+    pids=$(sudo ss -tlnp "sport = :$APP_PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u || true)
+  fi
+
+  [ -n "$pids" ] || return 0
+
+  warn "Stopping stale dashboard process on port $APP_PORT before restarting archie.service..."
+  for pid in $pids; do
+    sudo kill "$pid" 2>/dev/null || true
+  done
+  sleep 1
+
+  local remaining=""
+  if command -v lsof &>/dev/null; then
+    remaining=$(sudo lsof -ti :"$APP_PORT" 2>/dev/null || true)
+  elif command -v ss &>/dev/null; then
+    remaining=$(sudo ss -tlnp "sport = :$APP_PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u || true)
+  fi
+  for pid in $remaining; do
+    sudo kill -9 "$pid" 2>/dev/null || true
+  done
 }
 
 # Pull latest changes
@@ -100,6 +154,7 @@ if [ "$ARCHIE_MODE" = "production" ]; then
 
   if [ -f /etc/systemd/system/archie.service ]; then
     ensure_systemd_preserves_managed_servers
+    free_dashboard_port_after_execstart_migration
     info "Restarting service..."
     sudo systemctl restart archie
     ok "Service restarted"

@@ -330,7 +330,7 @@ fi
 # --- Create systemd service ---
 info "Creating systemd service..."
 NODE_BIN=$(command -v node)
-NPX_BIN=$(command -v npx)
+NEXT_BIN="$PROJECT_DIR/frontend/node_modules/next/dist/bin/next"
 NVM_DIR_RESOLVED="${NVM_DIR:-$HOME/.nvm}"
 
 sudo tee /etc/systemd/system/archie.service > /dev/null << SERVICEEOF
@@ -345,7 +345,7 @@ WorkingDirectory=$PROJECT_DIR/frontend
 EnvironmentFile=$PROJECT_DIR/.env
 Environment=NODE_ENV=production
 Environment=PATH=$NVM_DIR_RESOLVED/versions/node/$(node -v)/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=$NODE_BIN $NPX_BIN next start --hostname 127.0.0.1 -p $APP_PORT
+ExecStart=$NODE_BIN $NEXT_BIN start --hostname 127.0.0.1 -p $APP_PORT
 Restart=on-failure
 RestartSec=5
 # Archie starts user app and preview servers as managed child processes. Keep
