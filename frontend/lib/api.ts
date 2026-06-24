@@ -849,6 +849,13 @@ export async function restoreUser(id: number): Promise<{ message: string }> {
   return fetchJSON(`${BASE}/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ restore: true }) });
 }
 
+export async function resetUserPassword(id: number, newPassword: string): Promise<{ message: string }> {
+  return fetchJSON(`${BASE}/admin/users/${id}/password`, {
+    method: "POST",
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+}
+
 export interface InvitationInfo { id: number; email: string; token: string; invited_by: number; expires_at: string; accepted_at: string | null; created_at: string; }
 
 export async function createInvitation(email: string): Promise<{ id: number; email: string; token: string; expires_at: string }> {
