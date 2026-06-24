@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import useSWR from "swr";
 import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER } from "@/lib/models";
 import { fetcher } from "@/lib/swr";
@@ -13,14 +13,21 @@ interface ModelSelection {
   model: string;
 }
 
-function loadSelection(): ModelSelection {
+const DEFAULT_SELECTION: ModelSelection = { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL_ID };
+
+function loadStoredSelection(): { hasLocalOverride: boolean; selection: ModelSelection } {
   if (typeof window === "undefined") {
-    return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL_ID };
+    return { hasLocalOverride: false, selection: DEFAULT_SELECTION };
   }
   // Try new key first
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored) {
-    try { return JSON.parse(stored); } catch {}
+    try {
+      const parsed = JSON.parse(stored) as Partial<ModelSelection>;
+      if (parsed.provider && parsed.model) {
+        return { hasLocalOverride: true, selection: { provider: parsed.provider, model: parsed.model } };
+      }
+    } catch {}
   }
   // Migrate from legacy key
   const legacy = localStorage.getItem(LEGACY_KEY);
@@ -28,20 +35,25 @@ function loadSelection(): ModelSelection {
     const selection = { provider: "claude", model: legacy };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
     localStorage.removeItem(LEGACY_KEY);
-    return selection;
+    return { hasLocalOverride: true, selection };
   }
-  return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL_ID };
+  return { hasLocalOverride: false, selection: DEFAULT_SELECTION };
 }
 
 export function useSelectedModel() {
-  const hasLocalOverride = typeof window !== "undefined" && !!localStorage.getItem(STORAGE_KEY);
+  const [selection, setSelection] = useState<ModelSelection>(DEFAULT_SELECTION);
+  const [hasLocalOverride, setHasLocalOverride] = useState(false);
 
   const { data: config } = useSWR<{ defaultModel: string; defaultProvider: string }>(
     hasLocalOverride ? null : "/api/models/config",
     fetcher,
   );
 
-  const [selection, setSelection] = useState<ModelSelection>(loadSelection);
+  useEffect(() => {
+    const stored = loadStoredSelection();
+    setSelection(stored.selection);
+    setHasLocalOverride(stored.hasLocalOverride);
+  }, []);
 
   // Use server default if no local override
   const effectiveProvider = hasLocalOverride
@@ -54,7 +66,10 @@ export function useSelectedModel() {
   const handleModelChange = useCallback((provider: string, model: string) => {
     const next = { provider, model };
     setSelection(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    setHasLocalOverride(true);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    }
   }, []);
 
   return {
