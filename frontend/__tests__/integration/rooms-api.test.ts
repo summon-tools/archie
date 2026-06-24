@@ -575,7 +575,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("<latest_user_message>\nWho am I talking to?"),
       expect.objectContaining({
-        model: "claude-sonnet-4-6",
+        model: "claude-opus-4-8",
         cwd: "/tmp/test-app",
         maxTurns: 6,
         toolPolicy: "read_only_codebase",
@@ -590,7 +590,7 @@ describe("rooms API", () => {
     expect(run).toMatchObject({
       agent_key: "coordinator",
       status: "completed",
-      model_id: "claude-sonnet-4-6",
+      model_id: "claude-opus-4-8",
       tool_policy_json: JSON.stringify({ mode: "planning_chat", tools: "read_only_codebase" }),
     });
     expect(JSON.parse(run.result_json).events[0]).toMatchObject({ type: "tool_use", tool: "Grep" });
@@ -885,7 +885,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Return ONLY valid JSON"),
       expect.objectContaining({
-        model: "claude-sonnet-4-6",
+        model: "claude-opus-4-8",
         cwd: "/tmp/test-app",
         maxTurns: 8,
         toolPolicy: "read_only_codebase",
@@ -922,7 +922,7 @@ describe("rooms API", () => {
     expect(run).toMatchObject({
       agent_key: "coordinator",
       status: "completed",
-      model_id: "claude-sonnet-4-6",
+      model_id: "claude-opus-4-8",
       tool_policy_json: JSON.stringify({ mode: "plan_generation", tools: "read_only_codebase" }),
     });
     expect(JSON.parse(run.result_json)).toMatchObject({
@@ -993,7 +993,7 @@ describe("rooms API", () => {
     expect(ephemeralQuery).toHaveBeenCalledWith(
       expect.stringContaining("Convert the following plan-generator output into the required JSON object."),
       expect.objectContaining({
-        model: "claude-sonnet-4-6",
+        model: "claude-opus-4-8",
         cwd: "/tmp/test-app",
         maxTurns: 1,
         toolPolicy: "no_tools",
@@ -1173,7 +1173,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Recent room messages:"),
       expect.objectContaining({
-        model: "claude-sonnet-4-6",
+        model: "claude-opus-4-8",
         cwd: "/tmp/test-app",
         maxTurns: 8,
         toolPolicy: "read_only_codebase",

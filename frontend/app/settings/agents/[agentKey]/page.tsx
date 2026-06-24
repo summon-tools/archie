@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Header from "@/components/Header";
+import ModelPicker, { getModelProviderLabel } from "@/components/ModelPicker";
 import { useToast } from "@/components/Toast";
 import { getHomeAgents, getMe, updateHomeAgent } from "@/lib/api";
 import type { AgentModelOption, HomeAgentConfig } from "@/lib/types";
-import { ArrowLeft, CaretDown, Gear, GitBranch, Heartbeat, Robot, Users } from "@phosphor-icons/react";
+import { ArrowLeft, Gear, GitBranch, Heartbeat, Robot, Users } from "@phosphor-icons/react";
 
 type Section = "git" | "team" | "models" | "agents" | "system";
 
@@ -15,45 +16,7 @@ function settingsSectionHref(section: Section) {
 }
 
 function getProviderLabel(provider: string) {
-  if (provider === "claude") return "Claude Code";
-  if (provider === "codex") return "Codex";
-  return provider;
-}
-
-function GroupedModelSelect({
-  value,
-  availableModels,
-  onChange,
-}: {
-  value: string;
-  availableModels: AgentModelOption[];
-  onChange: (modelId: string) => void;
-}) {
-  const groupedModels = availableModels.reduce<Record<string, AgentModelOption[]>>((acc, model) => {
-    (acc[model.provider] ??= []).push(model);
-    return acc;
-  }, {});
-
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full appearance-none rounded-lg border border-th bg-th-subtle px-3 py-2 pr-8 text-sm text-th-primary focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent"
-      >
-        {Object.entries(groupedModels).map(([providerKey, models]) => (
-          <optgroup key={providerKey} label={getProviderLabel(providerKey)}>
-            {models.map((model) => (
-              <option key={`${providerKey}:${model.id}`} value={model.id}>
-                {model.label}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-      <CaretDown size={12} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-th-muted" />
-    </div>
-  );
+  return getModelProviderLabel(provider);
 }
 
 export default function AgentSettingsEditPage() {
@@ -255,10 +218,13 @@ export default function AgentSettingsEditPage() {
 
                   <label className="block space-y-1">
                     <span className="text-xs font-medium text-th-secondary">Model</span>
-                    <GroupedModelSelect
-                      value={draft.model_id}
+                    <ModelPicker
+                      model={draft.model_id}
+                      provider={selectedModel?.provider}
                       availableModels={availableModels}
-                      onChange={(modelId) => setDraft({ ...draft, model_id: modelId })}
+                      onChange={(_provider, modelId) => setDraft({ ...draft, model_id: modelId })}
+                      placement="below-left"
+                      variant="field"
                     />
                     {selectedModel && (
                       <span className="text-meta text-th-dimmed">

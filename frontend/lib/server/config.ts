@@ -91,7 +91,7 @@ export function getProjectsDir(): string {
 
 export type ModelCategory = "chat" | "background" | "quick" | "demo";
 
-const DEFAULT_MODEL_FALLBACK = "claude-sonnet-4-6";
+const DEFAULT_MODEL_FALLBACK = "claude-opus-4-8";
 const DEFAULT_PROVIDER_FALLBACK = "claude";
 
 // --- Settings cache (avoid opening a DB connection per lookup) ---

@@ -1,8 +1,9 @@
 "use client";
 
 import { useRef, useEffect, useCallback, useState } from "react";
-import { Stop, SpinnerGap, ArrowUp, Lightning, X, CaretDown } from "@phosphor-icons/react";
+import { Stop, SpinnerGap, ArrowUp, Lightning, X } from "@phosphor-icons/react";
 import { AttachmentUploadTray } from "@/components/Attachments";
+import ModelPicker from "@/components/ModelPicker";
 import { fetchGlobalSkillSummaries } from "@/lib/api";
 import type { AppFile, GlobalSkillSummary } from "@/lib/types";
 import type { Tool } from "@/tools/types";
@@ -314,30 +315,16 @@ export default function ChatInput({
 
             {/* Model selector — pushed to the right */}
             {model && onModelChange && availableModels && (
-              <div className="relative ml-auto flex items-center">
-                <select
-                  value={`${provider || "claude"}:${model}`}
-                  onChange={(e) => {
-                    const [p, ...rest] = e.target.value.split(":");
-                    onModelChange(p, rest.join(":"));
-                  }}
-                  className="appearance-none bg-transparent text-xs text-th-muted hover:text-th-primary cursor-pointer focus:outline-none focus:ring-0 py-0.5 pr-4 text-right"
-                >
-                  {Object.entries(
-                    availableModels.reduce<Record<string, { id: string; label: string; provider: string }[]>>((acc, m) => {
-                      (acc[m.provider] ??= []).push(m);
-                      return acc;
-                    }, {})
-                  ).map(([providerKey, models]) => (
-                    <optgroup key={providerKey} label={providerKey === "claude" ? "Claude Code" : providerKey === "codex" ? "Codex" : providerKey}>
-                      {models.map((m) => (
-                        <option key={`${providerKey}:${m.id}`} value={`${providerKey}:${m.id}`}>{m.label}</option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <CaretDown size={10} className="absolute right-0 top-1/2 -translate-y-1/2 text-th-muted pointer-events-none" />
-              </div>
+              <ModelPicker
+                className="ml-auto flex items-center"
+                model={model}
+                provider={provider || "claude"}
+                availableModels={availableModels}
+                onChange={onModelChange}
+                placement="above-right"
+                variant="compact"
+                onAfterChange={() => window.setTimeout(() => textareaRef.current?.focus(), 0)}
+              />
             )}
 
           </div>
