@@ -8,6 +8,8 @@ import type {
   OutcomeCoverageCounts,
   OutcomeCostBuckets,
   OutcomeEvidenceCompleteness,
+  OutcomeModelQualityBucket,
+  OutcomeQualityBand,
   OutcomeRow,
   OutcomeRowGroup,
   OutcomesSummaryResponse,
@@ -167,6 +169,7 @@ function emptySummary(apps: AppRow[], warnings: string[] = []): OutcomesSummaryR
       unknown_outcome_cost_usd: 0,
     },
     coverage: emptyCoverage(),
+    model_quality_buckets: [],
     rows: [],
     row_groups: OUTCOME_GROUP_ORDER.map((state) => ({
       state,
@@ -461,6 +464,42 @@ function buildCoverage(rows: OutcomeRow[]): OutcomeCoverageCounts {
     }
   }
   return coverage;
+}
+
+const MODEL_QUALITY_BANDS: OutcomeQualityBand[] = ["strong", "useful", "costly_reworked", "unknown"];
+
+function trackedQualityBand(band: OutcomeQualityBand | null): OutcomeQualityBand | null {
+  if (!band) return "unknown";
+  return MODEL_QUALITY_BANDS.includes(band) ? band : null;
+}
+
+function buildModelQualityBuckets(rows: OutcomeRow[]): OutcomeModelQualityBucket[] {
+  const buckets = new Map<string, OutcomeModelQualityBucket>();
+
+  for (const row of rows) {
+    const band = trackedQualityBand(row.quality_band);
+    if (!band) continue;
+
+    const modelId = row.model_id || "model unknown";
+    const providerId = row.provider_id || null;
+    const key = `${providerId || "unknown"}:${modelId}`;
+    const bucket = buckets.get(key) || {
+      model_id: modelId,
+      provider_id: providerId,
+      total: 0,
+      quality_counts: {},
+    };
+
+    bucket.total += 1;
+    bucket.quality_counts[band] = (bucket.quality_counts[band] || 0) + 1;
+    buckets.set(key, bucket);
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => (
+    b.total - a.total ||
+    a.model_id.localeCompare(b.model_id) ||
+    (a.provider_id || "").localeCompare(b.provider_id || "")
+  ));
 }
 
 function applyRowFilters(rows: OutcomeRow[], filters: OutcomeRowFilters | undefined): OutcomeRow[] {
@@ -893,6 +932,7 @@ export async function buildOutcomesSummary({
     counts,
     costs,
     coverage: buildCoverage(rows),
+    model_quality_buckets: buildModelQualityBuckets(rows),
     rows: paged.rows,
     row_groups: rowGroups,
     pagination: paged.pagination,

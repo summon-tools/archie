@@ -565,6 +565,13 @@ export interface OutcomeCoverageCounts {
   quality_counts: Partial<Record<OutcomeQualityBand, number>>;
 }
 
+export interface OutcomeModelQualityBucket {
+  model_id: string;
+  provider_id: string | null;
+  total: number;
+  quality_counts: Partial<Record<OutcomeQualityBand, number>>;
+}
+
 export interface OutcomeRow {
   id: string;
   app_id: number;
@@ -656,6 +663,7 @@ export interface OutcomesSummaryResponse {
   counts: OutcomeSummaryCounts;
   costs: OutcomeCostBuckets;
   coverage: OutcomeCoverageCounts;
+  model_quality_buckets: OutcomeModelQualityBucket[];
   rows: OutcomeRow[];
   row_groups: OutcomeRowGroup[];
   pagination: OutcomeRowsPagination;

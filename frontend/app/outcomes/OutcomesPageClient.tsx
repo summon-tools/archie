@@ -1,14 +1,25 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Chart from "chart.js/auto";
+import type { Chart as ChartInstance, ChartConfiguration } from "chart.js";
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import Header from "@/components/Header";
 import { getOutcomeJob, getOutcomesSettings, getOutcomesSummary, runOutcomesRefresh, updateOutcomesSettings } from "@/lib/api";
-import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeJob, OutcomeQualityBand, OutcomeRow, OutcomeRowGroup, OutcomeRowsPagination, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
+import type { OutcomeAttributionClassification, OutcomeFollowupRelation, OutcomeJob, OutcomeModelQualityBucket, OutcomeQualityBand, OutcomeRow, OutcomeRowGroup, OutcomeRowsPagination, OutcomesGitHubSyncSettings, OutcomesSummaryResponse, OutcomeState } from "@/lib/types";
 
 const OUTCOME_ORDER: OutcomeState[] = ["pending_pr", "merged", "closed_unmerged", "no_pr", "unknown"];
 const PAGE_SIZE_OPTIONS = ["25", "50", "100", "200"];
+const MODEL_QUALITY_BANDS: OutcomeQualityBand[] = ["strong", "useful", "costly_reworked", "unknown"];
+const MODEL_QUALITY_SEGMENTS: Record<OutcomeQualityBand, { label: string; color: string }> = {
+  strong: { label: "Strong", color: "#22c55e" },
+  useful: { label: "Useful", color: "#3b82f6" },
+  costly_reworked: { label: "Costly rework", color: "#eab308" },
+  unknown: { label: "Unknown", color: "#64748b" },
+  pending: { label: "Pending", color: "#94a3b8" },
+  abandoned: { label: "Abandoned", color: "#ef4444" },
+};
 
 function initialGroupPages(): Record<OutcomeState, number> {
   return OUTCOME_ORDER.reduce((acc, state) => {
@@ -168,6 +179,146 @@ function EmptyState() {
         Back to projects
       </Link>
     </div>
+  );
+}
+
+function ModelQualityChart({ buckets }: { buckets: OutcomeModelQualityBucket[] }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartRef = useRef<ChartInstance<"bar"> | null>(null);
+  const totalRows = buckets.reduce((total, bucket) => total + bucket.total, 0);
+  const chartHeight = Math.max(260, buckets.length * 52 + 96);
+
+  useEffect(() => {
+    if (!canvasRef.current || buckets.length === 0) return;
+
+    chartRef.current?.destroy();
+
+    const styles = getComputedStyle(document.documentElement);
+    const textColor = styles.getPropertyValue("--text-secondary").trim() || "#c0c0c0";
+    const mutedColor = styles.getPropertyValue("--text-muted").trim() || "#999999";
+    const gridColor = styles.getPropertyValue("--border-primary").trim() || "rgba(148, 163, 184, 0.2)";
+    const colors: Record<OutcomeQualityBand, string> = {
+      strong: styles.getPropertyValue("--status-green-text").trim() || MODEL_QUALITY_SEGMENTS.strong.color,
+      useful: styles.getPropertyValue("--status-blue-text").trim() || MODEL_QUALITY_SEGMENTS.useful.color,
+      costly_reworked: styles.getPropertyValue("--status-yellow-text").trim() || MODEL_QUALITY_SEGMENTS.costly_reworked.color,
+      unknown: mutedColor,
+      pending: MODEL_QUALITY_SEGMENTS.pending.color,
+      abandoned: styles.getPropertyValue("--status-red-text").trim() || MODEL_QUALITY_SEGMENTS.abandoned.color,
+    };
+
+    const config: ChartConfiguration<"bar"> = {
+      type: "bar",
+      data: {
+        labels: buckets.map((bucket) => bucket.model_id),
+        datasets: MODEL_QUALITY_BANDS.map((band) => ({
+          label: MODEL_QUALITY_SEGMENTS[band].label,
+          data: buckets.map((bucket) => bucket.quality_counts[band] || 0),
+          backgroundColor: colors[band],
+          borderRadius: 4,
+          borderSkipped: false,
+          barPercentage: 0.78,
+          categoryPercentage: 0.72,
+        })),
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: {
+            position: "top",
+            align: "end",
+            labels: {
+              boxWidth: 10,
+              boxHeight: 10,
+              color: textColor,
+              padding: 14,
+              usePointStyle: true,
+              pointStyle: "rectRounded",
+            },
+          },
+          tooltip: {
+            callbacks: {
+              afterBody: (items) => {
+                const index = items[0]?.dataIndex ?? 0;
+                const bucket = buckets[index];
+                return bucket ? [`Total tracked outcomes: ${bucket.total}`] : [];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: {
+              color: mutedColor,
+              precision: 0,
+            },
+            grid: {
+              color: gridColor,
+            },
+          },
+          y: {
+            stacked: true,
+            ticks: {
+              color: textColor,
+            },
+            grid: {
+              display: false,
+            },
+          },
+        },
+      },
+    };
+
+    chartRef.current = new Chart(canvasRef.current, config);
+
+    return () => {
+      chartRef.current?.destroy();
+      chartRef.current = null;
+    };
+  }, [buckets]);
+
+  return (
+    <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
+      <div>
+        <div>
+          <h2 className="text-sm font-semibold text-th-primary">Model quality mix</h2>
+          <p className="mt-1 text-xs text-th-muted">
+            Unfiltered count of strong, useful, costly rework, and unknown outcomes by model.
+          </p>
+        </div>
+      </div>
+
+      {buckets.length === 0 ? (
+        <div className="mt-4 rounded-lg bg-th-subtle p-4 text-sm text-th-muted">
+          No computed quality data yet.
+        </div>
+      ) : (
+        <div className="mt-5 space-y-3">
+          <div className="rounded-lg bg-th-subtle p-3">
+            <div style={{ height: chartHeight }}>
+              <canvas ref={canvasRef} aria-label="Model quality mix bar chart" role="img" />
+            </div>
+          </div>
+          <div className="text-xs text-th-muted">
+            {totalRows} tracked outcome{totalRows === 1 ? "" : "s"} across {buckets.length} model{buckets.length === 1 ? "" : "s"}. Table filters below do not change this chart.
+          </div>
+          <div className="grid grid-cols-1 gap-2 text-xs text-th-muted sm:grid-cols-2 lg:grid-cols-3">
+            {buckets.map((bucket) => (
+              <div key={`${bucket.provider_id || "unknown"}:${bucket.model_id}`} className="rounded-lg border border-th bg-th-surface px-3 py-2">
+                <div className="truncate font-medium text-th-secondary">{bucket.model_id}</div>
+                <div className="mt-1">
+                  {bucket.provider_id || "provider unknown"} - {bucket.total} tracked outcome{bucket.total === 1 ? "" : "s"}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -537,6 +688,8 @@ export default function OutcomesPage() {
               </div>
             ) : (
               <>
+                <ModelQualityChart buckets={data.model_quality_buckets || []} />
+
                 <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
                     <FilterSelect label="App" value={appFilter} onChange={updatePagedFilter(setAppFilter)} options={data.filters.apps.map((app) => ({ value: String(app.id), label: app.name }))} />

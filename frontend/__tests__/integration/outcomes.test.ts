@@ -72,6 +72,33 @@ function addPullRequestArtifact(appId: number, workItemId: number, metadata: Rec
     .run(appId, workItemId, JSON.stringify(metadata));
 }
 
+function addOutcomeSnapshot(input: {
+  appId: number;
+  workItemId: number;
+  conversationId: number;
+  outcomeState?: string;
+  qualityBand: string;
+}) {
+  db.prepare(`
+    INSERT INTO llm_outcome_snapshots (
+      app_id,
+      work_item_id,
+      conversation_id,
+      outcome_state,
+      quality_band,
+      confidence,
+      evidence_json
+    ) VALUES (?, ?, ?, ?, ?, 'medium', ?)
+  `).run(
+    input.appId,
+    input.workItemId,
+    input.conversationId,
+    input.outcomeState || "merged",
+    input.qualityBand,
+    JSON.stringify({ rules_version: 1, quality_reason: "test", attribution_reason: "test" }),
+  );
+}
+
 function setSetting(key: string, value: unknown) {
   db.prepare("INSERT OR REPLACE INTO system_settings (key, value_json) VALUES (?, ?)")
     .run(key, JSON.stringify(value));
@@ -404,6 +431,97 @@ describe("outcomes summary aggregation", () => {
       provider_id: "codex",
     });
     expect(summary.filters.providers).toEqual(["claude", "codex"]);
+  });
+
+  it("builds model quality buckets from unfiltered rows", async () => {
+    const firstCodex = createWorkItem({ appName: "Model Mix App", title: "Strong Codex Work" });
+    addRun({
+      appId: firstCodex.appId,
+      workItemId: firstCodex.workItemId,
+      conversationId: firstCodex.conversationId,
+      provider: "codex",
+      model: "gpt-5",
+      resultJson: JSON.stringify({ cost: 1 }),
+    });
+    addOutcomeSnapshot({
+      appId: firstCodex.appId,
+      workItemId: firstCodex.workItemId,
+      conversationId: firstCodex.conversationId,
+      qualityBand: "strong",
+    });
+
+    const secondCodex = createWorkItem({ appName: "Model Mix App", title: "Useful Codex Work" });
+    addRun({
+      appId: secondCodex.appId,
+      workItemId: secondCodex.workItemId,
+      conversationId: secondCodex.conversationId,
+      provider: "codex",
+      model: "gpt-5",
+      resultJson: JSON.stringify({ cost: 1 }),
+    });
+    addOutcomeSnapshot({
+      appId: secondCodex.appId,
+      workItemId: secondCodex.workItemId,
+      conversationId: secondCodex.conversationId,
+      qualityBand: "useful",
+    });
+
+    const claude = createWorkItem({ appName: "Model Mix App", title: "Costly Claude Work" });
+    addRun({
+      appId: claude.appId,
+      workItemId: claude.workItemId,
+      conversationId: claude.conversationId,
+      provider: "claude",
+      model: "claude-sonnet-4-6",
+      resultJson: JSON.stringify({ cost: 1 }),
+    });
+    addOutcomeSnapshot({
+      appId: claude.appId,
+      workItemId: claude.workItemId,
+      conversationId: claude.conversationId,
+      qualityBand: "costly_reworked",
+    });
+
+    const unknownQuality = createWorkItem({ appName: "Model Mix App", title: "Unknown Quality Codex Work" });
+    addRun({
+      appId: unknownQuality.appId,
+      workItemId: unknownQuality.workItemId,
+      conversationId: unknownQuality.conversationId,
+      provider: "codex",
+      model: "gpt-5",
+      resultJson: JSON.stringify({ cost: 1 }),
+    });
+    addOutcomeSnapshot({
+      appId: unknownQuality.appId,
+      workItemId: unknownQuality.workItemId,
+      conversationId: unknownQuality.conversationId,
+      qualityBand: "unknown",
+    });
+
+    const { buildOutcomesSummary } = await loadOutcomes();
+    const summary = await buildOutcomesSummary({
+      apps: getAppRows(),
+      refreshGitHubState: false,
+      rowFilters: { modelId: "claude-sonnet-4-6" },
+      pagination: { page: 1, pageSize: 25 },
+    });
+
+    expect(summary.rows).toHaveLength(1);
+    expect(summary.rows[0].model_id).toBe("claude-sonnet-4-6");
+    expect(summary.model_quality_buckets).toEqual([
+      {
+        model_id: "gpt-5",
+        provider_id: "codex",
+        total: 3,
+        quality_counts: { strong: 1, useful: 1, unknown: 1 },
+      },
+      {
+        model_id: "claude-sonnet-4-6",
+        provider_id: "claude",
+        total: 1,
+        quality_counts: { costly_reworked: 1 },
+      },
+    ]);
   });
 
   it("paginates each outcome group independently", async () => {
