@@ -21,15 +21,15 @@ const DEFAULT_MOCK_CONFIG = {
   PREVIEW_PORT_MAX: 9050,
   CLAUDE_DANGEROUS_PERMISSIONS: true,
   getProjectsDir: () => "/tmp",
-  getDefaultModel: () => "claude-sonnet-4-6",
+  getDefaultModel: () => "claude-opus-4-8",
   getDefaultProvider: () => "claude",
-  getBackgroundModel: () => "claude-sonnet-4-6",
+  getBackgroundModel: () => "claude-opus-4-8",
   getBackgroundProvider: () => "claude",
-  getQuickModel: () => "claude-sonnet-4-6",
+  getQuickModel: () => "claude-opus-4-8",
   getQuickProvider: () => "claude",
-  getDemoModel: () => "claude-sonnet-4-6",
+  getDemoModel: () => "claude-opus-4-8",
   getDemoProvider: () => "claude",
-  getModelForCategory: () => ({ model: "claude-sonnet-4-6", provider: "claude" }),
+  getModelForCategory: () => ({ model: "claude-opus-4-8", provider: "claude" }),
 };
 
 export interface TestContext {

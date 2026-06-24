@@ -48,7 +48,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       "When a step or plan completes, state the outcome clearly and ask for user approval instead of silently closing the work.",
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-opus-4-8",
   },
   {
     key: "architect",
@@ -100,7 +100,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       GATE_FEEDBACK_CONTRACT,
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-opus-4-8",
   },
   {
     key: "qa",
@@ -117,7 +117,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       GATE_FEEDBACK_CONTRACT,
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-opus-4-8",
   },
   {
     key: "security",

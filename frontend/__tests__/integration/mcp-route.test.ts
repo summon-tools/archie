@@ -137,7 +137,7 @@ describe("remote MCP route", () => {
       getModelForCategory: (category: string) => (
         category === "background"
           ? { provider: "codex", model: "gpt-5.5" }
-          : { provider: "claude", model: "claude-sonnet-4-6" }
+          : { provider: "claude", model: "claude-opus-4-8" }
       ),
     });
 

@@ -7,6 +7,7 @@ import useSWR from "swr";
 import { importApp, getSettings, getMe } from "@/lib/api";
 import Header from "@/components/Header";
 import DirectoryPicker from "@/components/DirectoryPicker";
+import ModelPicker from "@/components/ModelPicker";
 import { useSelectedModel } from "@/hooks/useSelectedModel";
 import { fetcher } from "@/lib/swr";
 
@@ -174,12 +175,17 @@ export default function CreateAppPage() {
                     />
                   </div>
 
-                  <ModelSelect
-                    id="import-model"
-                    value={`${selectedProvider}:${selectedModel}`}
-                    onChange={handleModelChange}
-                    models={modelConfig?.availableModels}
-                  />
+                  <div>
+                    <span className="block text-sm font-medium text-th-secondary mb-1">Model</span>
+                    <ModelPicker
+                      model={selectedModel}
+                      provider={selectedProvider}
+                      availableModels={modelConfig?.availableModels || []}
+                      onChange={handleModelChange}
+                      placement="below-left"
+                      variant="field"
+                    />
+                  </div>
 
                   <div className="flex items-center gap-3 pt-2">
                     <button
@@ -241,12 +247,17 @@ export default function CreateAppPage() {
                     </p>
                   </div>
 
-                  <ModelSelect
-                    id="local-model"
-                    value={`${selectedProvider}:${selectedModel}`}
-                    onChange={handleModelChange}
-                    models={modelConfig?.availableModels}
-                  />
+                  <div>
+                    <span className="block text-sm font-medium text-th-secondary mb-1">Model</span>
+                    <ModelPicker
+                      model={selectedModel}
+                      provider={selectedProvider}
+                      availableModels={modelConfig?.availableModels || []}
+                      onChange={handleModelChange}
+                      placement="below-left"
+                      variant="field"
+                    />
+                  </div>
 
                   <div className="flex items-center gap-3 pt-2">
                     <button
@@ -333,47 +344,5 @@ export default function CreateAppPage() {
         />
       )}
     </>
-  );
-}
-
-function ModelSelect({
-  id,
-  value,
-  onChange,
-  models,
-}: {
-  id: string;
-  value: string;
-  onChange: (provider: string, model: string) => void;
-  models?: { id: string; label: string; provider: string }[];
-}) {
-  const grouped = (models || []).reduce<Record<string, { id: string; label: string; provider: string }[]>>((acc, m) => {
-    (acc[m.provider] ??= []).push(m);
-    return acc;
-  }, {});
-
-  return (
-    <div>
-      <label htmlFor={id} className="block text-sm font-medium text-th-secondary mb-1">Model</label>
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => {
-          const [p, ...rest] = e.target.value.split(":");
-          onChange(p, rest.join(":"));
-        }}
-        className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg text-th-primary text-sm focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent appearance-none"
-      >
-        {Object.entries(grouped).map(([provider, providerModels]) => (
-          <optgroup key={provider} label={provider}>
-            {providerModels.map((m) => (
-              <option key={`${provider}:${m.id}`} value={`${provider}:${m.id}`}>
-                {m.label}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-    </div>
   );
 }
