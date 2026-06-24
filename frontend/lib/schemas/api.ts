@@ -76,6 +76,10 @@ export const patchUserSchema = z.union([
   z.object({ role: z.enum(["admin", "member"], { message: "Role must be 'admin' or 'member'" }) }),
 ]);
 
+export const adminResetUserPasswordSchema = z.object({
+  new_password: z.string().min(6, "New password must be at least 6 characters"),
+});
+
 // ── Settings ──
 
 const allowedSettingKeys = ["projects_dir", "github_token"] as const;

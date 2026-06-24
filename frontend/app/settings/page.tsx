@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import type { GitSettings, HomeAgentConfig } from "@/lib/types";
-import { getMe, getGitSettings, updateGitSettings, generateSSHKey, getSettings, getUsers, updateUserRole, deleteUser, restoreUser, createInvitation, getInvitations, revokeInvitation, getModelConfig, updateModelConfig, getHomeAgents, getGitHubAppSettings, updateGitHubAppSettings } from "@/lib/api";
+import { getMe, getGitSettings, updateGitSettings, generateSSHKey, getSettings, getUsers, updateUserRole, deleteUser, restoreUser, resetUserPassword, createInvitation, getInvitations, revokeInvitation, getModelConfig, updateModelConfig, getHomeAgents, getGitHubAppSettings, updateGitHubAppSettings } from "@/lib/api";
 import type { GitHubAppSettings, UserInfo, InvitationInfo } from "@/lib/api";
 import { GitBranch, CheckCircle, Users, Gear, Heartbeat, Warning, XCircle, Robot, PencilSimple, Copy, Lightning, Key } from "@phosphor-icons/react";
 import { useToast } from "@/components/Toast";
@@ -230,6 +230,7 @@ export default function SettingsPage() {
   const [removingToken, setRemovingToken] = useState(false);
   const [githubClientSecret, setGithubClientSecret] = useState("");
   const [savingGithubApp, setSavingGithubApp] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
@@ -239,6 +240,9 @@ export default function SettingsPage() {
   const [invitations, setInvitations] = useState<InvitationInfo[]>([]);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<number | null>(null);
+  const [passwordResetUserId, setPasswordResetUserId] = useState<number | null>(null);
+  const [passwordResetValue, setPasswordResetValue] = useState("");
+  const [savingPasswordUserId, setSavingPasswordUserId] = useState<number | null>(null);
   const [modelConfig, setModelConfig] = useState({
     chatModel: "", chatProvider: "claude",
     backgroundModel: "", backgroundProvider: "claude",
@@ -272,6 +276,7 @@ export default function SettingsPage() {
       setName(data.name);
       setEmail(data.email);
       setMaskedToken(dashSettings.settings.github_token || null);
+      if (typeof meRes.id === "number") setCurrentUserId(meRes.id);
       if (meRes.email) setCurrentUserEmail(meRes.email);
     } catch (err) {
       console.error("Failed to load settings:", err);
@@ -550,6 +555,27 @@ export default function SettingsPage() {
       loadTeam();
     } catch (err) {
       showMessage("error", err instanceof Error ? err.message : "Failed to restore user");
+    }
+  };
+
+  const handleOpenPasswordReset = (userId: number) => {
+    setPasswordResetUserId(userId);
+    setPasswordResetValue("");
+    setConfirmDeleteUserId(null);
+  };
+
+  const handleResetPassword = async (userId: number) => {
+    if (passwordResetValue.length < 6) return;
+    setSavingPasswordUserId(userId);
+    try {
+      await resetUserPassword(userId, passwordResetValue);
+      setPasswordResetUserId(null);
+      setPasswordResetValue("");
+      showMessage("success", "Password reset");
+    } catch (err) {
+      showMessage("error", err instanceof Error ? err.message : "Failed to reset password");
+    } finally {
+      setSavingPasswordUserId(null);
     }
   };
 
@@ -1128,76 +1154,129 @@ export default function SettingsPage() {
                       </thead>
                       <tbody>
                         {users.map((u) => {
-                          const isCurrentUser = u.email === currentUserEmail;
+                          const isCurrentUser = currentUserId === u.id || (!!currentUserEmail && u.email === currentUserEmail);
                           const isDeleted = !!u.deleted_at;
                           return (
-                          <tr key={u.id} className={`border-b border-th last:border-0 ${isDeleted ? "opacity-50" : ""}`}>
-                            <td className="py-2.5">
-                              <span className={`font-medium ${isDeleted ? "line-through text-th-dimmed" : "text-th-primary"}`}>{u.name}</span>
-                              {isCurrentUser && (
-                                <span className="ml-1.5 text-xs text-th-dimmed">(you)</span>
-                              )}
-                              {isDeleted && (
-                                <span className="ml-1.5 text-xs text-red-400">(removed)</span>
-                              )}
-                            </td>
-                            <td className={`py-2.5 ${isDeleted ? "text-th-dimmed line-through" : "text-th-muted"}`}>
-                              {u.email || <span className="text-th-dimmed">—</span>}
-                            </td>
-                            <td className="py-2.5">
-                              {!isDeleted && (
-                                <button
-                                  onClick={() => !isCurrentUser && handleToggleRole(u.id, u.role)}
-                                  disabled={isCurrentUser}
-                                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                                    u.role === "admin" ? "bg-blue-500" : "bg-th-muted"
-                                  } ${isCurrentUser ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                                  title={isCurrentUser ? "Cannot change your own role" : `Switch to ${u.role === "admin" ? "member" : "admin"}`}
-                                >
-                                  <span
-                                    className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
-                                      u.role === "admin" ? "translate-x-[18px]" : "translate-x-[3px]"
-                                    }`}
-                                  />
-                                </button>
-                              )}
-                            </td>
-                            <td className="py-2.5 text-right">
-                              {isDeleted ? (
-                                <button
-                                  onClick={() => handleRestoreUser(u.id)}
-                                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                                >
-                                  Restore
-                                </button>
-                              ) : !isCurrentUser && (
-                                confirmDeleteUserId === u.id ? (
-                                  <span className="inline-flex items-center gap-2">
-                                    <span className="text-xs text-red-400">Remove?</span>
+                            <Fragment key={u.id}>
+                              <tr className={`border-b border-th last:border-0 ${isDeleted ? "opacity-50" : ""}`}>
+                                <td className="py-2.5">
+                                  <span className={`font-medium ${isDeleted ? "line-through text-th-dimmed" : "text-th-primary"}`}>{u.name}</span>
+                                  {isCurrentUser && (
+                                    <span className="ml-1.5 text-xs text-th-dimmed">(you)</span>
+                                  )}
+                                  {isDeleted && (
+                                    <span className="ml-1.5 text-xs text-red-400">(removed)</span>
+                                  )}
+                                </td>
+                                <td className={`py-2.5 ${isDeleted ? "text-th-dimmed line-through" : "text-th-muted"}`}>
+                                  {u.email || <span className="text-th-dimmed">—</span>}
+                                </td>
+                                <td className="py-2.5">
+                                  {!isDeleted && (
                                     <button
-                                      onClick={() => handleDeleteUser(u.id)}
-                                      className="text-xs font-medium text-red-400 hover:text-red-300 transition-colors"
+                                      onClick={() => !isCurrentUser && handleToggleRole(u.id, u.role)}
+                                      disabled={isCurrentUser}
+                                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                        u.role === "admin" ? "bg-blue-500" : "bg-th-muted"
+                                      } ${isCurrentUser ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                                      title={isCurrentUser ? "Cannot change your own role" : `Switch to ${u.role === "admin" ? "member" : "admin"}`}
                                     >
-                                      Confirm
+                                      <span
+                                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                                          u.role === "admin" ? "translate-x-[18px]" : "translate-x-[3px]"
+                                        }`}
+                                      />
                                     </button>
+                                  )}
+                                </td>
+                                <td className="py-2.5 text-right">
+                                  {isDeleted ? (
                                     <button
-                                      onClick={() => setConfirmDeleteUserId(null)}
-                                      className="text-xs text-th-dimmed hover:text-th-primary transition-colors"
+                                      onClick={() => handleRestoreUser(u.id)}
+                                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
                                     >
-                                      Cancel
+                                      Restore
                                     </button>
-                                  </span>
-                                ) : (
-                                  <button
-                                    onClick={() => setConfirmDeleteUserId(u.id)}
-                                    className="text-xs text-th-dimmed hover:text-red-400 transition-colors"
-                                  >
-                                    Remove
-                                  </button>
-                                )
+                                  ) : !isCurrentUser && (
+                                    <div className="flex items-center justify-end gap-3">
+                                      {confirmDeleteUserId === u.id ? (
+                                        <span className="inline-flex items-center gap-2">
+                                          <span className="text-xs text-red-400">Remove?</span>
+                                          <button
+                                            onClick={() => handleDeleteUser(u.id)}
+                                            className="text-xs font-medium text-red-400 hover:text-red-300 transition-colors"
+                                          >
+                                            Confirm
+                                          </button>
+                                          <button
+                                            onClick={() => setConfirmDeleteUserId(null)}
+                                            className="text-xs text-th-dimmed hover:text-th-primary transition-colors"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => handleOpenPasswordReset(u.id)}
+                                            className="inline-flex items-center gap-1 text-xs text-th-dimmed hover:text-th-primary transition-colors"
+                                          >
+                                            <Key size={12} weight="bold" />
+                                            Reset password
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setConfirmDeleteUserId(u.id);
+                                              setPasswordResetUserId(null);
+                                              setPasswordResetValue("");
+                                            }}
+                                            className="text-xs text-th-dimmed hover:text-red-400 transition-colors"
+                                          >
+                                            Remove
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                              {passwordResetUserId === u.id && !isDeleted && !isCurrentUser && (
+                                <tr className="border-b border-th bg-th-subtle/50">
+                                  <td colSpan={4} className="py-3">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
+                                      <label className="block text-left sm:w-80">
+                                        <span className="mb-1 block text-xs font-medium text-th-secondary">New password</span>
+                                        <input
+                                          type="password"
+                                          autoComplete="new-password"
+                                          value={passwordResetValue}
+                                          onChange={(e) => setPasswordResetValue(e.target.value)}
+                                          className="w-full px-3 py-2 bg-th-surface border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                                        />
+                                      </label>
+                                      <div className="flex justify-end gap-2">
+                                        <button
+                                          onClick={() => handleResetPassword(u.id)}
+                                          disabled={savingPasswordUserId === u.id || passwordResetValue.length < 6}
+                                          className="px-3 py-2 bg-btn-primary text-btn-primary rounded-lg hover:bg-btn-primary-hover disabled:opacity-50 text-xs font-medium"
+                                        >
+                                          {savingPasswordUserId === u.id ? "Saving..." : "Save password"}
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setPasswordResetUserId(null);
+                                            setPasswordResetValue("");
+                                          }}
+                                          className="px-3 py-2 bg-btn-secondary text-btn-secondary rounded-lg hover:bg-btn-secondary-hover text-xs font-medium"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
-                            </td>
-                          </tr>
+                            </Fragment>
                           );
                         })}
                       </tbody>
