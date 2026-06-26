@@ -5,7 +5,7 @@
  * code walkthrough plans, and live walkthrough generation.
  *
  * NOTE: buildSeedPrompt and buildAdaptSeedPrompt stay in lib/server/demo.ts
- * because they have side effects (assembleContext, getSeedTool, getSpecForTool).
+ * because they have side effects (assembleContext, getSeedTool).
  */
 
 import { codeOnlyInstruction, playwrightSelectorRules } from "./shared";
@@ -56,7 +56,7 @@ interface NavigationScriptPromptParams {
   credsContext: string;
   crawlContext: string;
   additionalContext: string;
-  specContext: string;
+  contextSection: string;
 }
 
 export function buildNavigationScriptPrompt({
@@ -67,7 +67,7 @@ export function buildNavigationScriptPrompt({
   credsContext,
   crawlContext,
   additionalContext,
-  specContext,
+  contextSection,
 }: NavigationScriptPromptParams): string {
   return `You generate a Playwright script to record a video demo of a web app feature.
 
@@ -77,7 +77,7 @@ App URL: ${previewUrl}
 ${worktreeDir ? `Working directory: ${worktreeDir}\n` : ""}${credsContext}
 ${crawlContext}
 ${additionalContext}
-${specContext}
+${contextSection}
 
 ═══ NEVER GUESS ROUTES — THIS IS MANDATORY ═══
 You MUST verify every URL before using it in the script. A wrong URL causes a blank page and a failed video.
@@ -209,7 +209,7 @@ interface WalkthroughStepPromptParams {
   goal: string;
   appName: string;
   appDescription?: string;
-  specSection: string;
+  contextSection: string;
   historyText: string;
   currentPath: string;
   viewportWidth: number;
@@ -221,7 +221,7 @@ export function buildWalkthroughStepPrompt({
   goal,
   appName,
   appDescription,
-  specSection,
+  contextSection,
   historyText,
   currentPath,
   viewportWidth,
@@ -233,7 +233,7 @@ export function buildWalkthroughStepPrompt({
 GOAL: ${goal}
 APP: ${appName}
 ${appDescription ? `DESCRIPTION: ${appDescription}` : ""}
-${specSection}
+${contextSection}
 
 COMPLETED STEPS:
 ${historyText}

@@ -1,10 +1,8 @@
 import type { AutomationDefinition } from "./types";
 import { completedWorkReviewAutomation } from "./definitions/completed-work-review";
-import { specDriftReviewAutomation } from "./definitions/spec-drift-review";
 
 export const automationDefinitions: AutomationDefinition[] = [
   completedWorkReviewAutomation,
-  specDriftReviewAutomation,
 ];
 
 export function getAutomationDefinition(key: string): AutomationDefinition | undefined {

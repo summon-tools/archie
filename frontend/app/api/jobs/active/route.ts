@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
-import { getEphemeralJobs } from "@/lib/server/ephemeral-jobs";
 import * as dal from "@/lib/server/dal";
 
 export interface ActiveJob {
@@ -14,17 +13,13 @@ export interface ActiveJob {
 }
 
 const WORKFLOW_LABELS: Record<string, string> = {
-  spec_generate: "Generating spec…",
-  spec_validate: "Validating spec…",
-  spec_update_specs: "Updating specs…",
   knowledge_index: "Building codebase index…",
   "automation:completed_work_review": "Reviewing completed work…",
-  "automation:spec_drift_review": "Checking spec drift…",
 };
 
 /**
  * GET: Returns all currently running background jobs across all apps.
- * Reads durable runs from SQLite + ephemeral in-memory jobs.
+ * Reads durable runs from SQLite.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -32,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     const jobs: ActiveJob[] = [];
 
-    // Durable runs from SQLite (spec, knowledge, conversation runs, etc.)
+    // Durable runs from SQLite (knowledge, automations, conversation runs, etc.)
     const activeRuns = dal.getActiveRuns();
     for (const run of activeRuns) {
       // Skip conversation runs — they're shown inline in the conversation UI
@@ -48,20 +43,6 @@ export async function GET(request: NextRequest) {
         label: WORKFLOW_LABELS[workflowKey] || workflowKey,
         progress: run.progress_text || "",
         started_at: new Date(run.created_at).getTime(),
-      });
-    }
-
-    // Ephemeral jobs (short-lived tasks like task-proposal evaluation)
-    for (const ej of getEphemeralJobs()) {
-      const app = dal.getApp(ej.app_id);
-      jobs.push({
-        id: ej.id,
-        app_id: ej.app_id,
-        app_name: app?.name || `App ${ej.app_id}`,
-        type: ej.type,
-        label: ej.label,
-        progress: ej.label,
-        started_at: ej.started_at,
       });
     }
 

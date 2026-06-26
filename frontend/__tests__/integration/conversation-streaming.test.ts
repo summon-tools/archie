@@ -63,7 +63,6 @@ describe("conversation streaming", () => {
     vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
     vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
     vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
-    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
     vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
     vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
 
@@ -192,7 +191,6 @@ describe("conversation streaming", () => {
     vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
     vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
     vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
-    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
     vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
     vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
 
@@ -254,7 +252,6 @@ describe("conversation streaming", () => {
     vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
     vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
     vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
-    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
     vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
     vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
 
@@ -350,7 +347,6 @@ describe("conversation streaming", () => {
     vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
     vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
     vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
-    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
     vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
     vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
 
@@ -467,7 +463,6 @@ describe("conversation streaming", () => {
     vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
     vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext: async () => ({ formatted: "" }) }));
     vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
-    vi.doMock("@/lib/server/spec", () => ({ readSpecIndex: () => null, readPrinciples: () => null }));
     vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
     vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
 

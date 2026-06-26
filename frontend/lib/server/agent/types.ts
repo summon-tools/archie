@@ -72,7 +72,7 @@ export interface ModelEntry {
   provider: string;
 }
 
-/** Mirrors ToolActivity from sdk-helpers — used by demo/spec background jobs. */
+/** Mirrors ToolActivity from sdk-helpers — used by background jobs. */
 export interface ToolStreamEvent {
   type: "tool_use" | "tool_result" | "text" | "result" | "error";
   tool?: string;

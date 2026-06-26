@@ -285,7 +285,6 @@ export default function SetupNextSteps({
             </div>
             <div className="grid gap-1.5 text-xs text-th-dimmed">
               <div><code className="bg-th-code px-1 py-0.5 rounded">.archie/app.yaml</code> — Runtime manifest: how Archie starts, installs, and manages your app</div>
-              <div><code className="bg-th-code px-1 py-0.5 rounded">.archie/spec/</code> — Living specification docs for your project</div>
               <div><code className="bg-th-code px-1 py-0.5 rounded">.archie/skills/</code> — Team conventions and playbooks</div>
               <div><code className="bg-th-code px-1 py-0.5 rounded">.gitignore</code> — Updated to exclude runtime files (logs, pids)</div>
             </div>

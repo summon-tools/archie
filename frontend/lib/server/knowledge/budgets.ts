@@ -12,7 +12,6 @@ const DEFAULT_BUDGETS: Record<string, RunBudget> = {
   stream:        { max_turns: 50,  max_duration_ms: 600000, max_cost_usd: 5.0 },
   seed:          { max_turns: 20,  max_duration_ms: 120000, max_cost_usd: 1.0 },
   demo:          { max_turns: 30,  max_duration_ms: 300000, max_cost_usd: 2.0 },
-  spec_generate: { max_turns: 30,  max_duration_ms: 300000, max_cost_usd: 3.0 },
   walkthrough:   { max_turns: 5,   max_duration_ms: 30000,  max_cost_usd: 0.5 },
 };
 

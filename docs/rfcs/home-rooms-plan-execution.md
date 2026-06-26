@@ -196,7 +196,7 @@ Allowed:
 
 - read repo files
 - search files
-- inspect specs, skills, codebase index, routes, migrations, configuration
+- inspect skills, codebase index, routes, migrations, configuration
 - ask questions
 - propose plan steps
 - critique plans

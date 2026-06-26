@@ -1,13 +1,12 @@
 /**
  * Shared execution helper for automation agent runs.
- * Builds a system prompt with spec/skills context, runs the agent in a worktree,
+ * Builds a system prompt with skills context, runs the agent in a worktree,
  * creates proper run records, and triggers post-run hooks (brief, knowledge refresh).
  */
 
 import { getProvider } from "../agent";
 import { getBackgroundModel, getBackgroundProvider } from "../config";
 import * as dal from "../dal";
-import { readSpecIndex, readPrinciples } from "../spec";
 import { readSkillsIndex } from "../skills";
 import { generateWorkItemBrief } from "../knowledge/brief";
 import { buildGlobalSkillPromptContext } from "../global-skills";
@@ -19,7 +18,7 @@ export interface AutomationExecutionResult {
 
 /**
  * Build a prompt with the same context the normal conversation pipeline injects:
- * spec index, principles, and team skills.
+ * global skills and repo-local team skills.
  */
 function buildAutomationPrompt(directory: string, appName: string, taskDescription: string): string {
   let prompt = `You are an AI assistant working on the "${appName}" project at ${directory}.\n\n`;
@@ -29,24 +28,6 @@ function buildAutomationPrompt(directory: string, appName: string, taskDescripti
   if (globalSkillsContext.promptText) {
     prompt += `${globalSkillsContext.promptText}\n\n`;
   }
-
-  // Inject spec context
-  try {
-    const specIndex = readSpecIndex(directory);
-    if (specIndex && specIndex.entries.length > 0) {
-      prompt += `## Project Spec\nThis project has a living specification at .archie/spec/. ` +
-        `Read relevant spec files when you need context about features, routes, models, or flows.\n\n` +
-        `Spec index:\n${specIndex.entries.map((e) => `- ${e.path}: ${e.summary}`).join("\n")}\n\n`;
-    }
-  } catch {}
-
-  // Inject principles
-  try {
-    const principles = readPrinciples(directory);
-    if (principles) {
-      prompt += `## Team Principles\n${principles}\n\n`;
-    }
-  } catch {}
 
   // Inject team skills
   try {

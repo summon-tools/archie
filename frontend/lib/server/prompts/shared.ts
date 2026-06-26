@@ -20,17 +20,6 @@ export function markdownOnlyInstruction(): string {
   return "Return ONLY the markdown content. No fences or preamble.";
 }
 
-/** Standard YAML frontmatter rules for spec files. */
-export function specFrontmatterRules(): string {
-  return `Each file MUST start with YAML frontmatter (--- delimited) containing:
-- kind: feature | integration | model | page | flow
-- area: the product area (e.g. auth, billing, dashboard)
-- status: draft | active | deprecated
-- tags: list of tags
-
-Then: # Title, > summary, ## Behaviour, ## Context, ## Decisions`;
-}
-
 /** Playwright selector priority rules shared across demo/walkthrough prompts. */
 export function playwrightSelectorRules(): string {
   return `Selector priority (use the first available match):

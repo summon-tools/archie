@@ -7,7 +7,6 @@
 
 import { getProvider } from "./agent";
 import type { AgentStreamEvent, AgentResult } from "./agent";
-import { readSpecIndex, readPrinciples } from "./spec";
 import { readSkillsIndex } from "./skills";
 import { refreshIfStale } from "./knowledge/indexer";
 import { generateWorkItemBrief } from "./knowledge/brief";
@@ -211,19 +210,7 @@ async function buildConversationSystemPrompt(appId: number, appName: string, dir
     if (ctx.formatted) {
       prompt += `\n\n${ctx.formatted}`;
     }
-  } catch {
-    // Fallback to legacy spec index + principles if context assembly fails
-    const specIndex = readSpecIndex(directory);
-    if (specIndex && specIndex.entries.length > 0) {
-      prompt += `\n\nThis project has a living specification at .archie/spec/. ` +
-        `Read relevant spec files when you need context about features, routes, models, or flows.\n\n` +
-        `Spec index:\n${specIndex.entries.map(e => `- ${e.path}: ${e.summary}`).join("\n")}`;
-    }
-    const principles = readPrinciples(directory);
-    if (principles) {
-      prompt += `\n\nTeam principles:\n${principles}`;
-    }
-  }
+  } catch {}
 
   // Inject team skills if they exist
   try {

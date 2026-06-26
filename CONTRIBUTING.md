@@ -76,14 +76,12 @@ A few concepts matter a lot when working in this codebase:
   - the conversation
 - **Work item**
   - the tracked unit of work linked to a thread
-- **Spec**
-  - curated description of what the app does
 - **Skills**
   - curated description of how the team works in the repo
 - **Codebase Index**
   - generated codebase context cache
-- **Inbox**
-  - review surface for background proposals
+- **Notifications**
+  - review surface for app-level automation updates
 
 When in doubt, preserve these distinctions rather than collapsing them together.
 

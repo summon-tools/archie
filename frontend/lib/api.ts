@@ -1160,34 +1160,6 @@ export async function deleteSkill(appId: number, filename: string): Promise<{ de
   return fetchJSON(`${BASE}/apps/${appId}/skills/${encodeURIComponent(filename)}`, { method: "DELETE" });
 }
 
-// --- Spec endpoints ---
-
-export async function getSpecProposals(appId: number): Promise<{ proposals: { id: string; action: string; path: string; content: string; old_content?: string; created_at: string }[] }> {
-  return fetchJSON(`${BASE}/apps/${appId}/spec/proposals`);
-}
-
-export async function reviewSpecProposal(appId: number, proposalId: string | null, action: "accept" | "reject" | "accept_all" | "reject_all"): Promise<{ message: string }> {
-  return fetchJSON(`${BASE}/apps/${appId}/spec/proposals`, {
-    method: "POST",
-    body: JSON.stringify({ proposal_id: proposalId, action }),
-  });
-}
-
-export async function getSpecTaskProposals(appId: number): Promise<{ proposals: { id: string; title: string; description: string; spec_path: string; created_at: string }[] }> {
-  return fetchJSON(`${BASE}/apps/${appId}/spec/task-proposals`);
-}
-
-export async function reviewSpecTaskProposal(appId: number, proposalId: string | null, action: "accept" | "reject" | "accept_all" | "reject_all"): Promise<{ message: string }> {
-  return fetchJSON(`${BASE}/apps/${appId}/spec/task-proposals`, {
-    method: "POST",
-    body: JSON.stringify({ proposal_id: proposalId, action }),
-  });
-}
-
-export async function getDriftResults(appId: number): Promise<{ results: { path: string; status: string; detail: string }[] }> {
-  return fetchJSON(`${BASE}/apps/${appId}/spec/drift`);
-}
-
 export async function generateMainSeed(appId: number, customInstruction?: string): Promise<Response> {
   const res = await fetch(`${BASE}/apps/${appId}/seed`, {
     method: "POST",

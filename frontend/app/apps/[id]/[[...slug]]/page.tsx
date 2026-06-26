@@ -12,7 +12,6 @@ import NewChatView from "@/components/NewChatView";
 import RoomWorkspace from "@/components/RoomWorkspace";
 import SplitPanelLayout from "@/components/SplitPanelLayout";
 import PreviewPanel from "@/components/PreviewPanel";
-import SpecEditor from "@/components/SpecEditor";
 import ProfilePanel from "@/components/ProfilePanel";
 import CodebaseIndexPanel from "@/components/CodebaseIndexPanel";
 import SkillsPanel from "@/components/SkillsPanel";
@@ -38,7 +37,6 @@ export default function AppPage() {
   const roomIdFromUrl = slug && slug[0] === "rooms" && slug[1] ? Number(slug[1]) : null;
   const isRoomsPage = slug?.[0] === "rooms" || slug?.[0] === "home";
   const isSettingsPage = slug?.[0] === "settings";
-  const isSpecPage = slug?.[0] === "spec";
   const isCodebaseIndexPage = slug?.[0] === "codebase-index" || slug?.[0] === "knowledge";
   const isSkillsPage = slug?.[0] === "skills";
   const isFilesPage = slug?.[0] === "files";
@@ -50,13 +48,13 @@ export default function AppPage() {
   const [selectedItemId, setSelectedItemId] = useState<number | null>(itemIdFromUrl);
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(roomIdFromUrl);
   const [selectedItem, setSelectedItem] = useState<Task | null>(null);
-  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isRoomsPage && !isSettingsPage && !isSpecPage && !isCodebaseIndexPage && !isSkillsPage && !isFilesPage && !isNotificationsPage);
+  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isRoomsPage && !isSettingsPage && !isCodebaseIndexPage && !isSkillsPage && !isFilesPage && !isNotificationsPage);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Active view: null = conversation/new, "settings" = app settings, "profile" = profile
-  const [activeView, setActiveView] = useState<string | null>(isRoomsPage ? "room" : isSettingsPage ? "settings" : isSpecPage ? "spec" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isFilesPage ? "files" : isNotificationsPage ? "notifications" : null);
+  const [activeView, setActiveView] = useState<string | null>(isRoomsPage ? "room" : isSettingsPage ? "settings" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isFilesPage ? "files" : isNotificationsPage ? "notifications" : null);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const replacePath = useCallback((path: string) => {
@@ -249,8 +247,6 @@ export default function AppPage() {
       }
     } else if (view === "settings") {
       replacePath(`/apps/${appId}/settings`);
-    } else if (view === "spec") {
-      replacePath(`/apps/${appId}/spec`);
     } else if (view === "codebase-index") {
       replacePath(`/apps/${appId}/codebase-index`);
     } else if (view === "skills") {
@@ -479,14 +475,6 @@ export default function AppPage() {
 
     if (activeView === "profile") {
       return <ProfilePanel />;
-    }
-
-    if (activeView === "spec") {
-      return (
-        <div className="flex-1 flex flex-col min-h-0">
-          <SpecEditor appId={appId} onTasksChanged={loadData} onStartConversation={handleStartConversation} />
-        </div>
-      );
     }
 
     if (activeView === "codebase-index") {

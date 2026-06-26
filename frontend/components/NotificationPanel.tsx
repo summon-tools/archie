@@ -15,12 +15,10 @@ import { PROSE_CLASSES } from "@/lib/prose";
 
 const KIND_LABELS: Record<string, string> = {
   completed_work_review: "Work Review",
-  spec_drift_review: "Spec Drift",
 };
 
 const KIND_COLORS: Record<string, string> = {
   completed_work_review: "bg-indigo-500/10 text-indigo-400",
-  spec_drift_review: "bg-teal-500/10 text-teal-400",
 };
 
 type StatusFilter = "unread" | "all";

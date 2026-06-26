@@ -3,7 +3,6 @@ import { getDb } from "@/lib/server/db";
 import { getAuthUser, AuthError } from "@/lib/server/auth";
 import { runEphemeralQuery } from "@/lib/server/sdk-helpers";
 import type { AppRow } from "@/lib/server/types";
-import { getSpecForTool } from "@/lib/server/spec";
 import { assembleContext } from "@/lib/server/knowledge/context";
 import { WALKTHROUGH_CONTEXT } from "@/lib/server/knowledge/contracts";
 import { buildWalkthroughStepPrompt } from "@/lib/server/prompts/demo";
@@ -59,7 +58,7 @@ export async function POST(
       : "(This is the first step)";
 
     // Inject context for walkthrough via context assembler
-    let specSection = "";
+    let contextSection = "";
     if (app.directory) {
       try {
         const ctx = await assembleContext({
@@ -68,22 +67,16 @@ export async function POST(
           needs: WALKTHROUGH_CONTEXT,
         });
         if (ctx.formatted) {
-          specSection = `\n${ctx.formatted}\n`;
+          contextSection = `\n${ctx.formatted}\n`;
         }
-      } catch {
-        // Fallback to direct spec retrieval
-        const specContent = getSpecForTool(app.directory, "walkthrough");
-        if (specContent) {
-          specSection = `\nAPP SPECIFICATION (routes, flows, features):\n${specContent}\n`;
-        }
-      }
+      } catch {}
     }
 
     const prompt = buildWalkthroughStepPrompt({
       goal,
       appName: app.name,
       appDescription: app.description || undefined,
-      specSection,
+      contextSection,
       historyText,
       currentPath,
       viewportWidth,

@@ -125,8 +125,6 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
   ];
 
   const contextShortcuts = [
-    { label: "Update the spec", prompt: "Update the spec: " },
-    { label: "Check spec drift", prompt: "Check if the spec has drifted from the codebase" },
     { label: "Refresh codebase index", prompt: "Refresh the codebase index for this project" },
     { label: "Update team skills", prompt: "Update the team skills: " },
   ];
