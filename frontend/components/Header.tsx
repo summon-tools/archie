@@ -48,8 +48,8 @@ export default function Header() {
         <div className="flex items-center gap-4">
           <Link href="/" className="hover:opacity-80 transition-opacity">
             {/* Light-mode logo (dark text) / Dark-mode logo (light text) — toggled via data-theme in globals.css */}
-            <Image src="/logo-light.svg" alt="Archie" width={120} height={34} className="logo-light" priority />
-            <Image src="/logo-dark.svg" alt="Archie" width={120} height={34} className="logo-dark" priority />
+            <Image src="/logo-light.png" alt="Archie" width={640} height={177} className="logo-light h-9 w-auto" priority />
+            <Image src="/logo-dark.png" alt="Archie" width={640} height={177} className="logo-dark h-9 w-auto" priority />
           </Link>
           <nav className="hidden sm:flex items-center gap-1" aria-label="Primary navigation">
             <Link href="/" className={navLinkClass(pathname === "/")}>
