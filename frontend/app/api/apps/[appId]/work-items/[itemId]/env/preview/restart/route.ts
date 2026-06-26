@@ -92,6 +92,7 @@ export async function POST(
     message: "Preview restarted",
     port,
     pid: result.pid,
+    url: `/api/p/${port}`,
     healthy: result.healthy,
     statusCode: result.statusCode,
   });

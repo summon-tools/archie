@@ -883,7 +883,7 @@ export function getPreviewStatus(port: number | null): { running: boolean; port:
   return {
     running,
     port,
-    url: running ? `http://0.0.0.0:${port}` : null,
+    url: running ? `/api/p/${port}` : null,
   };
 }
 

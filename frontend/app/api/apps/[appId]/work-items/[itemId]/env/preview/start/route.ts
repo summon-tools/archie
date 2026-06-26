@@ -76,7 +76,7 @@ export async function POST(
     message: result.message,
     port,
     pid: result.pid,
-    url: `http://0.0.0.0:${port}`,
+    url: `/api/p/${port}`,
     healthy: result.healthy,
     statusCode: result.statusCode,
   });

@@ -183,11 +183,11 @@ export default function AppSettingsPanel({
                 rel="noopener noreferrer"
                 className="text-xs text-brand-400 hover:text-brand-300 font-mono ml-auto hover:underline"
               >
-                :{app.port}
+                /api/p/{app.port}
               </a>
             ) : (
               <span className="text-xs text-th-muted font-mono ml-auto">
-                :{app.port}
+                /api/p/{app.port}
               </span>
             )}
           </div>

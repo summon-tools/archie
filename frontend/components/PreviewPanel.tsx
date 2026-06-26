@@ -177,9 +177,6 @@ const PreviewPanel = React.forwardRef<HTMLIFrameElement, PreviewPanelProps>(
     // canDiff defined earlier (used for diff stats SWR)
     const proxyBase = `/api/p/${workItem.preview_port}`;
     const previewUrl = isRunning ? `${proxyBase}${path}` : null;
-    const directUrl = isRunning
-      ? `http://${typeof window !== "undefined" ? window.location.hostname : "localhost"}:${workItem.preview_port}${path}`
-      : null;
 
     // Navigate to a new path
     const navigateTo = useCallback((newPath: string) => {
@@ -285,7 +282,7 @@ const PreviewPanel = React.forwardRef<HTMLIFrameElement, PreviewPanelProps>(
             <div className="flex-1 flex items-center gap-1.5 min-w-0">
               <div className="flex-1 flex items-center bg-th-muted rounded-lg px-2 h-7 min-w-0">
                 <span className="w-1.5 h-1.5 bg-green-500 rounded-full flex-shrink-0 mr-1.5" />
-                <span className="text-meta font-mono text-th-muted flex-shrink-0">:{workItem.preview_port}</span>
+                <span className="text-meta font-mono text-th-muted flex-shrink-0">/api/p/{workItem.preview_port}</span>
                 <input
                   type="text"
                   value={urlInput}
@@ -298,7 +295,7 @@ const PreviewPanel = React.forwardRef<HTMLIFrameElement, PreviewPanelProps>(
               </div>
               <PreviewActionsDropdown
                 onRefresh={handleRefresh}
-                openUrl={directUrl!}
+                openUrl={previewUrl!}
                 onStop={onStopPreview}
                 stoppingPreview={stoppingPreview}
               />

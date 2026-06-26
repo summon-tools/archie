@@ -514,7 +514,7 @@ export async function createWorktree(appId: number, itemId: number): Promise<{ s
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/create`, { method: "POST" });
 }
 
-export async function startPreview(appId: number, itemId: number): Promise<{ success: boolean; message: string; port: number; pid: number }> {
+export async function startPreview(appId: number, itemId: number): Promise<{ success: boolean; message: string; port: number; pid: number; url: string }> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/preview/start`, { method: "POST" });
 }
 
@@ -522,7 +522,7 @@ export async function stopPreview(appId: number, itemId: number): Promise<{ succ
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/preview/stop`, { method: "POST" });
 }
 
-export async function restartPreview(appId: number, itemId: number): Promise<{ success: boolean; message: string; port?: number; pid?: number }> {
+export async function restartPreview(appId: number, itemId: number): Promise<{ success: boolean; message: string; port?: number; pid?: number; url?: string }> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/env/preview/restart`, { method: "POST" });
 }
 
