@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser, AuthError } from "@/lib/server/auth";
+import { getDb } from "@/lib/server/db";
 
 /**
  * Reverse proxy for preview iframes.
@@ -13,6 +13,19 @@ const STRIP_HEADERS = new Set([
   "content-security-policy",
   "content-security-policy-report-only",
 ]);
+
+function isRegisteredProxyPort(port: number): boolean {
+  const db = getDb();
+  const appPort = db
+    .prepare("SELECT 1 FROM apps WHERE port = ? LIMIT 1")
+    .get(port);
+  if (appPort) return true;
+
+  const previewPort = db
+    .prepare("SELECT 1 FROM work_item_env WHERE preview_port = ? LIMIT 1")
+    .get(port);
+  return Boolean(previewPort);
+}
 
 function rewriteUrls(text: string, proxyBase: string): string {
   // Rewrite url() references: url(/path), url('/path'), url("/path")
@@ -87,20 +100,15 @@ async function proxyRequest(
   request: NextRequest,
   { params }: { params: Promise<{ port: string; path?: string[] }> }
 ) {
-  // Auth check — iframe requests carry same-origin cookies
-  try {
-    await getAuthUser(request);
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
-    }
-  }
-
   const { port: portStr, path: pathSegments } = await params;
   const port = Number(portStr);
 
   if (isNaN(port) || port < 1 || port > 65535) {
     return NextResponse.json({ detail: "Invalid port" }, { status: 400 });
+  }
+
+  if (!isRegisteredProxyPort(port)) {
+    return NextResponse.json({ detail: "Preview not found" }, { status: 404 });
   }
 
   const targetPath = pathSegments ? `/${pathSegments.join("/")}` : "/";
