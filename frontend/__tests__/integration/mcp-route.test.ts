@@ -183,6 +183,44 @@ describe("remote MCP route", () => {
     });
   });
 
+  it("returns a tool error when a project question provider echoes the generated prompt", async () => {
+    const app = seedApp(db, { name: "Prompt Echo App", directory: ctx.tmpDir });
+    const token = await createToken(["apps:read", "project:read"], [app.id]);
+    const ephemeralQuery = vi.fn(async (prompt: string) => prompt);
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => createMockProvider({
+        id: "codex",
+        ephemeralQuery,
+      })),
+    }));
+    const route = await import("@/app/api/mcp/route");
+
+    const response = await route.POST(makeRequest({
+      jsonrpc: "2.0",
+      id: 8,
+      method: "tools/call",
+      params: {
+        name: "archie_ask_project",
+        arguments: {
+          app_id: app.id,
+          question: "Which files define authentication?",
+        },
+      },
+    }, token));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain("generated provider prompt instead of an answer");
+
+    const audits = db.prepare("SELECT status, error_text FROM mcp_audit_events WHERE tool_name = ?").all("archie_ask_project") as any[];
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      status: "error",
+      error_text: expect.stringContaining("generated provider prompt"),
+    });
+  });
+
   it("rejects cross-origin browser requests", async () => {
     const token = await createToken(["apps:read"]);
     const route = await import("@/app/api/mcp/route");

@@ -45,6 +45,18 @@ describe("parseCodexEvent", () => {
     expect(state.lastText).toBe("Hello world");
   });
 
+  it("ignores item.completed user_message so prompts are not treated as answers", () => {
+    const state = createParseState();
+    const event = parseCodexEvent(
+      JSON.stringify({ type: "item.completed", item: { id: "item_prompt", type: "user_message", text: "Answer this question..." } }),
+      state
+    );
+    expect(event).toBeNull();
+    expect(state.lastText).toBe("");
+    expect(state.allText).toEqual([]);
+    expect(state.sawToolActivity).toBe(false);
+  });
+
   it("handles item.completed command_execution → command activity", () => {
     const state = createParseState();
     const event = parseCodexEvent(

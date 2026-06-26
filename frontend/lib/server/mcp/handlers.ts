@@ -321,7 +321,19 @@ async function askProject(args: Record<string, unknown>, ctx: McpHandlerContext)
     model,
     toolPolicy: "read_only_codebase",
   });
-  return mcpTextResult(answer, { answer, app_id: app.id, provider: providerId, model: model ?? null });
+  const normalizedAnswer = answer.trim();
+  if (!normalizedAnswer) {
+    throw new McpToolError("archie_ask_project completed without an answer from the provider", 502);
+  }
+  if (normalizedAnswer === prompt.trim()) {
+    throw new McpToolError("archie_ask_project received the generated provider prompt instead of an answer", 502);
+  }
+  return mcpTextResult(normalizedAnswer, {
+    answer: normalizedAnswer,
+    app_id: app.id,
+    provider: providerId,
+    model: model ?? null,
+  });
 }
 
 async function listTasks(args: Record<string, unknown>, ctx: McpHandlerContext): Promise<McpToolResult> {
