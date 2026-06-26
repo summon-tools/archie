@@ -192,12 +192,6 @@ export default function SkillsPanel({ appId, onStartConversation }: SkillsPanelP
                     >
                       /update-skills
                     </button>
-                    <button
-                      onClick={() => onStartConversation?.("Update the team principles: ")}
-                      className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded bg-overlay-medium text-th-secondary font-mono hover:bg-overlay-heavy hover:text-th-primary transition-colors cursor-pointer"
-                    >
-                      /update-principles
-                    </button>
                   </div>
                 </div>
               </div>

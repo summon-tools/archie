@@ -28,7 +28,7 @@ Most AI coding tools compete on chat UX or model access. Archie is different: it
 - **Deploy it once, use it from anywhere**: run Archie on a server you control and open the same workspace from any machine
 - **Keep parallel work isolated**: each task gets its own git worktree and branch so agents do not step on each other
 - **See the app while the agent works**: live previews and console output are part of the same environment
-- **Capture team context in the workspace**: specs, skills, and codebase index stay attached to the repo instead of disappearing into chat history
+- **Capture team context in the workspace**: skills and the codebase index stay attached to the repo instead of disappearing into chat history
 - **Stay provider-agnostic**: Claude Code, Codex, and other CLIs plug into Archie instead of locking you into one hosted product
 - **You own it**: your repos, previews, prompts, and workflows live in a system you control, not behind someone else's login. If something is missing, build it, automate it, or customize it yourself
 
@@ -51,11 +51,10 @@ Every project in Archie carries its own context: a structured layer that lives a
 
 | Layer | What it is | How it's used |
 |---|---|---|
-| **Spec** | A living description of your project's architecture, features, conventions, and design decisions | Injected into agent context on every thread; changes to the spec can generate tasks to bring code in line, and code changes can suggest spec updates in return |
 | **Skills** | Your team's rules and conventions, naming patterns, testing requirements, commit formats, review checklists, deployment procedures | Written once, picked up automatically across threads so you stop repeating yourself in every conversation |
 | **Codebase Index** | Key facts the agent needs frequently, API contracts, environment details, integration notes, domain terminology | Assembled into context when relevant so the agent does not re-read files or ask for information your team has already captured |
 
-Spec, skills, and the codebase index are also available to tools. When a tool like Walkthrough or Seed Data runs, it receives the same project context, so its output reflects your project's actual structure and conventions, not generic defaults.
+Skills and the codebase index are also available to tools. When a tool like Walkthrough or Seed Data runs, it receives the same project context, so its output reflects your project's actual structure and conventions, not generic defaults.
 
 ## Tools
 

@@ -936,7 +936,7 @@ export default function SettingsPage() {
                       />
                       <ModelCategoryPicker
                         label="Background"
-                        description="Spec generation, codebase indexing, brief generation"
+                        description="Codebase indexing, brief generation, and automation analysis"
                         modelValue={modelConfig.backgroundModel}
                         providerValue={modelConfig.backgroundProvider}
                         availableModels={availableModels}

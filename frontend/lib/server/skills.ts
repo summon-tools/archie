@@ -13,7 +13,6 @@
 
 import fs from "fs";
 import path from "path";
-import { parseFrontmatter } from "./spec";
 
 export interface SkillEntry {
   filename: string;
@@ -35,6 +34,33 @@ const INDEX_FILE = "_index.md";
 
 function skillsDir(directory: string): string {
   return path.join(directory, SKILLS_DIR);
+}
+
+function parseFrontmatter(content: string): {
+  meta: Record<string, string | string[]>;
+  body: string;
+} {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!match) return { meta: {}, body: content };
+
+  const meta: Record<string, string | string[]> = {};
+  for (const line of match[1].split("\n")) {
+    const kvMatch = line.match(/^(\w[\w_]*)\s*:\s*(.+)$/);
+    if (!kvMatch) continue;
+
+    const key = kvMatch[1].trim();
+    const value = kvMatch[2].trim();
+    if (value.startsWith("[") && value.endsWith("]")) {
+      meta[key] = value
+        .slice(1, -1)
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""));
+    } else {
+      meta[key] = value.replace(/^["']|["']$/g, "");
+    }
+  }
+
+  return { meta, body: match[2] };
 }
 
 /**

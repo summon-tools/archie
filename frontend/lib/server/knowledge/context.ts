@@ -4,7 +4,6 @@
  */
 
 import { execSync } from "child_process";
-import { getSpecForTool, readPrinciples } from "../spec";
 import { getAllKnowledge, getKnowledge, isKnowledgeStale } from "./store";
 import { getWorkItemBrief, getRecentBriefs } from "./brief";
 import { refreshIfStale } from "./indexer";
@@ -13,13 +12,11 @@ import * as dal from "../dal";
 export interface ContextNeeds {
   all_knowledge?: boolean;
   knowledge_topics?: string[];
-  spec?: { toolType: string; maxChars?: number };
   git_diff?: { base?: string; nameOnly?: boolean };
   work_item_brief?: boolean;
   recent_briefs?: { limit: number };
   conversation_messages?: { conversationId: number; limit: number };
   schema_files?: boolean;
-  principles?: boolean;
   personas?: boolean;
   route_index?: boolean;
   auth_index?: boolean;
@@ -110,23 +107,6 @@ export async function assembleContext(req: ContextRequest): Promise<ContextResul
         brief.follow_up_concerns.length ? `Follow-up: ${brief.follow_up_concerns.join(", ")}` : "",
       ].filter(Boolean);
       addSection("Previous Work on This Item", lines.join("\n"));
-    }
-  }
-
-  // ── Spec ─────────────────────────────────────────────────────────
-  if (req.needs.spec) {
-    const specContent = getSpecForTool(req.directory, req.needs.spec.toolType);
-    if (specContent) {
-      const maxChars = req.needs.spec.maxChars || 8000;
-      addSection("Living Specification", truncate(specContent, maxChars));
-    }
-  }
-
-  // ── Principles ───────────────────────────────────────────────────
-  if (req.needs.principles) {
-    const principles = readPrinciples(req.directory);
-    if (principles) {
-      addSection("Team Principles", principles);
     }
   }
 

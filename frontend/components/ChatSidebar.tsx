@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { App, Task, GitStatus, HomeRoom } from "@/lib/types";
 import { fetcher } from "@/lib/swr";
-import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, BookOpen, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, UsersThree, ChatsCircle, FileText } from "@phosphor-icons/react";
+import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, UsersThree, ChatsCircle, FileText } from "@phosphor-icons/react";
 import BackgroundJobsBar from "./BackgroundJobsBar";
 
 interface ChatSidebarProps {
@@ -211,18 +211,6 @@ export default function ChatSidebar({
 
         {/* Project Context group */}
         <div className="flex flex-col items-center gap-1 pb-1">
-          <button
-            onClick={() => onViewChange?.("spec")}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              activeView === "spec"
-                ? "bg-btn-secondary text-btn-secondary"
-                : "text-th-muted hover:text-th-primary hover:bg-th-muted"
-            }`}
-            title="App Spec"
-            aria-label="App Spec"
-          >
-            <BookOpen size={16} weight="bold" />
-          </button>
           <button
             onClick={() => onViewChange?.("codebase-index")}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
@@ -446,18 +434,6 @@ export default function ChatSidebar({
       <div className="border-t border-th" />
       <SectionLabel label="Project Context" />
       <div className="px-3 pb-2 space-y-0.5">
-        <button
-          onClick={() => onViewChange?.("spec")}
-          title="Living specification for your project"
-          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
-            activeView === "spec"
-              ? "text-th-primary font-medium"
-              : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
-          }`}
-        >
-          <BookOpen size={15} weight="bold" className="text-th-muted" />
-          App Spec
-        </button>
         <button
           onClick={() => onViewChange?.("codebase-index")}
           title="Auto-indexed codebase used as AI context"

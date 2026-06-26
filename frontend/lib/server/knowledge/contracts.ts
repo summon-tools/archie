@@ -16,25 +16,18 @@ export const SEED_CONTEXT: ContextNeeds = {
   all_knowledge: true,
   personas: true,
   schema_files: true,
-  spec: { toolType: "seed" },
 };
 
 export const DEMO_CONTEXT: ContextNeeds = {
   all_knowledge: true,
   personas: true,
   route_index: true,
-  spec: { toolType: "video" },
   git_diff: { base: "main" },
 };
 
 export const WALKTHROUGH_CONTEXT: ContextNeeds = {
   knowledge_topics: ["brief", "routes", "auth"],
   personas: true,
-  spec: { toolType: "walkthrough" },
-};
-
-export const SPEC_GENERATE_CONTEXT: ContextNeeds = {
-  all_knowledge: true,
 };
 
 export const CODE_WALKTHROUGH_CONTEXT: ContextNeeds = {

@@ -343,7 +343,7 @@ export default function AppSettingsPanel({
             Project Owner
           </label>
           <p className="text-meta text-th-dimmed mb-2">
-            Receives app-level notifications like weekly spec drift reviews.
+            Receives app-level notifications from project automations.
           </p>
           <select
             value={projectOwner ?? ""}

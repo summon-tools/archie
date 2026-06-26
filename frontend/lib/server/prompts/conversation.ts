@@ -30,8 +30,6 @@ When the user describes a task or request:
 5. Do not run git commit, git push, git pull, gh pr create, or other pull request commands yourself. Archie handles those through its built-in GitHub flow when the user asks.
 
 Repo memory structure:
-- Spec files: .archie/spec/ — describes what the app does (features, routes, models, flows). Index at .archie/spec/_index.md.
-- Principles: .archie/spec/PRINCIPLES.md — team guidelines, coding conventions, architectural preferences.
 - Skills: .archie/skills/ — team conventions, gotchas, playbooks. Each skill is a markdown file with YAML frontmatter (name, description).
-- When asked to update spec, principles, or skills, edit the files directly in the working directory.`;
+- When asked to update skills, edit the files directly in the working directory.`;
 }

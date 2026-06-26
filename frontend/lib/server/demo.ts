@@ -17,7 +17,6 @@ import os from "os";
 import type { TechStack } from "./techstack";
 import { getWorktreeDatabaseName } from "./techstack";
 import { startPreview } from "./worktrees";
-import { getSpecForTool } from "./spec";
 import { assembleContext } from "./knowledge/context";
 import { SEED_CONTEXT, DEMO_CONTEXT } from "./knowledge/contracts";
 import { preflightCheck } from "./knowledge/preflight";
@@ -859,7 +858,7 @@ export async function generateNavigationScript(
   const worktreeDir = context?.worktreeDir;
 
   // Inject context for demo script generation via context assembler
-  let specContext = "";
+  let contextSection = "";
   if (worktreeDir && context?.appId) {
     try {
       const ctx = await assembleContext({
@@ -868,16 +867,9 @@ export async function generateNavigationScript(
         needs: DEMO_CONTEXT,
       });
       if (ctx.formatted) {
-        specContext = `\n\n${ctx.formatted}`;
+        contextSection = `\n\n${ctx.formatted}`;
       }
     } catch {}
-  }
-  if (!specContext && worktreeDir) {
-    // Fallback to direct spec retrieval
-    const specContent = getSpecForTool(worktreeDir, "video");
-    if (specContent) {
-      specContext = `\n\n═══ APP SPECIFICATION (use for routes, flows, and feature details) ═══\n${specContent}`;
-    }
   }
 
   const prompt = buildNavigationScriptPrompt({
@@ -888,7 +880,7 @@ export async function generateNavigationScript(
     credsContext,
     crawlContext,
     additionalContext,
-    specContext,
+    contextSection,
   });
 
   const abortController = new AbortController();
@@ -1085,7 +1077,7 @@ async function buildSeedPrompt(techStack: TechStack, worktreeDir: string, appId?
     customContext = `\n\n═══ CUSTOM INSTRUCTIONS ═══\n${customInstruction}`;
   }
 
-  // Use context assembler for spec + schema + knowledge
+  // Use context assembler for schema, personas, and codebase knowledge
   let assembledContext = "";
   if (appId) {
     try {
@@ -1098,14 +1090,6 @@ async function buildSeedPrompt(techStack: TechStack, worktreeDir: string, appId?
         assembledContext = `\n\n${ctx.formatted}`;
       }
     } catch {}
-  }
-
-  // Fallback: direct spec retrieval if no assembled context
-  if (!assembledContext) {
-    const specContent = getSpecForTool(worktreeDir, "seed");
-    if (specContent) {
-      assembledContext = `\n\n═══ APP SPECIFICATION (use for credentials, roles, and data models — only explore for details not in the spec) ═══\n${specContent}`;
-    }
   }
 
   return `You generate a bash shell script to seed demo data into a web application's database, AND you generate the personas (user accounts) needed for the demo.
@@ -1190,13 +1174,6 @@ function buildAdaptSeedPrompt(
     customContext = `\n\n═══ CUSTOM INSTRUCTIONS ═══\n${customInstruction}`;
   }
 
-  // Inject living spec context
-  let specContext = "";
-  const specContent = getSpecForTool(worktreeDir, "seed");
-  if (specContent) {
-    specContext = `\n\n═══ APP SPECIFICATION (use for credentials, roles, and data models) ═══\n${specContent}`;
-  }
-
   return `You adapt an existing seed script for a web application's database. A base script already exists — modify it only as needed for the current task.
 
 Framework: ${techStack.framework}
@@ -1204,7 +1181,6 @@ Database: ${techStack.database}${techStack.databaseName ? ` (name: ${techStack.d
 Working directory: ${worktreeDir}
 ${seedToolContext}
 ${customContext}
-${specContext}
 
 ═══ CURRENT DATABASE SCHEMA ═══
 ${schemaInfo}

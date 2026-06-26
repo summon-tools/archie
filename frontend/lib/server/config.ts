@@ -85,7 +85,7 @@ export function getProjectsDir(): string {
 //
 // 4 categories for AI model usage:
 //   chat       — main conversation with the user
-//   background — spec generation, knowledge indexing, brief generation, spec updates
+//   background — knowledge indexing, brief generation, automation analysis
 //   quick      — intent classification, commit messages, PR descriptions, task proposals
 //   demo       — navigation scripts, walkthrough planning, seed scripts
 
@@ -140,7 +140,7 @@ export function getChatProvider(): string {
   return getSettingValue("chat_provider") || getSettingValue("default_provider") || DEFAULT_PROVIDER_FALLBACK;
 }
 
-// --- Background (heavy async work: spec, knowledge, briefs) ---
+// --- Background (heavy async work: knowledge, briefs, automations) ---
 
 export function getBackgroundModel(): string {
   return getSettingValue("background_model") || DEFAULT_MODEL_FALLBACK;
