@@ -1,8 +1,11 @@
 import crypto from "crypto";
 import { NextRequest } from "next/server";
 import * as dal from "@/lib/server/dal";
+import { getPublicServerOrigin, normalizeServerUrl } from "./public-url";
 import { decryptSecret, encryptSecret } from "./secret-box";
 import type { GitHubUserConnectionRow } from "./types";
+
+export { getPublicServerOrigin } from "./public-url";
 
 export const GITHUB_OAUTH_CALLBACK_SUFFIX = "/api/github/oauth/callback";
 const GITHUB_API_VERSION = "2022-11-28";
@@ -43,24 +46,6 @@ export interface PublicGitHubAppSettings {
   bot_email: string;
 }
 
-function normalizeServerUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "");
-}
-
-function requestOrigin(request: Pick<NextRequest, "headers" | "url">): string {
-  const configured = dal.getSetting("public_server_url");
-  if (configured) return normalizeServerUrl(configured);
-
-  const proto = request.headers.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "");
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
-  if (host) return `${proto}://${host}`;
-  return new URL(request.url).origin;
-}
-
-export function getPublicServerOrigin(request: Pick<NextRequest, "headers" | "url">): string {
-  return requestOrigin(request);
-}
-
 export function getGitHubAppSettings(): GitHubAppSettings {
   return {
     public_server_url: dal.getSetting("public_server_url") || "",
@@ -76,7 +61,7 @@ export function getGitHubAppSettings(): GitHubAppSettings {
 
 export function getPublicGitHubAppSettings(request?: Pick<NextRequest, "headers" | "url">): PublicGitHubAppSettings {
   const settings = getGitHubAppSettings();
-  const publicServerUrl = settings.public_server_url || (request ? requestOrigin(request) : "");
+  const publicServerUrl = settings.public_server_url || (request ? getPublicServerOrigin(request) : "");
   const normalizedServerUrl = publicServerUrl ? normalizeServerUrl(publicServerUrl) : "";
   return {
     public_server_url: settings.public_server_url,
@@ -118,7 +103,7 @@ export function updateGitHubAppSettings(input: Partial<GitHubAppSettings> & { cl
 }
 
 export function getOAuthCallbackUrl(request: Pick<NextRequest, "headers" | "url">): string {
-  return `${requestOrigin(request)}${GITHUB_OAUTH_CALLBACK_SUFFIX}`;
+  return `${getPublicServerOrigin(request)}${GITHUB_OAUTH_CALLBACK_SUFFIX}`;
 }
 
 export function assertGitHubAppConfigured(request?: Pick<NextRequest, "headers" | "url">): GitHubAppSettings & { callback_url: string } {

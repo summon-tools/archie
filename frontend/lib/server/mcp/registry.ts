@@ -78,7 +78,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "archie_ask_project",
     title: "Ask Archie Project",
-    description: "Ask a read-only question about an app's codebase.",
+    description: "Ask Archie to inspect an app's codebase read-only and return a synchronous answer in content[0].text and structuredContent.answer.",
     inputSchema: objectSchema({
       app_id: appId,
       question: {
@@ -89,6 +89,17 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       model: { type: "string" },
       provider: { type: "string" },
     }, ["app_id", "question"]),
+    outputSchema: objectSchema({
+      answer: {
+        type: "string",
+        description: "Answer to the project question.",
+      },
+      app_id: appId,
+      provider: { type: "string" },
+      model: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+      },
+    }, ["answer", "app_id", "provider", "model"]),
     annotations: { readOnlyHint: true },
   },
   {

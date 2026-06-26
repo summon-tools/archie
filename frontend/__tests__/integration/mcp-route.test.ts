@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestContext, getTestDb, type TestContext } from "../helpers/test-db";
 import { createMockProvider } from "../helpers/mock-provider";
-import { seedApp } from "../helpers/seed";
+import { seedApp, seedConversation, seedWorkItem } from "../helpers/seed";
 import type Database from "better-sqlite3";
 
 let ctx: TestContext;
@@ -109,6 +109,51 @@ describe("remote MCP route", () => {
     });
   });
 
+  it("uses the configured public server URL for app and preview URLs", async () => {
+    const app = seedApp(db, { name: "Public URL App", directory: ctx.tmpDir, port: 4321 });
+    const conversation = seedConversation(db, app.id, { kind: "task", title: "Preview task" });
+    const workItem = seedWorkItem(db, app.id, conversation.id);
+    vi.doMock("@/lib/server/apps", () => ({
+      checkPortSync: vi.fn(() => false),
+      startApp: vi.fn(() => ({ success: true, message: "App started" })),
+      stopApp: vi.fn(() => ({ success: true, message: "App stopped" })),
+    }));
+    vi.doMock("@/lib/server/worktrees", () => ({
+      allocatePort: vi.fn(() => 9012),
+      getPreviewStatus: vi.fn(() => ({ running: true, port: 9012, url: "/api/p/9012" })),
+      startPreview: vi.fn(async () => ({ success: true, message: "Preview started", pid: 12345, healthy: true, statusCode: 200 })),
+      stopPreview: vi.fn(() => ({ success: true, message: "Preview stopped" })),
+    }));
+    const token = await createToken(["servers:start"], [app.id]);
+    const { setSetting } = await import("@/lib/server/dal");
+    setSetting("public_server_url", "https://archie.example.com/");
+    const route = await import("@/app/api/mcp/route");
+
+    const serverResponse = await route.POST(makeRequest({
+      jsonrpc: "2.0",
+      id: 31,
+      method: "tools/call",
+      params: {
+        name: "archie_start_server",
+        arguments: { app_id: app.id },
+      },
+    }, token, undefined, "http://localhost:3001/api/mcp"));
+    const serverBody = await serverResponse.json();
+    expect(serverBody.result.structuredContent.url).toBe("https://archie.example.com/api/p/4321");
+
+    const previewResponse = await route.POST(makeRequest({
+      jsonrpc: "2.0",
+      id: 32,
+      method: "tools/call",
+      params: {
+        name: "archie_start_preview",
+        arguments: { app_id: app.id, task_id: workItem.id },
+      },
+    }, token, undefined, "http://localhost:3001/api/mcp"));
+    const previewBody = await previewResponse.json();
+    expect(previewBody.result.structuredContent.url).toBe("https://archie.example.com/api/p/9012");
+  });
+
   it("returns a JSON-RPC error when token scopes are insufficient", async () => {
     const token = await createToken(["skills:read"]);
     const route = await import("@/app/api/mcp/route");
@@ -180,6 +225,44 @@ describe("remote MCP route", () => {
       answer: "Codex answer",
       provider: "codex",
       model: "gpt-5.5",
+    });
+  });
+
+  it("returns a tool error when a project question provider echoes the generated prompt", async () => {
+    const app = seedApp(db, { name: "Prompt Echo App", directory: ctx.tmpDir });
+    const token = await createToken(["apps:read", "project:read"], [app.id]);
+    const ephemeralQuery = vi.fn(async (prompt: string) => prompt);
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => createMockProvider({
+        id: "codex",
+        ephemeralQuery,
+      })),
+    }));
+    const route = await import("@/app/api/mcp/route");
+
+    const response = await route.POST(makeRequest({
+      jsonrpc: "2.0",
+      id: 8,
+      method: "tools/call",
+      params: {
+        name: "archie_ask_project",
+        arguments: {
+          app_id: app.id,
+          question: "Which files define authentication?",
+        },
+      },
+    }, token));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain("generated provider prompt instead of an answer");
+
+    const audits = db.prepare("SELECT status, error_text FROM mcp_audit_events WHERE tool_name = ?").all("archie_ask_project") as any[];
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      status: "error",
+      error_text: expect.stringContaining("generated provider prompt"),
     });
   });
 

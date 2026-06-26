@@ -208,6 +208,22 @@ export function extractItemText(item: any): string {
   return chunks.join("\n\n").trim();
 }
 
+function isMessageLikeItemType(type: unknown): boolean {
+  return typeof type === "string" && [
+    "agent_message",
+    "assistant_message",
+    "message",
+    "user_message",
+    "system_message",
+  ].includes(type);
+}
+
+function isAssistantOutputItem(item: any): boolean {
+  if (!item || typeof item !== "object") return false;
+  if (item.type === "agent_message" || item.type === "assistant_message") return true;
+  return item.role === "assistant";
+}
+
 // Sentinel value used when the new Codex output format doesn't include a
 // thread/session ID.  On resume we detect this and use `--last` instead.
 export const CODEX_LAST_SESSION = "__codex_last__";
@@ -275,8 +291,7 @@ export function parseCodexEvent(line: string, state: ParseState): AgentStreamEve
   if (
     (data.type === "item.started" || data.type === "item.completed") &&
     data.item?.type &&
-    data.item.type !== "agent_message" &&
-    data.item.type !== "assistant_message" &&
+    !isMessageLikeItemType(data.item.type) &&
     data.item.type !== "error"
   ) {
     state.sawToolActivity = true;
@@ -316,7 +331,7 @@ export function parseCodexEvent(line: string, state: ParseState): AgentStreamEve
   }
 
   // item.completed with text-bearing assistant output
-  if (data.type === "item.completed" && data.item?.type !== "command_execution") {
+  if (data.type === "item.completed" && isAssistantOutputItem(data.item)) {
     const text = extractItemText(data.item);
     if (!text) return null;
     state.lastText = text;
