@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="frontend/public/icon.svg" alt="Archie" width="80" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="frontend/public/logo-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="frontend/public/logo-light.png" />
+    <img src="frontend/public/logo-light.png" alt="Archie" width="320" />
+  </picture>
   <br />
   <h1 align="center">Archie</h1>
   <p align="center">
