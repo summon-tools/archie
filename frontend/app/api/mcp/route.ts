@@ -3,6 +3,7 @@ import * as dal from "@/lib/server/dal";
 import { authenticateMcpBearerToken, McpAuthError, McpForbiddenError } from "@/lib/server/mcp/auth";
 import { McpToolError } from "@/lib/server/mcp/errors";
 import { callMcpTool } from "@/lib/server/mcp/handlers";
+import { getPublicServerOrigin } from "@/lib/server/public-url";
 import {
   acceptedResponse,
   isJsonRpcRequest,
@@ -22,11 +23,6 @@ const SERVER_INFO = {
 const LOCAL_POSTMAN_ORIGINS = new Set([
   "https://web.postman.co",
 ]);
-
-function requestBaseUrl(request: NextRequest): string {
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
-}
 
 function isLocalHostname(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
@@ -155,7 +151,7 @@ function appIdFromArgs(value: unknown): number | null {
 
 async function handleRpc(request: NextRequest, rpc: JsonRpcRequest) {
   const principal = authenticateMcpBearerToken(request.headers.get("authorization"));
-  const baseUrl = requestBaseUrl(request);
+  const baseUrl = getPublicServerOrigin(request);
 
   if (rpc.id === undefined && rpc.method.startsWith("notifications/")) {
     return acceptedResponse();
