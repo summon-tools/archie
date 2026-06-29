@@ -206,6 +206,19 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.model-config-select {
+  color-scheme: dark;
+}
+
+[data-theme="light"] .model-config-select {
+  color-scheme: light;
+}
+
+.model-config-select option {
+  background-color: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
 /* Themed scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

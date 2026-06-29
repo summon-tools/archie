@@ -6,20 +6,13 @@ import {
   getBackgroundModel, getBackgroundProvider,
   getQuickModel, getQuickProvider,
   getDemoModel, getDemoProvider,
+  clearSettingsCache,
 } from "@/lib/server/config";
 import { getAllModels } from "@/lib/server/agent";
+import { clearProviderCache } from "@/lib/server/knowledge/preflight";
 
-export async function GET(request: NextRequest) {
-  try {
-    await getAuthUser(request);
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ detail: e.message }, { status: 401 });
-    }
-    throw e;
-  }
-
-  return NextResponse.json({
+function buildModelConfigResponse() {
+  return {
     chatModel: getChatModel(),
     chatProvider: getChatProvider(),
     backgroundModel: getBackgroundModel(),
@@ -32,7 +25,20 @@ export async function GET(request: NextRequest) {
     // Legacy compat
     defaultModel: getChatModel(),
     defaultProvider: getChatProvider(),
-  });
+  };
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    await getAuthUser(request);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ detail: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
+  return NextResponse.json(buildModelConfigResponse());
 }
 
 // Setting key mapping
@@ -65,21 +71,20 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
 
+  let updated = false;
+
   // Save any provided keys
   for (const [bodyKey, dbKey] of Object.entries(SETTING_KEYS)) {
     if (body[bodyKey] && typeof body[bodyKey] === "string") {
       dal.setSetting(dbKey, body[bodyKey]);
+      updated = true;
     }
   }
 
-  return NextResponse.json({
-    chatModel: getChatModel(),
-    chatProvider: getChatProvider(),
-    backgroundModel: getBackgroundModel(),
-    backgroundProvider: getBackgroundProvider(),
-    quickModel: getQuickModel(),
-    quickProvider: getQuickProvider(),
-    demoModel: getDemoModel(),
-    demoProvider: getDemoProvider(),
-  });
+  if (updated) {
+    clearSettingsCache();
+    clearProviderCache();
+  }
+
+  return NextResponse.json(buildModelConfigResponse());
 }

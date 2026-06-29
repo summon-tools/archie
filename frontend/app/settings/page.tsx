@@ -99,6 +99,8 @@ function ModelCategoryPicker({
   // Group models by provider
   const providers = Array.from(new Set(availableModels.map(m => m.provider)));
   const modelsForProvider = availableModels.filter(m => m.provider === providerValue);
+  const selectClassName =
+    "model-config-select px-3 py-2 bg-th-subtle border border-th rounded-lg text-th-primary text-sm focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent appearance-none";
 
   return (
     <div>
@@ -111,7 +113,7 @@ function ModelCategoryPicker({
             const firstModel = availableModels.find(m => m.provider === newProvider);
             onChange(newProvider, firstModel?.id || "");
           }}
-          className="px-3 py-2 bg-th-subtle border border-th rounded-lg text-th-primary text-sm focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent appearance-none w-32"
+          className={`${selectClassName} w-32`}
         >
           {providers.map(p => (
             <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
@@ -120,7 +122,7 @@ function ModelCategoryPicker({
         <select
           value={modelValue}
           onChange={(e) => onChange(providerValue, e.target.value)}
-          className="flex-1 px-3 py-2 bg-th-subtle border border-th rounded-lg text-th-primary text-sm focus:outline-none focus:ring-2 focus:ring-th focus:border-transparent appearance-none"
+          className={`${selectClassName} flex-1`}
         >
           {modelsForProvider.map(m => (
             <option key={m.id} value={m.id}>{m.label}</option>
