@@ -326,9 +326,11 @@ export default function OutcomesPage() {
   const [data, setData] = useState<OutcomesSummaryResponse | null>(null);
   const [settings, setSettings] = useState<OutcomesGitHubSyncSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [rowsLoading, setRowsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshJob, setRefreshJob] = useState<OutcomeJob | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [prRowsVisible, setPrRowsVisible] = useState(false);
   const [appFilter, setAppFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
@@ -340,6 +342,7 @@ export default function OutcomesPage() {
   const refreshing = isJobActive(refreshJob);
 
   const summaryQuery = useMemo(() => ({
+    include_rows: prRowsVisible,
     page_size: Number(pageSize),
     pending_pr_page: groupPages.pending_pr,
     merged_page: groupPages.merged,
@@ -352,10 +355,11 @@ export default function OutcomesPage() {
     model: modelFilter,
     run_status: runStatusFilter,
     pr_state: prStateFilter,
-  }), [appFilter, groupPages.closed_unmerged, groupPages.merged, groupPages.no_pr, groupPages.pending_pr, groupPages.unknown, modelFilter, outcomeFilter, pageSize, prStateFilter, providerFilter, runStatusFilter]);
+  }), [appFilter, groupPages.closed_unmerged, groupPages.merged, groupPages.no_pr, groupPages.pending_pr, groupPages.unknown, modelFilter, outcomeFilter, pageSize, prRowsVisible, prStateFilter, providerFilter, runStatusFilter]);
 
   const loadData = useCallback(() => {
-    setLoading(true);
+    if (prRowsVisible) setRowsLoading(true);
+    else setLoading(true);
     Promise.all([getOutcomesSummary(summaryQuery), getOutcomesSettings()])
       .then(([summary, loadedSettings]) => {
         setData(summary);
@@ -363,8 +367,11 @@ export default function OutcomesPage() {
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load outcomes"))
-      .finally(() => setLoading(false));
-  }, [summaryQuery]);
+      .finally(() => {
+        setLoading(false);
+        setRowsLoading(false);
+      });
+  }, [prRowsVisible, summaryQuery]);
 
   useEffect(() => {
     loadData();
@@ -478,6 +485,12 @@ export default function OutcomesPage() {
   function handlePageSizeChange(value: string) {
     setPageSize(value);
     setGroupPages(initialGroupPages());
+  }
+
+  function handleViewPrs() {
+    setGroupPages(initialGroupPages());
+    setRowsLoading(true);
+    setPrRowsVisible(true);
   }
 
   async function handleScheduleHourChange(value: string) {
@@ -691,47 +704,76 @@ export default function OutcomesPage() {
                 <ModelQualityChart buckets={data.model_quality_buckets || []} />
 
                 <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-                    <FilterSelect label="App" value={appFilter} onChange={updatePagedFilter(setAppFilter)} options={data.filters.apps.map((app) => ({ value: String(app.id), label: app.name }))} />
-                    <FilterSelect label="Outcome" value={outcomeFilter} onChange={updatePagedFilter(setOutcomeFilter)} options={OUTCOME_ORDER.map((state) => ({ value: state, label: outcomeLabel(state) }))} />
-                    <FilterSelect label="Provider" value={providerFilter} onChange={updatePagedFilter(setProviderFilter)} options={data.filters.providers.map((provider) => ({ value: provider, label: provider }))} />
-                    <FilterSelect label="Model" value={modelFilter} onChange={updatePagedFilter(setModelFilter)} options={data.filters.models.map((model) => ({ value: model, label: model }))} />
-                    <FilterSelect label="Run status" value={runStatusFilter} onChange={updatePagedFilter(setRunStatusFilter)} options={data.filters.run_statuses.map((status) => ({ value: status, label: status }))} />
-                    <FilterSelect label="PR state" value={prStateFilter} onChange={updatePagedFilter(setPrStateFilter)} options={data.filters.pr_states.map((state) => ({ value: state, label: state === "NO_PR" ? "No PR" : state }))} />
-                    <FilterSelect label="Rows/group" value={pageSize} onChange={handlePageSizeChange} includeAll={false} options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: `${size} rows` }))} />
-                    <button
-                      onClick={resetFilters}
-                      className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover transition-colors"
-                    >
-                      Reset
-                    </button>
-                  </div>
-                  <div className="mt-3 text-xs text-th-muted">
-                    Showing {visibleRowCount} of {filteredRowCount} matching rows across {data.pagination.total_rows} total. Each outcome group paginates independently.
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-sm font-semibold text-th-primary">Pull requests</h2>
+                      <div className="mt-1 text-xs text-th-muted">
+                        {data.pagination.total_rows} tracked row{data.pagination.total_rows === 1 ? "" : "s"}
+                      </div>
+                    </div>
+                    {!prRowsVisible && (
+                      <button
+                        onClick={handleViewPrs}
+                        className="h-9 px-3 rounded-lg bg-btn-primary text-btn-primary text-sm font-medium hover:bg-btn-primary-hover transition-colors"
+                      >
+                        View PRs
+                      </button>
+                    )}
                   </div>
                 </section>
 
-                <div className="mt-6 space-y-6">
-                  {groupedRows.map((group) => (
-                    <OutcomeGroup
-                      key={group.state}
-                      group={group}
-                      onPrevious={() => setGroupPages((current) => ({
-                        ...current,
-                        [group.state]: Math.max(1, (current[group.state] || 1) - 1),
-                      }))}
-                      onNext={() => setGroupPages((current) => ({
-                        ...current,
-                        [group.state]: (current[group.state] || 1) + 1,
-                      }))}
-                    />
-                  ))}
-                  {groupedRows.length === 0 && (
-                    <div className="border border-th rounded-xl bg-th-surface p-6 text-sm text-th-muted">
-                      No rows match the current filters.
+                {prRowsVisible && (
+                  <>
+                    <section className="mt-6 border border-th rounded-xl bg-th-surface p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+                        <FilterSelect label="App" value={appFilter} onChange={updatePagedFilter(setAppFilter)} options={data.filters.apps.map((app) => ({ value: String(app.id), label: app.name }))} />
+                        <FilterSelect label="Outcome" value={outcomeFilter} onChange={updatePagedFilter(setOutcomeFilter)} options={OUTCOME_ORDER.map((state) => ({ value: state, label: outcomeLabel(state) }))} />
+                        <FilterSelect label="Provider" value={providerFilter} onChange={updatePagedFilter(setProviderFilter)} options={data.filters.providers.map((provider) => ({ value: provider, label: provider }))} />
+                        <FilterSelect label="Model" value={modelFilter} onChange={updatePagedFilter(setModelFilter)} options={data.filters.models.map((model) => ({ value: model, label: model }))} />
+                        <FilterSelect label="Run status" value={runStatusFilter} onChange={updatePagedFilter(setRunStatusFilter)} options={data.filters.run_statuses.map((status) => ({ value: status, label: status }))} />
+                        <FilterSelect label="PR state" value={prStateFilter} onChange={updatePagedFilter(setPrStateFilter)} options={data.filters.pr_states.map((state) => ({ value: state, label: state === "NO_PR" ? "No PR" : state }))} />
+                        <FilterSelect label="Rows/group" value={pageSize} onChange={handlePageSizeChange} includeAll={false} options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: `${size} rows` }))} />
+                        <button
+                          onClick={resetFilters}
+                          className="h-9 px-3 rounded-lg bg-btn-secondary text-btn-secondary text-sm font-medium hover:bg-btn-secondary-hover transition-colors"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                      <div className="mt-3 text-xs text-th-muted">
+                        {rowsLoading
+                          ? "Loading PR rows..."
+                          : `Showing ${visibleRowCount} of ${filteredRowCount} matching rows across ${data.pagination.total_rows} total. Each outcome group paginates independently.`}
+                      </div>
+                    </section>
+
+                    <div className="mt-6 space-y-6">
+                      {rowsLoading ? (
+                        <div className="border border-th rounded-xl bg-th-surface p-6 text-sm text-th-muted">
+                          Loading PR rows...
+                        </div>
+                      ) : groupedRows.map((group) => (
+                        <OutcomeGroup
+                          key={group.state}
+                          group={group}
+                          onPrevious={() => setGroupPages((current) => ({
+                            ...current,
+                            [group.state]: Math.max(1, (current[group.state] || 1) - 1),
+                          }))}
+                          onNext={() => setGroupPages((current) => ({
+                            ...current,
+                            [group.state]: (current[group.state] || 1) + 1,
+                          }))}
+                        />
+                      ))}
+                      {!rowsLoading && groupedRows.length === 0 && (
+                        <div className="border border-th rounded-xl bg-th-surface p-6 text-sm text-th-muted">
+                          No rows match the current filters.
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
               </>
             )}
           </>

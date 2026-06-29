@@ -115,6 +115,7 @@ export async function deleteApp(appId: number, deleteFiles = false): Promise<{ s
 // --- Global outcomes ---
 
 export interface OutcomesSummaryQuery {
+  include_rows?: boolean;
   page?: number;
   page_size?: number;
   no_pr_page?: number;

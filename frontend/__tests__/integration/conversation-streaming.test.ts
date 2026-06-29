@@ -19,14 +19,34 @@ import type Database from "better-sqlite3";
 let ctx: TestContext;
 let db: Database.Database;
 
+const CONVERSATION_STREAMING_MOCKS = [
+  "@/lib/server/agent",
+  "@/lib/server/git-workflows",
+  "@/lib/server/knowledge/indexer",
+  "@/lib/server/knowledge/brief",
+  "@/lib/server/knowledge/context",
+  "@/lib/server/knowledge/preflight",
+  "@/lib/server/skills",
+  "@/lib/server/prompts/conversation",
+];
+
+function resetConversationStreamingMocks() {
+  for (const modulePath of CONVERSATION_STREAMING_MOCKS) {
+    vi.doUnmock(modulePath);
+  }
+  vi.restoreAllMocks();
+}
+
 beforeEach(async () => {
   vi.resetModules();
+  resetConversationStreamingMocks();
   ctx = createTestContext("conversation-stream-");
   db = await getTestDb(ctx);
 });
 
 afterEach(() => {
   ctx.cleanup();
+  resetConversationStreamingMocks();
 });
 
 describe("conversation streaming", () => {
@@ -465,6 +485,9 @@ describe("conversation streaming", () => {
     vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
     vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
     vi.doMock("@/lib/server/prompts/conversation", () => ({ buildConversationSystemPromptBase: () => "You are a helpful assistant." }));
+
+    const { detectGitChatIntent } = await import("@/lib/server/chat-git-intents");
+    expect(detectGitChatIntent("Please inspect the app", { hasWorkItem: false })).toEqual({ type: "none" });
 
     const { streamConversationMessage } = await import("@/lib/server/conversation");
     const stream = await streamConversationMessage(conversation.id, "Please inspect the app", "Test App", ctx.tmpDir);

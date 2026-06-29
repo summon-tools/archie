@@ -31,6 +31,7 @@ interface BuildOutcomesOptions {
   githubUnavailableWarning?: string;
   maxGithubLookups?: number | null;
   refreshGitHubState?: boolean;
+  includeRows?: boolean;
   rowFilters?: OutcomeRowFilters;
   pagination?: OutcomePaginationOptions;
   groupPagination?: OutcomeGroupPaginationOptions;
@@ -600,6 +601,7 @@ export async function buildOutcomesSummary({
   githubUnavailableWarning,
   maxGithubLookups = null,
   refreshGitHubState = true,
+  includeRows = true,
   rowFilters,
   pagination,
   groupPagination,
@@ -925,7 +927,7 @@ export async function buildOutcomesSummary({
   }
   const filteredRows = applyRowFilters(rows, rowFilters);
   const paged = paginateRows(filteredRows, rows.length, pagination);
-  const rowGroups = paginateOutcomeGroups(rows, filteredRows, groupPagination);
+  const rowGroups = includeRows ? paginateOutcomeGroups(rows, filteredRows, groupPagination) : [];
 
   return {
     generated_at: new Date().toISOString(),
@@ -933,7 +935,7 @@ export async function buildOutcomesSummary({
     costs,
     coverage: buildCoverage(rows),
     model_quality_buckets: buildModelQualityBuckets(rows),
-    rows: paged.rows,
+    rows: includeRows ? paged.rows : [],
     row_groups: rowGroups,
     pagination: paged.pagination,
     filters: buildFilters(apps, rows),

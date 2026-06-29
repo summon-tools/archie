@@ -55,9 +55,11 @@ export async function GET(request: NextRequest) {
   }, {} as Record<OutcomeState, number>);
 
   try {
+    const includeRows = request.nextUrl.searchParams.get("include_rows") !== "false";
     const summary = await buildOutcomesSummary({
       apps,
       refreshGitHubState: false,
+      includeRows,
       rowFilters: parseFilters(request),
       pagination: { page, pageSize },
       groupPagination: { pageSize, pagesByState },
