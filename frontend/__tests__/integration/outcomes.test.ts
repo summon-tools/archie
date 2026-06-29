@@ -1615,6 +1615,31 @@ describe("GET /api/outcomes/summary", () => {
     expect(noPrGroup.rows).toHaveLength(1);
     expect(body.warnings).toEqual([]);
   });
+
+  it("can omit rows from an authenticated summary response", async () => {
+    const token = await createAuthToken();
+    const work = createWorkItem({ appName: "Metadata Only API App" });
+    addRun({
+      appId: work.appId,
+      workItemId: work.workItemId,
+      conversationId: work.conversationId,
+      resultJson: JSON.stringify({ cost: 0.44 }),
+    });
+    const { GET } = await import("@/app/api/outcomes/summary/route");
+
+    const response = await GET(makeRequest("http://localhost:8080/api/outcomes/summary?include_rows=false", token));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      counts: { total_work_items: 1, no_pr_work: 1 },
+      costs: { total_known_cost_usd: 0.44, no_pr_cost_usd: 0.44 },
+      pagination: { total_rows: 1, filtered_rows: 1 },
+    });
+    expect(body.rows).toEqual([]);
+    expect(body.row_groups).toEqual([]);
+    expect(body.filters.apps).toEqual([{ id: work.appId, name: "Metadata Only API App" }]);
+  });
 });
 
 describe("POST /api/outcomes/github/sync", () => {
