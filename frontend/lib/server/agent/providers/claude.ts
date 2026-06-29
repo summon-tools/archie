@@ -92,6 +92,10 @@ function applyToolPolicy(options: Options, policy: AgentToolPolicy = "full_acces
   return options;
 }
 
+function defaultEphemeralMaxTurns(policy?: AgentToolPolicy): number {
+  return policy === "read_only_codebase" ? 15 : 1;
+}
+
 function extractResultInfo(result: SDKResultSuccess | SDKResultError): AgentResult {
   const text = result.subtype === "success" ? (result as SDKResultSuccess).result || "" : "";
   const usage = result.usage;
@@ -228,9 +232,9 @@ export class ClaudeProvider implements AgentProvider {
           persistSession: false,
           settingSources: [],
           permissionMode: "plan",
-          maxTurns: opts?.maxTurns ?? 1,
+          maxTurns: opts?.maxTurns ?? defaultEphemeralMaxTurns(opts?.toolPolicy),
         };
-        applyToolPolicy(options, opts?.toolPolicy === "read_only_codebase" ? "no_tools" : opts?.toolPolicy || "no_tools");
+        applyToolPolicy(options, opts?.toolPolicy || "no_tools");
         if (opts?.model) options.model = opts.model;
         if (opts?.abortController) options.abortController = opts.abortController;
         if (opts?.cwd) options.cwd = opts.cwd;
