@@ -216,6 +216,7 @@ describe("remote MCP route", () => {
       expect.objectContaining({
         cwd: ctx.tmpDir,
         model: "gpt-5.5",
+        maxTurns: 15,
         toolPolicy: "read_only_codebase",
       }),
     );
@@ -264,6 +265,149 @@ describe("remote MCP route", () => {
       status: "error",
       error_text: expect.stringContaining("generated provider prompt"),
     });
+  });
+
+  it("returns an actionable tool error when Codex read-only sandbox startup fails", async () => {
+    ctx.cleanup();
+    vi.resetModules();
+    ctx = createTestContext("archie-mcp-route-codex-sandbox-");
+    db = await getTestDb(ctx, {
+      getModelForCategory: (category: string) => (
+        category === "background"
+          ? { provider: "codex", model: "gpt-5.5" }
+          : { provider: "claude", model: "claude-opus-4-8" }
+      ),
+    });
+
+    const app = seedApp(db, { name: "Sandbox App", directory: ctx.tmpDir });
+    const token = await createToken(["apps:read", "project:read"], [app.id]);
+    const ephemeralQuery = vi.fn(async () => {
+      throw new Error("Codex CLI error:\nstderr:\nbwrap: loopback: Failed RTM_NEWADDR: Operation not permitted");
+    });
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => createMockProvider({
+        id: "codex",
+        ephemeralQuery,
+      })),
+    }));
+    const route = await import("@/app/api/mcp/route");
+
+    const response = await route.POST(makeRequest({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "archie_ask_project",
+        arguments: {
+          app_id: app.id,
+          question: "Which files define authentication?",
+        },
+      },
+    }, token));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain("CODEX_READ_ONLY_MODE=bypass");
+    expect(body.result.content[0].text).toContain("Failed RTM_NEWADDR");
+  });
+
+  it("treats Codex self-reports about read-only command sandbox failure as tool errors", async () => {
+    ctx.cleanup();
+    vi.resetModules();
+    ctx = createTestContext("archie-mcp-route-codex-self-report-");
+    db = await getTestDb(ctx, {
+      getModelForCategory: (category: string) => (
+        category === "background"
+          ? { provider: "codex", model: "gpt-5.5" }
+          : { provider: "claude", model: "claude-opus-4-8" }
+      ),
+    });
+
+    const app = seedApp(db, { name: "Sandbox Self Report App", directory: ctx.tmpDir });
+    const token = await createToken(["apps:read", "project:read"], [app.id]);
+    const ephemeralQuery = vi.fn(async () => (
+      "I cannot inspect this repo because rg, ls, and pwd failed with wrap: loopback: Failed RTM_NEWADDR: Operation not permitted."
+    ));
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => createMockProvider({
+        id: "codex",
+        ephemeralQuery,
+      })),
+    }));
+    const route = await import("@/app/api/mcp/route");
+
+    const response = await route.POST(makeRequest({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "archie_ask_project",
+        arguments: {
+          app_id: app.id,
+          question: "Does this project have a blog feature?",
+        },
+      },
+    }, token));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain("CODEX_READ_ONLY_MODE=bypass");
+    expect(body.result.content[0].text).toContain("Original error");
+  });
+
+  it("returns a tool error when the background model hits the project question turn budget", async () => {
+    ctx.cleanup();
+    vi.resetModules();
+    ctx = createTestContext("archie-mcp-route-claude-max-turns-");
+    db = await getTestDb(ctx, {
+      getModelForCategory: (category: string) => (
+        category === "background"
+          ? { provider: "claude", model: "claude-sonnet-4-6" }
+          : { provider: "claude", model: "claude-opus-4-8" }
+      ),
+    });
+
+    const app = seedApp(db, { name: "Claude Ask App", directory: ctx.tmpDir });
+    const token = await createToken(["apps:read", "project:read"], [app.id]);
+    const ephemeralQuery = vi.fn(async () => {
+      throw new Error("SDK query failed: error_max_turns");
+    });
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: vi.fn(() => createMockProvider({
+        id: "claude",
+        ephemeralQuery,
+      })),
+    }));
+    const route = await import("@/app/api/mcp/route");
+
+    const response = await route.POST(makeRequest({
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: {
+        name: "archie_ask_project",
+        arguments: {
+          app_id: app.id,
+          question: "Does this project have a blog feature?",
+        },
+      },
+    }, token));
+
+    expect(ephemeralQuery).toHaveBeenCalledWith(
+      expect.stringContaining("Does this project have a blog feature?"),
+      expect.objectContaining({
+        cwd: ctx.tmpDir,
+        model: "claude-sonnet-4-6",
+        maxTurns: 15,
+        toolPolicy: "read_only_codebase",
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain("turn budget");
   });
 
   it("rejects cross-origin browser requests", async () => {

@@ -49,6 +49,33 @@ function resolveModelSelection(args: Record<string, unknown>, category: ModelCat
   return { provider, model };
 }
 
+function isCodexReadOnlySandboxFailure(value: unknown): boolean {
+  const text = value instanceof Error ? value.message : String(value ?? "");
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("failed rtm_newaddr") ||
+    lower.includes("bubblewrap") ||
+    lower.includes("bwrap") ||
+    lower.includes("wrap: loopback") ||
+    (lower.includes("loopback") && lower.includes("operation not permitted"))
+  );
+}
+
+function codexReadOnlySandboxHint(value: unknown): string {
+  const original = value instanceof Error ? value.message : String(value ?? "");
+  const tail = original.trim().slice(-1200);
+  return [
+    "Codex read-only project inspection is blocked by the host sandbox.",
+    "On RunPod, Docker, or other restricted Linux/container hosts, set CODEX_READ_ONLY_MODE=bypass in Archie .env and restart the Archie service. This keeps Archie asking Codex to operate read-only, but disables Codex's inner Bubblewrap sandbox and relies on the host/container boundary instead.",
+    tail ? `Original error: ${tail}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function isProviderMaxTurnsFailure(value: unknown): boolean {
+  const text = value instanceof Error ? value.message : String(value ?? "");
+  return text.toLowerCase().includes("error_max_turns");
+}
+
 function proxyUrl(baseUrl: string, port: number | null | undefined): string | null {
   return port ? `${baseUrl.replace(/\/+$/, "")}/api/p/${port}` : null;
 }
@@ -316,17 +343,32 @@ async function askProject(args: Record<string, unknown>, ctx: McpHandlerContext)
     "",
     question,
   ].join("\n");
-  const answer = await provider.ephemeralQuery(prompt, {
-    cwd: app.directory,
-    model,
-    toolPolicy: "read_only_codebase",
-  });
+  let answer: string;
+  try {
+    answer = await provider.ephemeralQuery(prompt, {
+      cwd: app.directory,
+      model,
+      maxTurns: 15,
+      toolPolicy: "read_only_codebase",
+    });
+  } catch (error) {
+    if (providerId === "codex" && isCodexReadOnlySandboxFailure(error)) {
+      throw new McpToolError(codexReadOnlySandboxHint(error), 502);
+    }
+    if (isProviderMaxTurnsFailure(error)) {
+      throw new McpToolError("The background model hit its turn budget while answering this project question. Archie now sends a larger read-only inspection budget for project questions; if this continues, simplify the question or increase the provider maxTurns for this tool.", 502);
+    }
+    throw error;
+  }
   const normalizedAnswer = answer.trim();
   if (!normalizedAnswer) {
     throw new McpToolError("archie_ask_project completed without an answer from the provider", 502);
   }
   if (normalizedAnswer === prompt.trim()) {
     throw new McpToolError("archie_ask_project received the generated provider prompt instead of an answer", 502);
+  }
+  if (providerId === "codex" && isCodexReadOnlySandboxFailure(normalizedAnswer)) {
+    throw new McpToolError(codexReadOnlySandboxHint(normalizedAnswer), 502);
   }
   return mcpTextResult(normalizedAnswer, {
     answer: normalizedAnswer,
