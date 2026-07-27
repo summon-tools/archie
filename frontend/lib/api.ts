@@ -268,11 +268,12 @@ export async function streamConversationMessage(
   retry?: boolean,
   provider?: string,
   fileIds: number[] = [],
+  effort?: import("@/lib/effort").EffortLevel,
 ): Promise<Response> {
   const res = await fetch(`${BASE}/apps/${appId}/conversations/${conversationId}/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, model, provider, retry: retry || undefined, file_ids: fileIds.length ? fileIds : undefined }),
+    body: JSON.stringify({ content, model, provider, effort, retry: retry || undefined, file_ids: fileIds.length ? fileIds : undefined }),
   });
   if (res.status === 401) {
     window.location.href = "/login";

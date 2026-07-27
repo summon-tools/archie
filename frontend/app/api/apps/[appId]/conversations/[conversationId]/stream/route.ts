@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isEffortLevel } from "@/lib/effort";
 import { streamConversationMessage } from "@/lib/server/conversation";
 import { handleRoomRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireConversationAccess } from "@/lib/server/room-route-utils";
 
@@ -11,7 +12,7 @@ export async function POST(
     const access = await requireConversationAccess(request, appId, conversationId);
 
     const body = await readJsonBody(request);
-    const { content, model, provider, retry } = body;
+    const { content, model, provider, retry, effort } = body;
     const fileIds = parseFileIds(body.file_ids);
 
     if ((!content || typeof content !== "string") && fileIds.length === 0) {
@@ -32,6 +33,8 @@ export async function POST(
       !!retry,
       typeof provider === "string" ? provider : undefined,
       fileIds,
+      undefined,
+      isEffortLevel(effort) ? effort : undefined,
     );
 
     return new Response(stream, {

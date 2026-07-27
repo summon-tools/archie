@@ -5,12 +5,14 @@
 
 import { getProvider } from "./agent";
 import { getModelForCategory, type ModelCategory } from "./config";
+import type { EffortLevel } from "@/lib/effort";
 
 // Re-export types for existing callers
 export type { ToolStreamEvent as ToolActivity } from "./agent";
 
 export interface ToolEnabledQueryOptions {
   model?: string;
+  effort?: EffortLevel;
   maxTurns?: number;
   abortController?: AbortController;
   cwd?: string;
@@ -23,7 +25,7 @@ export interface ToolEnabledQueryOptions {
  */
 export async function runEphemeralQuery(
   prompt: string,
-  opts?: { model?: string; maxTurns?: number; abortController?: AbortController; category?: ModelCategory }
+  opts?: { model?: string; effort?: EffortLevel; maxTurns?: number; abortController?: AbortController; category?: ModelCategory }
 ): Promise<string> {
   const category = opts?.category || "background";
   const resolved = getModelForCategory(category);

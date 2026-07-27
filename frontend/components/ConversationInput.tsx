@@ -4,6 +4,7 @@ import ChatInput from "@/components/ChatInput";
 import ToolActivity from "@/components/ToolActivity";
 import { ToolActivity as ToolActivityType } from "@/hooks/useConversation";
 import type { AppFile } from "@/lib/types";
+import type { EffortLevel } from "@/lib/effort";
 import { tools } from "@/tools/registry";
 import type { ToolState } from "@/tools/types";
 
@@ -21,7 +22,9 @@ interface ConversationInputProps {
   handleStopClaude: () => void;
   selectedModel: string;
   selectedProvider: string;
+  selectedEffort: EffortLevel;
   handleModelChange: (provider: string, model: string) => void;
+  handleEffortChange: (effort: EffortLevel) => void;
   availableModels?: { id: string; label: string; provider: string }[];
   toolStates?: Map<string, ToolState>;
   pinnedToolId?: string | null;
@@ -44,7 +47,9 @@ export default function ConversationInput({
   handleStopClaude,
   selectedModel,
   selectedProvider,
+  selectedEffort,
   handleModelChange,
+  handleEffortChange,
   availableModels,
   toolStates,
   pinnedToolId,
@@ -83,7 +88,9 @@ export default function ConversationInput({
         onStop={busyTool ? busyTool[1].cancel : handleStopClaude}
         model={selectedModel}
         provider={selectedProvider}
+        effort={selectedEffort}
         onModelChange={handleModelChange}
+        onEffortChange={handleEffortChange}
         availableModels={availableModels}
         tools={tools}
         pinnedToolId={pinnedToolId}

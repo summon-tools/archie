@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import useSWR from "swr";
 import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER } from "@/lib/models";
+import { DEFAULT_EFFORT, isEffortLevel, type EffortLevel } from "@/lib/effort";
 import { fetcher } from "@/lib/swr";
 
 const STORAGE_KEY = "archie-model-selection";
@@ -11,9 +12,10 @@ const LEGACY_KEY = "claudia-model";
 interface ModelSelection {
   provider: string;
   model: string;
+  effort: EffortLevel;
 }
 
-const DEFAULT_SELECTION: ModelSelection = { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL_ID };
+const DEFAULT_SELECTION: ModelSelection = { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL_ID, effort: DEFAULT_EFFORT };
 
 function loadStoredSelection(): { hasLocalOverride: boolean; selection: ModelSelection } {
   if (typeof window === "undefined") {
@@ -25,14 +27,22 @@ function loadStoredSelection(): { hasLocalOverride: boolean; selection: ModelSel
     try {
       const parsed = JSON.parse(stored) as Partial<ModelSelection>;
       if (parsed.provider && parsed.model) {
-        return { hasLocalOverride: true, selection: { provider: parsed.provider, model: parsed.model } };
+        const selection: ModelSelection = {
+          provider: parsed.provider,
+          model: parsed.model,
+          effort: isEffortLevel(parsed.effort) ? parsed.effort : DEFAULT_EFFORT,
+        };
+        if (!isEffortLevel(parsed.effort)) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
+        }
+        return { hasLocalOverride: true, selection };
       }
     } catch {}
   }
   // Migrate from legacy key
   const legacy = localStorage.getItem(LEGACY_KEY);
   if (legacy) {
-    const selection = { provider: "claude", model: legacy };
+    const selection = { provider: "claude", model: legacy, effort: DEFAULT_EFFORT };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
     localStorage.removeItem(LEGACY_KEY);
     return { hasLocalOverride: true, selection };
@@ -63,8 +73,7 @@ export function useSelectedModel() {
     ? selection.model
     : (config?.defaultModel || selection.model);
 
-  const handleModelChange = useCallback((provider: string, model: string) => {
-    const next = { provider, model };
+  const persistSelection = useCallback((next: ModelSelection) => {
     setSelection(next);
     setHasLocalOverride(true);
     if (typeof window !== "undefined") {
@@ -72,9 +81,19 @@ export function useSelectedModel() {
     }
   }, []);
 
+  const handleModelChange = useCallback((provider: string, model: string) => {
+    persistSelection({ ...selection, provider, model });
+  }, [persistSelection, selection]);
+
+  const handleEffortChange = useCallback((effort: EffortLevel) => {
+    persistSelection({ provider: effectiveProvider, model: effectiveModel, effort });
+  }, [effectiveModel, effectiveProvider, persistSelection]);
+
   return {
     selectedModel: effectiveModel,
     selectedProvider: effectiveProvider,
+    selectedEffort: selection.effort,
     handleModelChange,
+    handleEffortChange,
   };
 }

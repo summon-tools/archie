@@ -3,8 +3,10 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { Stop, SpinnerGap, ArrowUp, Lightning, X } from "@phosphor-icons/react";
 import { AttachmentUploadTray } from "@/components/Attachments";
+import EffortPicker from "@/components/EffortPicker";
 import ModelPicker from "@/components/ModelPicker";
 import { fetchGlobalSkillSummaries } from "@/lib/api";
+import type { EffortLevel } from "@/lib/effort";
 import type { AppFile, GlobalSkillSummary } from "@/lib/types";
 import type { Tool } from "@/tools/types";
 
@@ -20,7 +22,9 @@ interface ChatInputProps {
   onStop?: () => void;
   model?: string;
   provider?: string;
+  effort?: EffortLevel;
   onModelChange?: (provider: string, model: string) => void;
+  onEffortChange?: (effort: EffortLevel) => void;
   availableModels?: { id: string; label: string; provider: string }[];
   tools?: Tool[];
   pinnedToolId?: string | null;
@@ -45,7 +49,9 @@ export default function ChatInput({
   onStop,
   model,
   provider,
+  effort,
   onModelChange,
+  onEffortChange,
   availableModels,
   tools: availableTools,
   pinnedToolId,
@@ -315,16 +321,24 @@ export default function ChatInput({
 
             {/* Model selector — pushed to the right */}
             {model && onModelChange && availableModels && (
-              <ModelPicker
-                className="ml-auto flex items-center"
-                model={model}
-                provider={provider || "claude"}
-                availableModels={availableModels}
-                onChange={onModelChange}
-                placement="above-right"
-                variant="compact"
-                onAfterChange={() => window.setTimeout(() => textareaRef.current?.focus(), 0)}
-              />
+              <div className="ml-auto flex items-center gap-1">
+                <ModelPicker
+                  model={model}
+                  provider={provider || "claude"}
+                  availableModels={availableModels}
+                  onChange={onModelChange}
+                  placement="above-right"
+                  variant="compact"
+                  onAfterChange={() => window.setTimeout(() => textareaRef.current?.focus(), 0)}
+                />
+                {effort && onEffortChange && (
+                  <EffortPicker
+                    effort={effort}
+                    onChange={onEffortChange}
+                    disabled={disabled || isLoading || toolsBusy}
+                  />
+                )}
+              </div>
             )}
 
           </div>

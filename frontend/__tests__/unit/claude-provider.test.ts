@@ -34,6 +34,7 @@ describe("ClaudeProvider", () => {
     const result = await provider.ephemeralQuery("Inspect the project", {
       cwd: "/tmp/example-project",
       toolPolicy: "read_only_codebase",
+      effort: "max",
     });
 
     expect(result).toBe("Project answer");
@@ -44,6 +45,7 @@ describe("ClaudeProvider", () => {
       tools: ["Read", "Glob", "Grep", "LS"],
       allowedTools: ["Read", "Glob", "Grep", "LS"],
       disallowedTools: expect.arrayContaining(["Bash", "Write", "Edit", "Task"]),
+      effort: "max",
     });
     expect(capturedOptions.allowDangerouslySkipPermissions).toBeUndefined();
     expect(close).toHaveBeenCalled();

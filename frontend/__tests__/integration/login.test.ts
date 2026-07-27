@@ -31,8 +31,8 @@ async function setupDbWithUser() {
     PREVIEW_PORT_MAX: 9050,
     CLAUDE_DANGEROUS_PERMISSIONS: true,
     getProjectsDir: () => tmpDir,
-    getDefaultModel: () => "claude-opus-4-8",
-    getBackgroundModel: () => "claude-opus-4-8",
+    getDefaultModel: () => "claude-opus-5",
+    getBackgroundModel: () => "claude-opus-5",
   }));
 
   const { getDb } = await import("@/lib/server/db");

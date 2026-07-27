@@ -5,6 +5,7 @@
 
 import { spawn, type ChildProcess } from "child_process";
 import { execSync } from "child_process";
+import type { EffortLevel } from "@/lib/effort";
 import type {
   AgentProvider,
   AgentStreamEvent,
@@ -18,14 +19,20 @@ import type {
 } from "../types";
 
 const CODEX_MODELS: ModelEntry[] = [
-  { id: "gpt-5.5", label: "GPT-5.5", provider: "codex" },
-  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "codex" },
-  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", provider: "codex" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: "codex" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "codex" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "codex" },
 ];
 
 const ERROR_DETAIL_LIMIT = 8000;
 const CAPTURED_STREAM_LIMIT = 12000;
 type CodexSandboxMode = "bypass" | "read-only" | "workspace-write" | "danger-full-access";
+const CODEX_EFFORTS: Record<EffortLevel, "low" | "medium" | "high" | "xhigh"> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  max: "xhigh",
+};
 
 function appendBounded(current: string, next: string, limit = CAPTURED_STREAM_LIMIT): string {
   const combined = current + next;
@@ -480,11 +487,16 @@ function appendSandboxArgs(args: string[], mode: CodexSandboxMode): void {
   }
 }
 
-export function buildCodexExecArgs(model?: string, cwd?: string, toolPolicy: AgentToolPolicy = "full_access"): string[] {
+export function buildCodexExecArgs(
+  model?: string,
+  cwd?: string,
+  toolPolicy: AgentToolPolicy = "full_access",
+  effort?: EffortLevel,
+): string[] {
   const args = ["exec", "--json"];
   appendSandboxArgs(args, sandboxModeForPolicy(toolPolicy));
   // Override reasoning effort to avoid inheriting invalid user config values
-  args.push("-c", "model_reasoning_effort=high");
+  args.push("-c", `model_reasoning_effort=${effort ? CODEX_EFFORTS[effort] : "high"}`);
   if (!isGitRepo(cwd)) {
     args.push("--skip-git-repo-check");
   }
@@ -514,7 +526,7 @@ export class CodexCliProvider implements AgentProvider {
   readonly label = "Codex CLI";
 
   async *streamTask(params: StreamTaskParams): AsyncGenerator<AgentStreamEvent> {
-    const args = buildCodexExecArgs(params.model, params.cwd);
+    const args = buildCodexExecArgs(params.model, params.cwd, "full_access", params.effort);
     const repoFingerprintBefore = getRepoFingerprint(params.cwd);
 
     const { child, errorPromise } = spawnCodex(args, params.cwd, params.abortController, params.prompt);
@@ -562,7 +574,7 @@ export class CodexCliProvider implements AgentProvider {
     // Codex CLI >=0.22 removed the `resume` subcommand. Fall back to a fresh
     // `exec` session with the full prompt (which already contains conversation
     // context assembled by the caller).
-    const args = buildCodexExecArgs(params.model, params.cwd);
+    const args = buildCodexExecArgs(params.model, params.cwd, "full_access", params.effort);
     const repoFingerprintBefore = getRepoFingerprint(params.cwd);
 
     const { child, errorPromise } = spawnCodex(args, params.cwd, params.abortController, params.prompt);
@@ -604,7 +616,12 @@ export class CodexCliProvider implements AgentProvider {
   }
 
   async ephemeralQuery(prompt: string, opts?: EphemeralOpts): Promise<string> {
-    const args = buildCodexExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy === "full_access" ? "full_access" : "read_only_codebase");
+    const args = buildCodexExecArgs(
+      opts?.model,
+      opts?.cwd,
+      opts?.toolPolicy === "full_access" ? "full_access" : "read_only_codebase",
+      opts?.effort,
+    );
 
     const { child, errorPromise } = spawnCodex(args, opts?.cwd, opts?.abortController, prompt);
 
@@ -648,7 +665,7 @@ export class CodexCliProvider implements AgentProvider {
   }
 
   async *toolEnabledStream(prompt: string, opts?: EphemeralOpts): AsyncGenerator<ToolStreamEvent> {
-    const args = buildCodexExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy);
+    const args = buildCodexExecArgs(opts?.model, opts?.cwd, opts?.toolPolicy, opts?.effort);
 
     const { child, errorPromise } = spawnCodex(args, opts?.cwd, opts?.abortController, prompt);
 

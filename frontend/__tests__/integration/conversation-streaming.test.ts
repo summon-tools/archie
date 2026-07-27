@@ -185,7 +185,7 @@ describe("conversation streaming", () => {
           durationMs: 50,
           numTurns: 1,
           usage: { inputTokens: 10, outputTokens: 5 },
-          models: ["gpt-5.5"],
+          models: ["gpt-5.6-sol"],
         },
       };
     });
@@ -199,7 +199,7 @@ describe("conversation streaming", () => {
           durationMs: 50,
           numTurns: 1,
           usage: { inputTokens: 10, outputTokens: 5 },
-          models: ["claude-sonnet-4-6"],
+          models: ["claude-sonnet-5"],
         },
       };
     });
@@ -220,10 +220,13 @@ describe("conversation streaming", () => {
       "Implement with the configured implementer.",
       "Test App",
       ctx.tmpDir,
-      "gpt-5.5",
+      "gpt-5.6-sol",
       undefined,
       false,
       "codex",
+      [],
+      undefined,
+      "max",
     );
 
     const reader = stream.getReader();
@@ -235,7 +238,8 @@ describe("conversation streaming", () => {
     expect(getProvider).toHaveBeenCalledWith("codex");
     expect(resumeSession).not.toHaveBeenCalled();
     expect(streamTask).toHaveBeenCalledWith(expect.objectContaining({
-      model: "gpt-5.5",
+      model: "gpt-5.6-sol",
+      effort: "max",
     }));
 
     const session = db.prepare("SELECT * FROM agent_sessions WHERE conversation_id = ?").get(conversation.id) as any;
@@ -245,7 +249,7 @@ describe("conversation streaming", () => {
     const run = db.prepare("SELECT * FROM runs WHERE conversation_id = ? ORDER BY id DESC LIMIT 1").get(conversation.id) as any;
     expect(run).toMatchObject({
       provider_id: "codex",
-      model_id: "gpt-5.5",
+      model_id: "gpt-5.6-sol",
       status: "completed",
     });
     expect(JSON.parse(run.result_json)).toMatchObject({
@@ -281,7 +285,7 @@ describe("conversation streaming", () => {
       "Read the attached screenshot.",
       "Test App",
       ctx.tmpDir,
-      "gpt-5.5",
+      "gpt-5.6-sol",
       undefined,
       false,
       "codex",
@@ -304,7 +308,7 @@ describe("conversation streaming", () => {
     expect(status.last_error).toMatchObject({
       category: "execution_environment",
       provider_id: "codex",
-      model_id: "gpt-5.5",
+      model_id: "gpt-5.6-sol",
       detail: sandboxError,
     });
 

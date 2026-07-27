@@ -124,7 +124,7 @@ async function attachCompletedImplementation(stepId: number, appId: number) {
   sessionsDal.upsertSessionForConversation(conversation.id, {
     provider_id: "codex",
     status: "completed",
-    last_model_id: "gpt-5.5",
+    last_model_id: "gpt-5.6-sol",
   });
   roomsDal.updatePlanStep(stepId, {
     linked_conversation_id: conversation.id,
@@ -389,7 +389,7 @@ describe("rooms API", () => {
         role: "agent",
         agent_key: JSON.parse(userMessage.payload_json).target_agent_key,
         body_md: "Hello room",
-        payload_json: JSON.stringify({ provider_id: "claude", model_id: "claude-opus-4-7" }),
+        payload_json: JSON.stringify({ provider_id: "claude", model_id: "claude-opus-5" }),
       });
     });
     vi.doMock("@/lib/server/room-agents", () => ({ createRoomAgentReplyStream }));
@@ -575,7 +575,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("<latest_user_message>\nWho am I talking to?"),
       expect.objectContaining({
-        model: "claude-opus-4-8",
+        model: "claude-opus-5",
         cwd: "/tmp/test-app",
         maxTurns: 6,
         toolPolicy: "read_only_codebase",
@@ -590,7 +590,7 @@ describe("rooms API", () => {
     expect(run).toMatchObject({
       agent_key: "coordinator",
       status: "completed",
-      model_id: "claude-opus-4-8",
+      model_id: "claude-opus-5",
       tool_policy_json: JSON.stringify({ mode: "planning_chat", tools: "read_only_codebase" }),
     });
     expect(JSON.parse(run.result_json).events[0]).toMatchObject({ type: "tool_use", tool: "Grep" });
@@ -633,7 +633,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("You are the Architect agent inside an Archie planning room"),
       expect.objectContaining({
-        model: "claude-opus-4-7",
+        model: "claude-opus-5",
         cwd: "/tmp/test-app",
         maxTurns: 6,
         toolPolicy: "read_only_codebase",
@@ -648,7 +648,7 @@ describe("rooms API", () => {
     expect(run).toMatchObject({
       agent_key: "architect",
       status: "completed",
-      model_id: "claude-opus-4-7",
+      model_id: "claude-opus-5",
     });
   });
 
@@ -662,7 +662,7 @@ describe("rooms API", () => {
       role: "Custom architecture reviewer for this workspace.",
       prompt: "Always check route shape before giving architecture advice.",
       provider_id: "codex",
-      model_id: "gpt-5.5",
+      model_id: "gpt-5.6-sol",
     });
     const userMessage = roomsDal.createRoomMessage({
       room_id: room.id,
@@ -681,8 +681,8 @@ describe("rooms API", () => {
     vi.doMock("@/lib/server/agent", () => ({
       getProvider,
       getAllModels: vi.fn(() => [
-        { id: "claude-opus-4-7", label: "Opus 4.7", provider: "claude" },
-        { id: "gpt-5.5", label: "GPT-5.5", provider: "codex" },
+        { id: "claude-opus-5", label: "Opus 5", provider: "claude" },
+        { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "codex" },
       ]),
     }));
     const { createRoomAgentReply } = await import("@/lib/server/room-agents");
@@ -696,7 +696,7 @@ describe("rooms API", () => {
     expect(getProvider).toHaveBeenCalledWith("codex");
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Custom architecture reviewer for this workspace."),
-      expect.objectContaining({ model: "gpt-5.5" }),
+      expect.objectContaining({ model: "gpt-5.6-sol" }),
     );
     const [prompt] = toolEnabledStream.mock.calls[0] as unknown as [string];
     expect(prompt).toContain("Always check route shape before giving architecture advice.");
@@ -705,7 +705,7 @@ describe("rooms API", () => {
     expect(run).toMatchObject({
       agent_key: "architect",
       provider_id: "codex",
-      model_id: "gpt-5.5",
+      model_id: "gpt-5.6-sol",
     });
   });
 
@@ -720,7 +720,7 @@ describe("rooms API", () => {
           agent_key: "reviewer",
           role: "Workspace-specific reviewer.",
           prompt: "Prioritize regression risk across rooms.",
-          model_id: "gpt-5.5",
+          model_id: "gpt-5.6-sol",
         },
       }),
     );
@@ -732,7 +732,7 @@ describe("rooms API", () => {
       role: "Workspace-specific reviewer.",
       prompt: "Prioritize regression risk across rooms.",
       defaultProvider: "codex",
-      defaultModel: "gpt-5.5",
+      defaultModel: "gpt-5.6-sol",
       isCustomized: true,
     });
 
@@ -740,9 +740,9 @@ describe("rooms API", () => {
       makeRequest("http://localhost:8080/api/settings/agents", { token }),
     );
     const getBody = await getResponse.json();
-    expect(getBody.availableModels.some((model: any) => model.id === "gpt-5.5")).toBe(true);
+    expect(getBody.availableModels.some((model: any) => model.id === "gpt-5.6-sol")).toBe(true);
     expect(getBody.agents.find((agent: any) => agent.key === "reviewer")).toMatchObject({
-      defaultModel: "gpt-5.5",
+      defaultModel: "gpt-5.6-sol",
       isCustomized: true,
     });
   });
@@ -818,7 +818,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Update the room planning context summary"),
       expect.objectContaining({
-        model: "claude-opus-4-7",
+        model: "claude-opus-5",
         cwd: "/tmp/test-app",
         maxTurns: 3,
         toolPolicy: "read_only_codebase",
@@ -885,7 +885,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Return ONLY valid JSON"),
       expect.objectContaining({
-        model: "claude-opus-4-8",
+        model: "claude-opus-5",
         cwd: "/tmp/test-app",
         maxTurns: 8,
         toolPolicy: "read_only_codebase",
@@ -922,7 +922,7 @@ describe("rooms API", () => {
     expect(run).toMatchObject({
       agent_key: "coordinator",
       status: "completed",
-      model_id: "claude-opus-4-8",
+      model_id: "claude-opus-5",
       tool_policy_json: JSON.stringify({ mode: "plan_generation", tools: "read_only_codebase" }),
     });
     expect(JSON.parse(run.result_json)).toMatchObject({
@@ -993,7 +993,7 @@ describe("rooms API", () => {
     expect(ephemeralQuery).toHaveBeenCalledWith(
       expect.stringContaining("Convert the following plan-generator output into the required JSON object."),
       expect.objectContaining({
-        model: "claude-opus-4-8",
+        model: "claude-opus-5",
         cwd: "/tmp/test-app",
         maxTurns: 1,
         toolPolicy: "no_tools",
@@ -1173,7 +1173,7 @@ describe("rooms API", () => {
     expect(toolEnabledStream).toHaveBeenCalledWith(
       expect.stringContaining("Recent room messages:"),
       expect.objectContaining({
-        model: "claude-opus-4-8",
+        model: "claude-opus-5",
         cwd: "/tmp/test-app",
         maxTurns: 8,
         toolPolicy: "read_only_codebase",
@@ -1550,7 +1550,7 @@ describe("rooms API", () => {
       expect.stringContaining("Implement only the routed step."),
       "Test App",
       "/tmp/test-app",
-      "gpt-5.5",
+      "gpt-5.6-sol",
       undefined,
       true,
       "codex",
@@ -1577,7 +1577,7 @@ describe("rooms API", () => {
     sessionsDal.upsertSessionForConversation(conversation.id, {
       provider_id: "codex",
       status: "failed",
-      last_model_id: "gpt-5.5",
+      last_model_id: "gpt-5.6-sol",
     });
     const { schedulePlanStepImplementation } = await import("@/lib/server/plan-execution");
 
@@ -1671,7 +1671,7 @@ describe("rooms API", () => {
       expect.stringContaining("Tighten the test coverage before advancing."),
       "Test App",
       "/tmp/test-app",
-      "gpt-5.5",
+      "gpt-5.6-sol",
       undefined,
       false,
       "codex",
@@ -1750,7 +1750,7 @@ describe("rooms API", () => {
       expect.stringContaining("failed to produce a usable result"),
       "Test App",
       "/tmp/test-app",
-      "gpt-5.5",
+      "gpt-5.6-sol",
       undefined,
       false,
       "codex",
