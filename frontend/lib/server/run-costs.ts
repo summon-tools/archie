@@ -46,6 +46,21 @@ const DEFAULT_MODEL_PRICING: Array<{
 }> = [
   {
     providerId: "codex",
+    modelId: "gpt-5.6-sol",
+    rate: { inputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.5, outputUsdPerMillion: 30 },
+  },
+  {
+    providerId: "codex",
+    modelId: "gpt-5.6-terra",
+    rate: { inputUsdPerMillion: 2.5, cachedInputUsdPerMillion: 0.25, outputUsdPerMillion: 15 },
+  },
+  {
+    providerId: "codex",
+    modelId: "gpt-5.6-luna",
+    rate: { inputUsdPerMillion: 1, cachedInputUsdPerMillion: 0.1, outputUsdPerMillion: 6 },
+  },
+  {
+    providerId: "codex",
     modelId: "gpt-5.5",
     rate: { inputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.5, outputUsdPerMillion: 30 },
   },
@@ -143,6 +158,15 @@ function getPricingRate(providerId: string | null, modelId: string | null): Pric
   }
   if (provider === "codex" && model.startsWith("gpt-5.5")) {
     return DEFAULT_MODEL_PRICING.find((entry) => entry.providerId === "codex" && entry.modelId === "gpt-5.5")?.rate || null;
+  }
+  if (provider === "codex" && model.startsWith("gpt-5.6-sol")) {
+    return DEFAULT_MODEL_PRICING.find((entry) => entry.providerId === "codex" && entry.modelId === "gpt-5.6-sol")?.rate || null;
+  }
+  if (provider === "codex" && model.startsWith("gpt-5.6-terra")) {
+    return DEFAULT_MODEL_PRICING.find((entry) => entry.providerId === "codex" && entry.modelId === "gpt-5.6-terra")?.rate || null;
+  }
+  if (provider === "codex" && model.startsWith("gpt-5.6-luna")) {
+    return DEFAULT_MODEL_PRICING.find((entry) => entry.providerId === "codex" && entry.modelId === "gpt-5.6-luna")?.rate || null;
   }
 
   return null;

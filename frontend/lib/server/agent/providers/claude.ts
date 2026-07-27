@@ -5,6 +5,7 @@
 
 import type { Options, SDKResultSuccess, SDKResultError, Query } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_DANGEROUS_PERMISSIONS } from "../../config";
+import type { EffortLevel } from "@/lib/effort";
 import type {
   AgentProvider,
   AgentStreamEvent,
@@ -23,9 +24,8 @@ if (!process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
 }
 
 const CLAUDE_MODELS: ModelEntry[] = [
-  { id: "claude-opus-4-8", label: "Opus 4.8", provider: "claude" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", provider: "claude" },
-  { id: "claude-opus-4-7", label: "Opus 4.7", provider: "claude" },
+  { id: "claude-opus-5", label: "Opus 5", provider: "claude" },
+  { id: "claude-sonnet-5", label: "Sonnet 5", provider: "claude" },
 ];
 
 const CLAUDE_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "LS"] as const;
@@ -42,6 +42,12 @@ const CLAUDE_BLOCKED_PLANNING_TOOLS = [
   "WebFetch",
   "WebSearch",
 ];
+const CLAUDE_EFFORTS: Record<EffortLevel, "low" | "medium" | "high" | "max"> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  max: "max",
+};
 
 // Cached SDK query function
 let _sdkQuery: ((args: { prompt: string; options: Options }) => Query) | null = null;
@@ -92,6 +98,11 @@ function applyToolPolicy(options: Options, policy: AgentToolPolicy = "full_acces
   return options;
 }
 
+function applyEffort(options: Options, effort?: EffortLevel): Options {
+  if (effort) options.effort = CLAUDE_EFFORTS[effort];
+  return options;
+}
+
 function defaultEphemeralMaxTurns(policy?: AgentToolPolicy): number {
   return policy === "read_only_codebase" ? 15 : 1;
 }
@@ -139,6 +150,7 @@ export class ClaudeProvider implements AgentProvider {
     if (params.abortController) opts.abortController = params.abortController;
     opts.includePartialMessages = true;
     if (params.model) opts.model = params.model;
+    applyEffort(opts, params.effort);
 
     const q = sdkQuery({ prompt: params.prompt, options: opts });
 
@@ -236,6 +248,7 @@ export class ClaudeProvider implements AgentProvider {
         };
         applyToolPolicy(options, opts?.toolPolicy || "no_tools");
         if (opts?.model) options.model = opts.model;
+        applyEffort(options, opts?.effort);
         if (opts?.abortController) options.abortController = opts.abortController;
         if (opts?.cwd) options.cwd = opts.cwd;
 
@@ -287,6 +300,7 @@ export class ClaudeProvider implements AgentProvider {
     };
     applyToolPolicy(options, opts?.toolPolicy);
     if (opts?.model) options.model = opts.model;
+    applyEffort(options, opts?.effort);
     if (opts?.abortController) options.abortController = opts.abortController;
     if (opts?.cwd) options.cwd = opts.cwd;
 

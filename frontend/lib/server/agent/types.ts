@@ -3,6 +3,8 @@
  * All providers (Claude, Codex, etc.) emit these unified event types.
  */
 
+import type { EffortLevel } from "@/lib/effort";
+
 export type AgentStreamEvent =
   | { type: "text"; text: string }
   | { type: "activity"; activity: AgentActivity }
@@ -49,6 +51,7 @@ export interface StreamTaskParams {
   prompt: string;
   cwd?: string;
   model?: string;
+  effort?: EffortLevel;
   abortController?: AbortController;
 }
 
@@ -58,6 +61,7 @@ export interface ResumeSessionParams extends StreamTaskParams {
 
 export interface EphemeralOpts {
   model?: string;
+  effort?: EffortLevel;
   maxTurns?: number;
   cwd?: string;
   abortController?: AbortController;

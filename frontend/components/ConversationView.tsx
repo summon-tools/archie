@@ -108,7 +108,13 @@ export default function ConversationView({
   }, [appId]);
 
   // --- Hooks ---
-  const { selectedModel, selectedProvider, handleModelChange } = useSelectedModel();
+  const {
+    selectedModel,
+    selectedProvider,
+    selectedEffort,
+    handleModelChange,
+    handleEffortChange,
+  } = useSelectedModel();
 
   const {
     pushBranch,
@@ -132,6 +138,7 @@ export default function ConversationView({
     onItemUpdate,
     selectedModel,
     selectedProvider,
+    selectedEffort,
   });
 
   const { autoScroll, setAutoScroll, logEndRef } = useAutoScroll([
@@ -319,7 +326,9 @@ export default function ConversationView({
           handleStopClaude={conversation.handleStopClaude}
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
+          selectedEffort={selectedEffort}
           handleModelChange={handleModelChange}
+          handleEffortChange={handleEffortChange}
           availableModels={modelConfig?.availableModels}
           toolStates={toolStates}
           pinnedToolId={pinnedToolId}

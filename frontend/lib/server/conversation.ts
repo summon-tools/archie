@@ -23,6 +23,7 @@ import { cleanupMaterializedFilesForContext, formatAttachmentContext, materializ
 import type { AppFileRow } from "./types";
 import { detectGitChatIntent, type GitChatIntent } from "./chat-git-intents";
 import { buildGlobalSkillPromptContext } from "./global-skills";
+import type { EffortLevel } from "@/lib/effort";
 import {
   pullAppDefaultBranch,
   pullWorkItemBranch,
@@ -495,6 +496,7 @@ export async function streamConversationMessage(
   providerId?: string,
   fileIds: number[] = [],
   messageSource?: ConversationMessageSource,
+  effort?: EffortLevel,
 ): Promise<ReadableStream<Uint8Array>> {
   // Abort existing query on this conversation
   if (_conversationQueries.has(conversationId)) {
@@ -711,6 +713,7 @@ export async function streamConversationMessage(
     input_json: JSON.stringify({
       content,
       global_skill_slugs: globalSkillsContext.activeSkills.map((skill) => skill.slug),
+      effort: effort || null,
     }),
     budget_json: JSON.stringify(budget),
   });
@@ -723,8 +726,8 @@ export async function streamConversationMessage(
   // Get the event stream from the provider
   const provider = getProvider(resolvedProviderId);
   const events = sessionId
-    ? provider.resumeSession({ prompt, cwd: streamCwd, model, sessionId, abortController })
-    : provider.streamTask({ prompt, cwd: streamCwd, model, abortController });
+    ? provider.resumeSession({ prompt, cwd: streamCwd, model, sessionId, effort, abortController })
+    : provider.streamTask({ prompt, cwd: streamCwd, model, effort, abortController });
 
   const encoder = new TextEncoder();
 

@@ -271,17 +271,24 @@ describe("buildCodexExecArgs", () => {
     delete process.env.CODEX_FULL_ACCESS_MODE;
 
     try {
-      const args = buildCodexExecArgs("gpt-5.5", undefined, "full_access");
+      const args = buildCodexExecArgs("gpt-5.6-sol", undefined, "full_access");
 
       expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
       expect(args).not.toContain("--full-auto");
       expect(args).not.toContain("--sandbox");
       expect(args).toContain("--model");
-      expect(args).toContain("gpt-5.5");
+      expect(args).toContain("gpt-5.6-sol");
     } finally {
       if (previous === undefined) delete process.env.CODEX_FULL_ACCESS_MODE;
       else process.env.CODEX_FULL_ACCESS_MODE = previous;
     }
+  });
+
+  it("maps the shared effort levels to Codex reasoning effort values", () => {
+    expect(buildCodexExecArgs("gpt-5.6-sol", undefined, "full_access", "low")).toContain("model_reasoning_effort=low");
+    expect(buildCodexExecArgs("gpt-5.6-sol", undefined, "full_access", "medium")).toContain("model_reasoning_effort=medium");
+    expect(buildCodexExecArgs("gpt-5.6-sol", undefined, "full_access", "high")).toContain("model_reasoning_effort=high");
+    expect(buildCodexExecArgs("gpt-5.6-sol", undefined, "full_access", "max")).toContain("model_reasoning_effort=xhigh");
   });
 
   it("keeps read-only Codex calls sandboxed by default", () => {
@@ -289,7 +296,7 @@ describe("buildCodexExecArgs", () => {
     delete process.env.CODEX_READ_ONLY_MODE;
 
     try {
-      const args = buildCodexExecArgs("gpt-5.5", undefined, "read_only_codebase");
+      const args = buildCodexExecArgs("gpt-5.6-sol", undefined, "read_only_codebase");
       const sandboxIndex = args.indexOf("--sandbox");
 
       expect(sandboxIndex).toBeGreaterThanOrEqual(0);
@@ -306,7 +313,7 @@ describe("buildCodexExecArgs", () => {
     process.env.CODEX_READ_ONLY_MODE = "bypass";
 
     try {
-      const args = buildCodexExecArgs("gpt-5.5", undefined, "read_only_codebase");
+      const args = buildCodexExecArgs("gpt-5.6-sol", undefined, "read_only_codebase");
 
       expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
       expect(args).not.toContain("--sandbox");
@@ -323,7 +330,7 @@ describe("formatCodexFailureDetail", () => {
       exitError: "Codex CLI exited with code 1",
       stderr: "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted",
       stdout: "{\"type\":\"error\",\"message\":\"sandbox failed\"}",
-      args: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--model", "gpt-5.5", "-"],
+      args: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--model", "gpt-5.6-sol", "-"],
       cwd: "/srv/archie/apps/example-task-1",
     });
 
@@ -333,7 +340,7 @@ describe("formatCodexFailureDetail", () => {
     expect(detail).toContain("stdout:");
     expect(detail).toContain("sandbox failed");
     expect(detail).toContain("command:");
-    expect(detail).toContain("codex exec --json --dangerously-bypass-approvals-and-sandbox --model gpt-5.5 -");
+    expect(detail).toContain("codex exec --json --dangerously-bypass-approvals-and-sandbox --model gpt-5.6-sol -");
     expect(detail).toContain("cwd:");
     expect(detail).toContain("/srv/archie/apps/example-task-1");
   });

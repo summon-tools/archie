@@ -181,8 +181,8 @@ describe("remote MCP route", () => {
     db = await getTestDb(ctx, {
       getModelForCategory: (category: string) => (
         category === "background"
-          ? { provider: "codex", model: "gpt-5.5" }
-          : { provider: "claude", model: "claude-opus-4-8" }
+          ? { provider: "codex", model: "gpt-5.6-sol" }
+          : { provider: "claude", model: "claude-opus-5" }
       ),
     });
 
@@ -215,7 +215,7 @@ describe("remote MCP route", () => {
       expect.stringContaining("Do we have a blog feature implemented?"),
       expect.objectContaining({
         cwd: ctx.tmpDir,
-        model: "gpt-5.5",
+        model: "gpt-5.6-sol",
         maxTurns: 15,
         toolPolicy: "read_only_codebase",
       }),
@@ -225,7 +225,7 @@ describe("remote MCP route", () => {
       app_id: app.id,
       answer: "Codex answer",
       provider: "codex",
-      model: "gpt-5.5",
+      model: "gpt-5.6-sol",
     });
   });
 
@@ -274,8 +274,8 @@ describe("remote MCP route", () => {
     db = await getTestDb(ctx, {
       getModelForCategory: (category: string) => (
         category === "background"
-          ? { provider: "codex", model: "gpt-5.5" }
-          : { provider: "claude", model: "claude-opus-4-8" }
+          ? { provider: "codex", model: "gpt-5.6-sol" }
+          : { provider: "claude", model: "claude-opus-5" }
       ),
     });
 
@@ -319,8 +319,8 @@ describe("remote MCP route", () => {
     db = await getTestDb(ctx, {
       getModelForCategory: (category: string) => (
         category === "background"
-          ? { provider: "codex", model: "gpt-5.5" }
-          : { provider: "claude", model: "claude-opus-4-8" }
+          ? { provider: "codex", model: "gpt-5.6-sol" }
+          : { provider: "claude", model: "claude-opus-5" }
       ),
     });
 
@@ -364,8 +364,8 @@ describe("remote MCP route", () => {
     db = await getTestDb(ctx, {
       getModelForCategory: (category: string) => (
         category === "background"
-          ? { provider: "claude", model: "claude-sonnet-4-6" }
-          : { provider: "claude", model: "claude-opus-4-8" }
+          ? { provider: "claude", model: "claude-sonnet-5" }
+          : { provider: "claude", model: "claude-opus-5" }
       ),
     });
 
@@ -399,7 +399,7 @@ describe("remote MCP route", () => {
       expect.stringContaining("Does this project have a blog feature?"),
       expect.objectContaining({
         cwd: ctx.tmpDir,
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         maxTurns: 15,
         toolPolicy: "read_only_codebase",
       }),

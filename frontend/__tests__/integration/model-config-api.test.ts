@@ -80,16 +80,24 @@ describe("model config API", () => {
       makeRequest("http://test.local/api/models/config", { token }),
     );
     expect(primingResponse.status).toBe(200);
-    await primingResponse.json();
+    await expect(primingResponse.json()).resolves.toMatchObject({
+      availableModels: [
+        { id: "claude-opus-5", label: "Opus 5", provider: "claude" },
+        { id: "claude-sonnet-5", label: "Sonnet 5", provider: "claude" },
+        { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: "codex" },
+        { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "codex" },
+        { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "codex" },
+      ],
+    });
 
     const nextConfig = {
-      chatModel: "gpt-5.5",
+      chatModel: "gpt-5.6-sol",
       chatProvider: "codex",
-      backgroundModel: "claude-sonnet-4-6",
+      backgroundModel: "claude-sonnet-5",
       backgroundProvider: "claude",
-      quickModel: "gpt-5.4-mini",
+      quickModel: "gpt-5.6-luna",
       quickProvider: "codex",
-      demoModel: "claude-opus-4-7",
+      demoModel: "claude-opus-5",
       demoProvider: "claude",
     };
 

@@ -48,7 +48,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       "When a step or plan completes, state the outcome clearly and ask for user approval instead of silently closing the work.",
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-opus-4-8",
+    defaultModel: "claude-opus-5",
   },
   {
     key: "architect",
@@ -66,7 +66,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       GATE_FEEDBACK_CONTRACT,
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "claude-opus-5",
   },
   {
     key: "implementer",
@@ -83,7 +83,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       "End with a concise handoff: changed files, verification run, risks, and anything reviewers should inspect closely.",
     ].join("\n\n"),
     defaultProvider: "codex",
-    defaultModel: "gpt-5.5",
+    defaultModel: "gpt-5.6-sol",
   },
   {
     key: "reviewer",
@@ -100,7 +100,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       GATE_FEEDBACK_CONTRACT,
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-opus-4-8",
+    defaultModel: "claude-opus-5",
   },
   {
     key: "qa",
@@ -117,7 +117,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       GATE_FEEDBACK_CONTRACT,
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-opus-4-8",
+    defaultModel: "claude-opus-5",
   },
   {
     key: "security",
@@ -136,7 +136,7 @@ export const DEFAULT_HOME_AGENTS: HomeAgentDefinition[] = [
       GATE_FEEDBACK_CONTRACT,
     ].join("\n\n"),
     defaultProvider: "claude",
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "claude-opus-5",
   },
 ];
 

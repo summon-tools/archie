@@ -40,8 +40,8 @@ async function getTestDb() {
     PREVIEW_PORT_MAX: 9050,
     CLAUDE_DANGEROUS_PERMISSIONS: true,
     getProjectsDir: () => tmpDir,
-    getDefaultModel: () => "claude-opus-4-8",
-    getBackgroundModel: () => "claude-opus-4-8",
+    getDefaultModel: () => "claude-opus-5",
+    getBackgroundModel: () => "claude-opus-5",
   }));
   const { getDb } = await import("@/lib/server/db");
   return getDb();
@@ -370,8 +370,8 @@ describe("Database idempotency", () => {
       PREVIEW_PORT_MAX: 9050,
       CLAUDE_DANGEROUS_PERMISSIONS: true,
       getProjectsDir: () => tmpDir,
-      getDefaultModel: () => "claude-opus-4-8",
-      getBackgroundModel: () => "claude-opus-4-8",
+      getDefaultModel: () => "claude-opus-5",
+      getBackgroundModel: () => "claude-opus-5",
     }));
     const { getDb } = await import("@/lib/server/db");
 

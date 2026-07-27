@@ -15,6 +15,7 @@ import {
   type StreamActivityChip,
   type StreamActivityEvent,
 } from "@/lib/toolSummary";
+import type { EffortLevel } from "@/lib/effort";
 
 export type ToolActivity = StreamActivityChip;
 
@@ -25,6 +26,7 @@ interface UseConversationParams {
   onItemUpdate: () => void;
   selectedModel: string;
   selectedProvider: string;
+  selectedEffort: EffortLevel;
 }
 
 export function useConversation({
@@ -34,6 +36,7 @@ export function useConversation({
   onItemUpdate,
   selectedModel,
   selectedProvider,
+  selectedEffort,
 }: UseConversationParams) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [streamContent, setStreamContent] = useState("");
@@ -251,7 +254,8 @@ export function useConversation({
           selectedModel,
           retry,
           selectedProvider,
-          fileIds
+          fileIds,
+          selectedEffort,
         );
         const reader = response.body?.getReader();
         if (!reader) throw new Error("No response body");
@@ -362,7 +366,7 @@ export function useConversation({
         throw err;
       }
     },
-    [appId, workItem.id, selectedModel, selectedProvider, onItemUpdate, setWorkItem, loadMessages, reloadPreview, debouncedReloadPreview, applyStatusResponse]
+    [appId, workItem.id, selectedModel, selectedProvider, selectedEffort, onItemUpdate, setWorkItem, loadMessages, reloadPreview, debouncedReloadPreview, applyStatusResponse]
   );
 
   // Auto-send a server-seeded user message when it has not received an assistant response yet.

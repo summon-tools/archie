@@ -28,7 +28,13 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
   const [importingBranch, setImportingBranch] = useState(false);
   const branchPickerRef = useRef<HTMLDivElement>(null);
   const branchInputRef = useRef<HTMLInputElement>(null);
-  const { selectedModel, selectedProvider, handleModelChange } = useSelectedModel();
+  const {
+    selectedModel,
+    selectedProvider,
+    selectedEffort,
+    handleModelChange,
+    handleEffortChange,
+  } = useSelectedModel();
   const { data: modelConfig } = useSWR<ModelConfig>("/api/models/config", fetcher);
   const {
     data: remoteBranches,
@@ -336,7 +342,9 @@ export default function NewChatView({ appId, onItemCreated, initialMessage }: Ne
         onAttachmentsChange={setAttachments}
         model={selectedModel}
         provider={selectedProvider}
+        effort={selectedEffort}
         onModelChange={handleModelChange}
+        onEffortChange={handleEffortChange}
         availableModels={modelConfig?.availableModels}
         tools={tools}
         pinnedToolId={pinnedToolId}
