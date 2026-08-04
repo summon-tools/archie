@@ -72,6 +72,48 @@ export interface WorkItemRow {
   updated_at: string;
 }
 
+export type TaskStatus = "backlog" | "ready" | "in_progress" | "review" | "done" | "blocked";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
+export interface TaskRow {
+  id: number;
+  app_id: number;
+  parent_task_id: number | null;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  position: number;
+  created_by: number | null;
+  assigned_to: number | null;
+  origin_type: string;
+  blocked_reason: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskDependencyRow {
+  task_id: number;
+  depends_on_task_id: number;
+  depends_on_title: string;
+  depends_on_status: TaskStatus;
+  created_at: string;
+}
+
+export interface TaskWorkItemRow {
+  task_id: number;
+  work_item_id: number;
+  relation_type: string;
+  work_item_title: string;
+  work_item_status: WorkItemStatus;
+  primary_conversation_id: number | null;
+  branch_name: string | null;
+  pr_url: string | null;
+  pr_number: number | null;
+  created_at: string;
+}
+
 export interface WorkItemEnvRow {
   work_item_id: number;
   branch_name: string | null;

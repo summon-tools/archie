@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse, ProjectTask, ProjectTaskPriority, ProjectTaskStatus } from "./types";
 
 const BASE = "/api";
 
@@ -308,10 +308,10 @@ export async function getWorkItems(appId: number): Promise<Task[]> {
   return data.work_items;
 }
 
-export async function createWorkItem(appId: number, message: string, taskType?: string, fileIds: number[] = []): Promise<Task> {
+export async function createWorkItem(appId: number, message: string, taskType?: string, fileIds: number[] = [], taskId?: number): Promise<Task> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items`, {
     method: "POST",
-    body: JSON.stringify({ message, task_type: taskType, file_ids: fileIds.length ? fileIds : undefined }),
+    body: JSON.stringify({ message, task_type: taskType, task_id: taskId, file_ids: fileIds.length ? fileIds : undefined }),
   });
 }
 
@@ -374,6 +374,45 @@ export async function archiveConversation(appId: number, conversationId: number)
 
 export async function markWorkItemDone(appId: number, itemId: number): Promise<Task> {
   return fetchJSON(`${BASE}/apps/${appId}/work-items/${itemId}/done`, { method: "POST" });
+}
+
+// --- Project task endpoints ---
+
+export async function getProjectTasks(appId: number): Promise<ProjectTask[]> {
+  const data = await fetchJSON<{ tasks: ProjectTask[] }>(`${BASE}/apps/${appId}/tasks`);
+  return data.tasks;
+}
+
+export async function createProjectTask(appId: number, data: {
+  title: string;
+  description?: string;
+  status?: ProjectTaskStatus;
+  priority?: ProjectTaskPriority;
+  parent_task_id?: number | null;
+  dependency_ids?: number[];
+  assigned_to?: number | null;
+}): Promise<ProjectTask> {
+  return fetchJSON(`${BASE}/apps/${appId}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateProjectTask(appId: number, taskId: number, data: Partial<{
+  title: string;
+  description: string;
+  status: ProjectTaskStatus;
+  priority: ProjectTaskPriority;
+  parent_task_id: number | null;
+  dependency_ids: number[];
+  assigned_to: number | null;
+  blocked_reason: string | null;
+  position: number;
+}>): Promise<ProjectTask> {
+  return fetchJSON(`${BASE}/apps/${appId}/tasks/${taskId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
 }
 
 // --- Home Rooms / Plans ---

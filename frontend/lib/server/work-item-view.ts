@@ -47,5 +47,6 @@ export function enrichWorkItem(wi: WorkItemWithUser): WorkItemWithUser & Record<
     demo_script: scriptArt?.inline_text || null,
     demo_personas: personasArt?.inline_text || null,
     walkthrough_script: walkthroughArt?.inline_text || null,
+    task_ids: dal.getTaskIdsForWorkItem(wi.id),
   };
 }

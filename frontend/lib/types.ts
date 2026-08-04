@@ -294,10 +294,58 @@ export type EnrichedWorkItem = WorkItem & {
   demo_seed_output: string | null;
   walkthrough_script: string | null;
   task_type: string | null;
+  task_ids: number[];
 };
 
 /** Alias kept for widespread usage */
 export type Task = EnrichedWorkItem;
+
+export type ProjectTaskStatus = "backlog" | "ready" | "in_progress" | "review" | "done" | "blocked";
+export type ProjectTaskPriority = "low" | "medium" | "high" | "urgent";
+
+export interface TaskDependency {
+  task_id: number;
+  depends_on_task_id: number;
+  depends_on_title: string;
+  depends_on_status: ProjectTaskStatus;
+  created_at: string;
+}
+
+export interface TaskWorkItemLink {
+  task_id: number;
+  work_item_id: number;
+  relation_type: string;
+  work_item_title: string;
+  work_item_status: "proposed" | "in_progress" | "done";
+  primary_conversation_id: number | null;
+  branch_name: string | null;
+  pr_url: string | null;
+  pr_number: number | null;
+  created_at: string;
+}
+
+export interface ProjectTask {
+  id: number;
+  app_id: number;
+  parent_task_id: number | null;
+  title: string;
+  description: string;
+  status: ProjectTaskStatus;
+  priority: ProjectTaskPriority;
+  position: number;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_by_color: string | null;
+  assigned_to: number | null;
+  assigned_to_name: string | null;
+  origin_type: string;
+  blocked_reason: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  dependencies: TaskDependency[];
+  linked_work_items: TaskWorkItemLink[];
+}
 
 /** Conversation message as returned by the API */
 export interface ConversationMessage {

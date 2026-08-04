@@ -50,17 +50,25 @@ export const importAppSchema = z.object({
 // ── Tasks ──
 
 export const createTaskSchema = z.object({
-  message: z.string().optional(),
-  title: z.string().optional(),
-  description: z.string().optional(),
-}).refine((data) => data.message || data.title, {
-  message: "Title or message is required",
+  title: z.string().trim().min(1, "Title is required").max(200, "Title is too long"),
+  description: z.string().trim().max(20000, "Description is too long").optional().default(""),
+  status: z.enum(["backlog", "ready", "in_progress", "review", "done", "blocked"]).optional().default("backlog"),
+  priority: z.enum(["low", "medium", "high", "urgent"]).optional().default("medium"),
+  parent_task_id: z.number().int().positive().nullable().optional(),
+  dependency_ids: z.array(z.number().int().positive()).optional().default([]),
+  assigned_to: z.number().int().positive().nullable().optional(),
 });
 
 export const updateTaskSchema = z.object({
-  title: z.string().optional(),
-  description: z.string().optional(),
-  status: z.string().optional(),
+  title: z.string().trim().min(1, "Title is required").max(200, "Title is too long").optional(),
+  description: z.string().trim().max(20000, "Description is too long").optional(),
+  status: z.enum(["backlog", "ready", "in_progress", "review", "done", "blocked"]).optional(),
+  priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+  parent_task_id: z.number().int().positive().nullable().optional(),
+  dependency_ids: z.array(z.number().int().positive()).optional(),
+  assigned_to: z.number().int().positive().nullable().optional(),
+  blocked_reason: z.string().trim().max(5000).nullable().optional(),
+  position: z.number().int().min(0).optional(),
 });
 
 // ── Admin: Invitations ──

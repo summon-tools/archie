@@ -1,5 +1,6 @@
 export * from "./conversations";
 export * from "./work-items";
+export * from "./tasks";
 export * from "./sessions";
 export * from "./runs";
 export * from "./artifacts";
