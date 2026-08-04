@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, ForbiddenError, getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { getPlanExecutionElapsedMs } from "@/lib/server/plan-execution";
 import type {
   AppRow,
   ConversationRow,
   ConversationStatus,
-  HomeRoomRow,
-  HomeRoomStatus,
-  PlanRow,
-  PlanStepRow,
   TaskRow,
   WorkItemRow,
   WorkItemStatus,
@@ -43,7 +38,7 @@ export async function readJsonBody(request: NextRequest): Promise<Record<string,
   }
 }
 
-export function handleRoomRouteError(error: unknown): NextResponse | null {
+export function handleRouteError(error: unknown): NextResponse | null {
   if (error instanceof AuthError) {
     return NextResponse.json({ detail: error.message }, { status: 401 });
   }
@@ -56,7 +51,6 @@ export function handleRoomRouteError(error: unknown): NextResponse | null {
   return null;
 }
 
-export const ROOM_STATUSES = new Set<HomeRoomStatus>(["open", "archived"]);
 export const CONVERSATION_STATUSES = new Set<ConversationStatus>(["open", "closed", "archived"]);
 export const WORK_ITEM_STATUSES = new Set<WorkItemStatus>(["proposed", "in_progress", "done"]);
 
@@ -110,24 +104,6 @@ export function filterAppsForUser<T extends AppRow>(user: { id: number; role: st
   return apps.filter((app) => canAccessApp(user, app));
 }
 
-export function serializeRoomPlan(roomId: number) {
-  const room = dal.getRoom(roomId);
-  const plan = dal.getPlansByRoom(roomId)[0] || null;
-  const steps = plan ? dal.getPlanSteps(plan.id).map((step) => ({
-    ...step,
-    events: dal.getPlanStepEvents(step.id),
-  })) : [];
-  return {
-    plan: plan ? {
-      ...plan,
-      execution_elapsed_ms: getPlanExecutionElapsedMs(plan),
-    } : null,
-    steps,
-    planning_context_md: room?.planning_context_md || "",
-    planning_context_updated_at: room?.planning_context_updated_at || null,
-  };
-}
-
 export async function requireAppAccess(
   request: NextRequest,
   appIdParam: string,
@@ -138,20 +114,6 @@ export async function requireAppAccess(
   if (!app) throw new RouteInputError("App not found", 404);
   assertCanAccessApp(user, app);
   return { user, app, appId };
-}
-
-export async function requireRoomAccess(
-  request: NextRequest,
-  appIdParam: string,
-  roomIdParam: string,
-): Promise<{ user: Awaited<ReturnType<typeof getAuthUser>>; app: AppRow; room: HomeRoomRow; appId: number; roomId: number }> {
-  const { user, app, appId } = await requireAppAccess(request, appIdParam);
-  const roomId = parseRouteId(roomIdParam, "roomId");
-  const room = dal.getRoom(roomId);
-  if (!room || room.app_id !== app.id) {
-    throw new RouteInputError("Room not found", 404);
-  }
-  return { user, app, room, appId, roomId };
 }
 
 export async function requireConversationAccess(
@@ -194,43 +156,4 @@ export async function requireTaskAccess(
     throw new RouteInputError("Task not found", 404);
   }
   return { user, app, task, appId, taskId };
-}
-
-export async function requireRoomPlanAccess(
-  request: NextRequest,
-  appIdParam: string,
-  roomIdParam: string,
-): Promise<{ user: Awaited<ReturnType<typeof getAuthUser>>; app: AppRow; room: HomeRoomRow; plan: PlanRow; appId: number; roomId: number }> {
-  const result = await requireRoomAccess(request, appIdParam, roomIdParam);
-  const plan = dal.getPlansByRoom(result.room.id)[0];
-  if (!plan) throw new RouteInputError("Plan not found", 404);
-  return { ...result, plan };
-}
-
-export async function requirePlanStepAccess(
-  request: NextRequest,
-  appIdParam: string,
-  roomIdParam: string,
-  stepIdParam: string,
-): Promise<{
-  user: Awaited<ReturnType<typeof getAuthUser>>;
-  app: AppRow;
-  room: HomeRoomRow;
-  plan: PlanRow;
-  step: PlanStepRow;
-  appId: number;
-  roomId: number;
-  stepId: number;
-}> {
-  const result = await requireRoomAccess(request, appIdParam, roomIdParam);
-  const stepId = parseRouteId(stepIdParam, "stepId");
-  const step = dal.getPlanStep(stepId);
-  if (!step) throw new RouteInputError("Plan step not found", 404);
-
-  const plan = dal.getPlan(step.plan_id);
-  if (!plan || plan.room_id !== result.room.id) {
-    throw new RouteInputError("Plan step not found", 404);
-  }
-
-  return { ...result, plan, step, stepId };
 }

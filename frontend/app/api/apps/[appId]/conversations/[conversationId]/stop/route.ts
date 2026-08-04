@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stopConversation } from "@/lib/server/conversation";
-import { handleRoomRouteError, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireConversationAccess } from "@/lib/server/route-utils";
 
 export async function POST(
   request: NextRequest,
@@ -14,7 +14,7 @@ export async function POST(
 
     return NextResponse.json({ message: "Conversation stopped" });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

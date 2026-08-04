@@ -3,7 +3,7 @@ import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { safeDownloadContentType } from "@/lib/server/file-storage";
-import { handleRoomRouteError, parseRouteId, requireAppAccess, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, parseRouteId, requireAppAccess, RouteInputError } from "@/lib/server/route-utils";
 
 function contentDisposition(filename: string): string {
   const safe = path.basename(filename).replace(/[\r\n"]/g, "'");
@@ -35,7 +35,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

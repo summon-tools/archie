@@ -13,15 +13,6 @@ export type MessageKind = "text" | "reflection" | "ready" | "action" | "walkthro
 export type UserRole = "admin" | "member";
 
 export type NotificationStatus = "unread" | "read";
-export type HomeRoomStatus = "open" | "archived";
-export type RoomMessageRole = "user" | "agent" | "system";
-export type RoomMessageKind = "message" | "decision" | "plan_update" | "execution_event" | "error";
-export type RoomAgentRunPhase = "planning" | "critique" | "coordination" | "review" | "security" | "qa";
-export type PlanStatus = "draft" | "ready" | "executing" | "completed" | "blocked" | "cancelled";
-export type PlanExecutionState = "idle" | "running" | "paused" | "completed";
-export type PlanStepRiskLevel = "low" | "medium" | "high";
-export type PlanStepStatus = "pending" | "implementing" | "reviewing" | "fixing" | "validating" | "committing" | "completed" | "blocked" | "failed" | "skipped";
-
 export interface ConversationRow {
   id: number;
   app_id: number;
@@ -425,12 +416,9 @@ export interface AppFileLinkRow {
   id: number;
   app_id: number;
   app_file_id: number;
-  room_id: number | null;
-  room_message_id: number | null;
   conversation_id: number | null;
   message_id: number | null;
   work_item_id: number | null;
-  plan_step_id: number | null;
   link_type: AppFileLinkType;
   created_at: string;
 }
@@ -439,15 +427,6 @@ export interface AppToolConfigRow {
   app_id: number;
   tool_key: string;
   config_json: string;
-}
-
-export interface HomeAgentConfigRow {
-  agent_key: string;
-  role: string;
-  prompt: string;
-  provider_id: string;
-  model_id: string;
-  updated_at: string;
 }
 
 export interface GlobalSkillRow {
@@ -463,97 +442,6 @@ export interface GlobalSkillRow {
   updated_by: number | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface HomeRoomRow {
-  id: number;
-  app_id: number;
-  title: string;
-  purpose: string;
-  planning_context_md: string;
-  planning_context_updated_at: string | null;
-  status: HomeRoomStatus;
-  created_by: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RoomMessageRow {
-  id: number;
-  room_id: number;
-  author_user_id: number | null;
-  author_name?: string | null;
-  author_color?: string | null;
-  agent_key: string | null;
-  role: RoomMessageRole;
-  kind: RoomMessageKind;
-  body_md: string;
-  payload_json: string | null;
-  created_at: string;
-}
-
-export interface RoomAgentRunRow {
-  id: number;
-  room_id: number;
-  agent_key: string;
-  provider_id: string;
-  model_id: string | null;
-  phase: RoomAgentRunPhase;
-  tool_policy_json: string;
-  status: RunStatus;
-  input_json: string | null;
-  result_json: string | null;
-  error_text: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PlanRow {
-  id: number;
-  room_id: number;
-  title: string;
-  summary_md: string;
-  status: PlanStatus;
-  execution_state: PlanExecutionState;
-  execution_started_at: string | null;
-  execution_paused_at: string | null;
-  execution_paused_ms: number;
-  current_version: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PlanStepRow {
-  id: number;
-  plan_id: number;
-  position: number;
-  title: string;
-  objective_md: string;
-  implementation_prompt_md: string;
-  acceptance_criteria_md: string;
-  risk_level: PlanStepRiskLevel;
-  requires_architecture_review: number;
-  requires_security_review: number;
-  status: PlanStepStatus;
-  linked_work_item_id: number | null;
-  linked_conversation_id: number | null;
-  fix_attempts: number;
-  base_commit_sha: string | null;
-  commit_sha: string | null;
-  result_summary_md: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PlanStepEventRow {
-  id: number;
-  plan_step_id: number;
-  phase: string;
-  agent_key: string | null;
-  status: string;
-  summary_md: string;
-  payload_json: string | null;
-  created_at: string;
 }
 
 export interface AppRow {

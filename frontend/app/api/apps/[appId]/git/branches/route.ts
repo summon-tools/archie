@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getValidGitHubUserToken } from "@/lib/server/github-app";
-import { handleRoomRouteError, requireAppAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireAppAccess } from "@/lib/server/route-utils";
 import { listRemoteBranches } from "@/lib/server/worktrees";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +48,7 @@ export async function GET(
       { headers: noStoreHeaders },
     );
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) {
       errorResponse.headers.set("Cache-Control", noStoreHeaders["Cache-Control"]);
       return errorResponse;

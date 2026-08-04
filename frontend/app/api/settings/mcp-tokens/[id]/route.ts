@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { handleRoomRouteError, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, RouteInputError } from "@/lib/server/route-utils";
 
 export async function DELETE(
   request: NextRequest,
@@ -28,7 +28,7 @@ export async function DELETE(
     dal.revokeMcpToken(tokenId);
     return NextResponse.json({ success: true, revoked: true });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { filterAppsForUser } from "@/lib/server/room-route-utils";
+import { filterAppsForUser } from "@/lib/server/route-utils";
 import { buildOutcomesSummary, type OutcomeRowFilters } from "@/lib/server/outcomes";
 import type { OutcomeState } from "@/lib/types";
 

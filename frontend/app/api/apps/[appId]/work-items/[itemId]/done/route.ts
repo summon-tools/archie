@@ -5,7 +5,7 @@ import {
   stopPreview,
   runGitSafe,
 } from "@/lib/server/worktrees";
-import { handleRoomRouteError, requireWorkItemAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireWorkItemAccess } from "@/lib/server/route-utils";
 
 export async function POST(
   request: NextRequest,
@@ -63,7 +63,7 @@ export async function POST(
     const updated = dal.getWorkItem(wi.id)!;
     return NextResponse.json(updated);
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

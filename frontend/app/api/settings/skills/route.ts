@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { parseGlobalSkillPayload } from "@/lib/server/global-skill-validation";
-import { handleRoomRouteError, readJsonBody, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, readJsonBody, RouteInputError } from "@/lib/server/route-utils";
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Error && error.message.toLowerCase().includes("unique");
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     await requireAdmin(request);
     return NextResponse.json({ skills: dal.listGlobalSkills() });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
       throw error;
     }
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

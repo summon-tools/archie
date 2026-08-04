@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
-import { filterAppsForUser } from "@/lib/server/room-route-utils";
+import { filterAppsForUser } from "@/lib/server/route-utils";
 import { getOutcomesGitHubSyncSettings } from "@/lib/server/outcomes-github-sync";
 
 function parseRange(body: Record<string, unknown>): {

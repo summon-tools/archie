@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isEffortLevel } from "@/lib/effort";
 import { streamConversationMessage } from "@/lib/server/conversation";
-import { handleRoomRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireConversationAccess } from "@/lib/server/route-utils";
 
 export async function POST(
   request: NextRequest,
@@ -45,7 +45,7 @@ export async function POST(
       },
     });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     if (e instanceof Error && e.message.includes("already running")) {
       return NextResponse.json({ detail: e.message }, { status: 409 });

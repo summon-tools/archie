@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { getDb } from "@/lib/server/db";
 import { getAuthUser, requireAdmin, AuthError, ForbiddenError } from "@/lib/server/auth";
-import { filterAppsForUser } from "@/lib/server/room-route-utils";
+import { filterAppsForUser } from "@/lib/server/route-utils";
 import { getProjectsDir } from "@/lib/server/config";
 import * as dal from "@/lib/server/dal";
 import { createAppSchema } from "@/lib/schemas/api";

@@ -3,7 +3,7 @@ import * as dal from "@/lib/server/dal";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
 import { createWorktreeFromBranch } from "@/lib/server/worktrees";
 import { getValidGitHubUserToken } from "@/lib/server/github-app";
-import { handleRoomRouteError, readJsonBody, requireAppAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, readJsonBody, requireAppAccess } from "@/lib/server/route-utils";
 
 function normalizeTitle(branchName: string): string {
   return `Branch: ${branchName}`.slice(0, 80);
@@ -86,7 +86,7 @@ export async function POST(
 
     return NextResponse.json(enriched, { status: 201 });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

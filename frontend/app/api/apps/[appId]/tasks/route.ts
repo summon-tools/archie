@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createTaskSchema } from "@/lib/schemas/api";
 import * as dal from "@/lib/server/dal";
 import { serializeTask } from "@/lib/server/task-view";
-import { handleRoomRouteError, readJsonBody, requireAppAccess, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, readJsonBody, requireAppAccess, RouteInputError } from "@/lib/server/route-utils";
 
 function parseTaskInput(body: Record<string, unknown>) {
   const parsed = createTaskSchema.safeParse(body);
@@ -20,7 +20,7 @@ export async function GET(
     const { app } = await requireAppAccess(request, (await params).appId);
     return NextResponse.json({ tasks: dal.getTasksByApp(app.id).map(serializeTask) });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }
@@ -45,7 +45,7 @@ export async function POST(
 
     return NextResponse.json(serializeTask({ ...task, created_by_name: user.name, created_by_color: (user as any).color || null }), { status: 201 });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

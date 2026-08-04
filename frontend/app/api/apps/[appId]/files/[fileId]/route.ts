@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { deleteStoredFile, serializeAppFile } from "@/lib/server/file-storage";
-import { handleRoomRouteError, parseRouteId, requireAppAccess, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, parseRouteId, requireAppAccess, RouteInputError } from "@/lib/server/route-utils";
 
 export async function DELETE(
   request: NextRequest,
@@ -18,7 +18,7 @@ export async function DELETE(
     deleteStoredFile(file);
     return NextResponse.json({ file: serializeAppFile(deleted) });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

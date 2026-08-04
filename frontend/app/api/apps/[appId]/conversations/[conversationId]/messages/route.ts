@@ -3,7 +3,7 @@ import * as dal from "@/lib/server/dal";
 import { emitConversationEvent } from "@/lib/server/conversation-events";
 import { getConversationMessages } from "@/lib/server/conversation";
 import { serializeAppFile } from "@/lib/server/file-storage";
-import { handleRoomRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, parseFileIds, readJsonBody, requireAvailableAppFiles, requireConversationAccess } from "@/lib/server/route-utils";
 import type { MessageRow } from "@/lib/server/types";
 
 type MessageRole = MessageRow["role"];
@@ -37,7 +37,7 @@ export async function GET(
       })),
     });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }
@@ -100,7 +100,7 @@ export async function POST(
 
     return NextResponse.json({ ...message, attachments });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

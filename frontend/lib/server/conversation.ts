@@ -103,17 +103,6 @@ function parseMessageSource(payloadJson: string | null | undefined): Conversatio
   }
 }
 
-function inferLegacyMessageSource(body: string): ConversationMessageSource | null {
-  const trimmed = body.trimStart();
-  if (
-    trimmed.startsWith("# Plan step implementation brief") ||
-    trimmed.startsWith("# Plan gate feedback")
-  ) {
-    return { sent_by_agent_key: "coordinator" };
-  }
-  return null;
-}
-
 function buildSenderLabel(authorName: string | null, source: ConversationMessageSource | null): string | null {
   if (!source) return authorName;
   const agentName = source.sent_by_agent_name || (source.sent_by_agent_key ? formatAgentSenderLabel(source.sent_by_agent_key) : "Agent");
@@ -528,7 +517,7 @@ export async function streamConversationMessage(
     const attachments = dal.getFilesForMessage(conversation.app_id, userMsg.id).map(serializeAppFile);
     const behalfUserId = messageSource?.behalf_of_user_id ?? userId ?? null;
     const author = behalfUserId ? dal.getUser(behalfUserId) : null;
-    const senderLabel = buildSenderLabel(author?.name || null, messageSource || inferLegacyMessageSource(content));
+    const senderLabel = buildSenderLabel(author?.name || null, messageSource || null);
     emitConversationEvent(conversationId, {
       type: "message",
       message: {
@@ -614,19 +603,6 @@ export async function streamConversationMessage(
     targetDirectory: effectiveCwd,
   }) : "";
   const globalSkillsContext = buildGlobalSkillPromptContext(content);
-  if (effectiveCwd) {
-    try {
-      const { capturePlanStepBaseCommitForConversation } = await import("./plan-execution");
-      capturePlanStepBaseCommitForConversation({
-        appId: conversation.app_id,
-        conversationId,
-        directory: effectiveCwd,
-      });
-    } catch {
-      // Plan execution can still continue without a scoped base commit.
-    }
-  }
-
   // Build prompt
   let prompt: string;
   if (sessionId) {
@@ -824,31 +800,6 @@ export async function streamConversationMessage(
                 }
                 dal.updateRun(run.id, runUpdate);
 
-                try {
-                  const {
-                    scheduleAutomatedPlanStepGates,
-                    startPlanStepGatesForCompletedConversation,
-                  } = await import("./plan-execution");
-                  const gateResult = startPlanStepGatesForCompletedConversation({
-                    appId: conversation.app_id,
-                    conversationId,
-                  });
-                  if (gateResult) {
-                    const planRoom = dal.getRoom(gateResult.plan.room_id);
-                    if (planRoom) {
-                      scheduleAutomatedPlanStepGates({
-                        appId: conversation.app_id,
-                        roomId: planRoom.id,
-                        stepId: gateResult.step.id,
-                      });
-                    }
-                  }
-                } catch {
-                  // Plan execution advancement is best-effort here. The
-                  // conversation result is already persisted and should still
-                  // complete even if the plan linkage is stale.
-                }
-
                 safeEnqueue(`event: status\ndata: ${JSON.stringify({ status: "completed" })}\n\n`);
 
                 // Fire-and-forget: generate brief immediately, defer heavier work
@@ -976,7 +927,7 @@ export function getConversationMessages(
   const fallbackAuthorId = workItem?.created_by ?? conversation?.created_by ?? null;
   const fallbackAuthor = fallbackAuthorId ? dal.getUser(fallbackAuthorId) : null;
   return messages.map(m => {
-    const source = parseMessageSource(m.payload_json) || (m.role === "user" ? inferLegacyMessageSource(m.body_md) : null);
+    const source = parseMessageSource(m.payload_json);
     const sourceUser = source?.behalf_of_user_id ? dal.getUser(source.behalf_of_user_id) : null;
     const authorName = m.author_name || (m.role === "user" ? sourceUser?.name || fallbackAuthor?.name || null : null);
     const authorColor = m.author_color || (m.role === "user" ? sourceUser?.color || fallbackAuthor?.color || null : null);

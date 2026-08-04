@@ -62,10 +62,10 @@ export default function AppFilesPanel({ appId }: { appId: number }) {
       <div className="max-w-4xl mx-auto p-6">
         <div className="mb-5">
           <p className="text-sm text-th-secondary">
-            Durable project files uploaded from room and task chats.
+            Durable project files uploaded from task chats.
           </p>
           <p className="mt-1 text-xs text-th-muted">
-            Agents receive readable local paths only when the file is attached to the current room or conversation context.
+            Agents receive readable local paths only when the file is attached to the current conversation context.
           </p>
         </div>
 
@@ -84,7 +84,7 @@ export default function AppFilesPanel({ appId }: { appId: number }) {
           <div className="rounded-lg border border-dashed border-th p-8 text-center">
             <FileText size={24} className="mx-auto mb-3 text-th-muted" />
             <p className="text-sm font-medium text-th-secondary">No files yet</p>
-            <p className="mt-1 text-xs text-th-muted">Attach files from a room or task chat to add them here.</p>
+            <p className="mt-1 text-xs text-th-muted">Attach files from a task chat to add them here.</p>
           </div>
         ) : (
           <div className="overflow-hidden rounded-lg border border-th">

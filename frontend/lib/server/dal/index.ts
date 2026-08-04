@@ -16,7 +16,5 @@ export * from "./outcome-followups";
 export * from "./outcome-jobs";
 export * from "./notifications";
 export * from "./automation-configs";
-export * from "./rooms";
-export * from "./agent-configs";
 export * from "./global-skills";
 export * from "./mcp-tokens";

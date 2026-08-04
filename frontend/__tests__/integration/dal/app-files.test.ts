@@ -19,18 +19,11 @@ afterEach(() => {
 });
 
 describe("app files DAL", () => {
-  it("links files to messages, rooms, conversations, and work items", async () => {
+  it("links files to messages, conversations, and work items", async () => {
     const dal = await import("@/lib/server/dal");
     const app = seedApp(db);
     const conversation = seedConversation(db, app.id, { kind: "task" });
     const message = seedMessage(db, conversation.id);
-    const room = dal.createRoom({ app_id: app.id, title: "Planning", purpose: "Plan" });
-    const roomMessage = dal.createRoomMessage({
-      room_id: room.id,
-      role: "user",
-      kind: "message",
-      body_md: "See attached",
-    });
     const workItem = dal.createWorkItem({
       app_id: app.id,
       primary_conversation_id: conversation.id,
@@ -50,56 +43,15 @@ describe("app files DAL", () => {
     dal.linkAppFiles({
       app_id: app.id,
       file_ids: [file.id],
-      room_id: room.id,
-      room_message_id: roomMessage.id,
       conversation_id: conversation.id,
       message_id: message.id,
       work_item_id: workItem.id,
       link_type: "attachment",
     });
 
-    expect(dal.getFilesForRoom(app.id, room.id).map((f) => f.id)).toEqual([file.id]);
-    expect(dal.getFilesForRoomMessage(app.id, roomMessage.id).map((f) => f.id)).toEqual([file.id]);
     expect(dal.getFilesForConversation(app.id, conversation.id).map((f) => f.id)).toEqual([file.id]);
     expect(dal.getFilesForMessage(app.id, message.id).map((f) => f.id)).toEqual([file.id]);
     expect(dal.getFilesForWorkItem(app.id, workItem.id).map((f) => f.id)).toEqual([file.id]);
-  });
-
-  it("carries room files into a work item execution context", async () => {
-    const dal = await import("@/lib/server/dal");
-    const app = seedApp(db);
-    const conversation = seedConversation(db, app.id, { kind: "task" });
-    const room = dal.createRoom({ app_id: app.id, title: "Planning", purpose: "Plan" });
-    const workItem = dal.createWorkItem({
-      app_id: app.id,
-      primary_conversation_id: conversation.id,
-      title: "Implementation",
-    });
-    const file = dal.createAppFile({
-      app_id: app.id,
-      original_name: "brief.pdf",
-      stored_name: "brief.pdf",
-      content_type: "application/pdf",
-      size_bytes: 1024,
-      sha256: "def",
-      storage_path: "/tmp/brief.pdf",
-    });
-    dal.linkAppFiles({
-      app_id: app.id,
-      file_ids: [file.id],
-      room_id: room.id,
-      link_type: "attachment",
-    });
-
-    dal.linkRoomFilesToWorkItem({
-      app_id: app.id,
-      room_id: room.id,
-      work_item_id: workItem.id,
-      conversation_id: conversation.id,
-    });
-
-    expect(dal.getFilesForWorkItem(app.id, workItem.id).map((f) => f.id)).toEqual([file.id]);
-    expect(dal.getFilesForConversation(app.id, conversation.id).map((f) => f.id)).toEqual([file.id]);
   });
 
   it("keeps uploading files hidden and scopes storage activation by app", async () => {

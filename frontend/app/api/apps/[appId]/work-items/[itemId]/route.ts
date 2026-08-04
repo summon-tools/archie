@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { removeWorktree, stopPreview } from "@/lib/server/worktrees";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
-import { handleRoomRouteError, readJsonBody, requireEnumValue, requireWorkItemAccess, WORK_ITEM_STATUSES } from "@/lib/server/room-route-utils";
+import { handleRouteError, readJsonBody, requireEnumValue, requireWorkItemAccess, WORK_ITEM_STATUSES } from "@/lib/server/route-utils";
 
 export async function GET(
   request: NextRequest,
@@ -14,7 +14,7 @@ export async function GET(
 
     return NextResponse.json(enrichWorkItem(workItem));
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }
@@ -40,7 +40,7 @@ export async function PUT(
     const updated = dal.getWorkItem(workItem.id)!;
     return NextResponse.json(enrichWorkItem(updated));
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }
@@ -77,7 +77,7 @@ export async function DELETE(
 
     return NextResponse.json({ message: "Work item deleted" });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

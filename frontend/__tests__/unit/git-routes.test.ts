@@ -185,14 +185,14 @@ describe("branch import route", () => {
       worktree_dir: "/repo-task-9",
     }));
 
-    vi.doMock("@/lib/server/room-route-utils", () => ({
+    vi.doMock("@/lib/server/route-utils", () => ({
       requireAppAccess: vi.fn(async () => ({
         user: authUser,
         appId: 1,
         app: { id: 1, name: "Test App", directory: "/repo" },
       })),
       readJsonBody: vi.fn(async () => ({ branch: "feature/existing" })),
-      handleRoomRouteError: vi.fn(() => null),
+      handleRouteError: vi.fn(() => null),
     }));
     vi.doMock("@/lib/server/github-app", () => ({
       getValidGitHubUserToken: vi.fn(async () => ({ token: "user-token" })),
