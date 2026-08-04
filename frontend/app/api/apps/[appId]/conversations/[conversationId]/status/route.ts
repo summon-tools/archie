@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConversationStatus } from "@/lib/server/conversation";
-import { handleRoomRouteError, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireConversationAccess } from "@/lib/server/route-utils";
 
 export async function GET(
   request: NextRequest,
@@ -14,7 +14,7 @@ export async function GET(
 
     return NextResponse.json(status);
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

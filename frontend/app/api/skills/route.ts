@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
-import { handleRoomRouteError } from "@/lib/server/room-route-utils";
+import { handleRouteError } from "@/lib/server/route-utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     }));
     return NextResponse.json({ skills });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

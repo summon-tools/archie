@@ -270,36 +270,4 @@ describe("app file API", () => {
     expect(listed.messages[0].attachments[0].id).toBe(file.id);
   });
 
-  it("persists room message attachments without requiring text", async () => {
-    vi.doMock("@/lib/server/room-agents", () => ({
-      createRoomAgentReply: vi.fn(async () => undefined),
-    }));
-    const token = await createAuthToken();
-    const app = seedApp(db);
-    const dal = await import("@/lib/server/dal");
-    const room = dal.createRoom({ app_id: app.id, title: "Planning", purpose: "Plan" });
-    const file = dal.createAppFile({
-      app_id: app.id,
-      original_name: "wireframe.png",
-      stored_name: "wireframe.png",
-      content_type: "image/png",
-      size_bytes: 18,
-      sha256: "imghash",
-      storage_path: "/tmp/wireframe.png",
-    });
-    const messagesRoute = await import("@/app/api/apps/[appId]/rooms/[roomId]/messages/route");
-
-    const response = await messagesRoute.POST(
-      makeRequest(`http://test.local/api/apps/${app.id}/rooms/${room.id}/messages`, {
-        token,
-        body: { file_ids: [file.id] },
-      }),
-      { params: Promise.resolve({ appId: String(app.id), roomId: String(room.id) }) },
-    );
-
-    expect(response.status).toBe(201);
-    const message = await response.json();
-    expect(message.body_md).toBe("");
-    expect(message.attachments[0].original_name).toBe("wireframe.png");
-  });
 });

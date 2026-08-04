@@ -3,7 +3,7 @@ import * as dal from "@/lib/server/dal";
 import { subscribeConversation, getEventSeq } from "@/lib/server/conversation-events";
 import { getConversationMessages } from "@/lib/server/conversation";
 import { serializeAppFile } from "@/lib/server/file-storage";
-import { handleRoomRouteError, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireConversationAccess } from "@/lib/server/route-utils";
 
 /**
  * GET /api/apps/[appId]/conversations/[conversationId]/events
@@ -23,7 +23,7 @@ export async function GET(
     numericConversationId = access.conversation.id;
     numericAppId = access.app.id;
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

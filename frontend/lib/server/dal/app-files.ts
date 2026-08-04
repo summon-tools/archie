@@ -80,12 +80,9 @@ export function markAppFileDeleted(appId: number, fileId: number): AppFileRow {
 export function createAppFileLink(data: {
   app_id: number;
   app_file_id: number;
-  room_id?: number | null;
-  room_message_id?: number | null;
   conversation_id?: number | null;
   message_id?: number | null;
   work_item_id?: number | null;
-  plan_step_id?: number | null;
   link_type?: AppFileLinkType;
 }): AppFileLinkRow {
   const db = getDb();
@@ -93,41 +90,31 @@ export function createAppFileLink(data: {
     `SELECT * FROM app_file_links
      WHERE app_id = ?
        AND app_file_id = ?
-       AND COALESCE(room_id, -1) = ?
-       AND COALESCE(room_message_id, -1) = ?
        AND COALESCE(conversation_id, -1) = ?
        AND COALESCE(message_id, -1) = ?
        AND COALESCE(work_item_id, -1) = ?
-       AND COALESCE(plan_step_id, -1) = ?
        AND link_type = ?
      LIMIT 1`
   ).get(
     data.app_id,
     data.app_file_id,
-    data.room_id ?? -1,
-    data.room_message_id ?? -1,
     data.conversation_id ?? -1,
     data.message_id ?? -1,
     data.work_item_id ?? -1,
-    data.plan_step_id ?? -1,
     data.link_type ?? "attachment",
   ) as AppFileLinkRow | undefined;
   if (existing) return existing;
 
   const result = db.prepare(
     `INSERT INTO app_file_links (
-       app_id, app_file_id, room_id, room_message_id, conversation_id,
-       message_id, work_item_id, plan_step_id, link_type
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       app_id, app_file_id, conversation_id, message_id, work_item_id, link_type
+     ) VALUES (?, ?, ?, ?, ?, ?)`
   ).run(
     data.app_id,
     data.app_file_id,
-    data.room_id ?? null,
-    data.room_message_id ?? null,
     data.conversation_id ?? null,
     data.message_id ?? null,
     data.work_item_id ?? null,
-    data.plan_step_id ?? null,
     data.link_type ?? "attachment",
   );
   return db.prepare("SELECT * FROM app_file_links WHERE id = ?").get(result.lastInsertRowid) as AppFileLinkRow;
@@ -136,12 +123,9 @@ export function createAppFileLink(data: {
 export function linkAppFiles(data: {
   app_id: number;
   file_ids: number[];
-  room_id?: number | null;
-  room_message_id?: number | null;
   conversation_id?: number | null;
   message_id?: number | null;
   work_item_id?: number | null;
-  plan_step_id?: number | null;
   link_type?: AppFileLinkType;
 }): AppFileLinkRow[] {
   const db = getDb();
@@ -155,12 +139,9 @@ export function linkAppFiles(data: {
     return createAppFileLink({
       app_id: data.app_id,
       app_file_id: fileId,
-      room_id: data.room_id,
-      room_message_id: data.room_message_id,
       conversation_id: data.conversation_id,
       message_id: data.message_id,
       work_item_id: data.work_item_id,
-      plan_step_id: data.plan_step_id,
       link_type: data.link_type,
     });
   }))();
@@ -181,38 +162,12 @@ export function getFilesForMessage(appId: number, messageId: number): AppFileWit
     .all(appId, messageId) as AppFileWithLink[];
 }
 
-export function getFilesForRoomMessage(appId: number, roomMessageId: number): AppFileWithLink[] {
-  return getDb().prepare(linkedFilesQuery("l.app_id = ? AND l.room_message_id = ?"))
-    .all(appId, roomMessageId) as AppFileWithLink[];
-}
-
 export function getFilesForConversation(appId: number, conversationId: number): AppFileWithLink[] {
   return getDb().prepare(linkedFilesQuery("l.app_id = ? AND l.conversation_id = ?"))
     .all(appId, conversationId) as AppFileWithLink[];
 }
 
-export function getFilesForRoom(appId: number, roomId: number): AppFileWithLink[] {
-  return getDb().prepare(linkedFilesQuery("l.app_id = ? AND l.room_id = ?"))
-    .all(appId, roomId) as AppFileWithLink[];
-}
-
 export function getFilesForWorkItem(appId: number, workItemId: number): AppFileWithLink[] {
   return getDb().prepare(linkedFilesQuery("l.app_id = ? AND l.work_item_id = ?"))
     .all(appId, workItemId) as AppFileWithLink[];
-}
-
-export function linkRoomFilesToWorkItem(data: {
-  app_id: number;
-  room_id: number;
-  work_item_id: number;
-  conversation_id: number;
-}): AppFileLinkRow[] {
-  const files = getFilesForRoom(data.app_id, data.room_id).filter((file) => file.status === "available");
-  return linkAppFiles({
-    app_id: data.app_id,
-    file_ids: files.map((file) => file.id),
-    work_item_id: data.work_item_id,
-    conversation_id: data.conversation_id,
-    link_type: "context",
-  });
 }

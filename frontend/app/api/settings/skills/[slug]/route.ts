@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { parseGlobalSkillPayload, parseGlobalSkillRouteSlug } from "@/lib/server/global-skill-validation";
-import { handleRoomRouteError, readJsonBody, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, readJsonBody, RouteInputError } from "@/lib/server/route-utils";
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Error && error.message.toLowerCase().includes("unique");
@@ -20,7 +20,7 @@ export async function GET(
     if (!skill) throw new RouteInputError("Skill not found", 404);
     return NextResponse.json({ skill });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }
@@ -48,7 +48,7 @@ export async function PATCH(
       throw error;
     }
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }
@@ -66,7 +66,7 @@ export async function DELETE(
     if (!deleted) throw new RouteInputError("Skill not found", 404);
     return NextResponse.json({ deleted: slug });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

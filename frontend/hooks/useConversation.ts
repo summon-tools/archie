@@ -384,7 +384,6 @@ export function useConversation({
     if (activeClaudeStatus === "running" || activeClaudeStatus === "waiting_approval") return;
     if (activeClaudeStatus === "failed" || activeClaudeStatus === "stopped") return;
     if (sending) return;
-    if (workItem.origin_type === "room_plan") return;
     if (!latestUserMessage && workItem.branch_source === "imported") return;
     // Wait for worktree to be ready before sending
     if (workItem.worktree_status === "preparing") return;

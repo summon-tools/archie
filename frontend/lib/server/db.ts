@@ -545,26 +545,18 @@ function initDb(db: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL,
       app_file_id INTEGER NOT NULL,
-      room_id INTEGER DEFAULT NULL,
-      room_message_id INTEGER DEFAULT NULL,
       conversation_id INTEGER DEFAULT NULL,
       message_id INTEGER DEFAULT NULL,
       work_item_id INTEGER DEFAULT NULL,
-      plan_step_id INTEGER DEFAULT NULL,
       link_type TEXT NOT NULL DEFAULT 'attachment' CHECK(link_type IN ('attachment', 'context')),
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
       FOREIGN KEY (app_file_id) REFERENCES app_files(id) ON DELETE CASCADE,
-      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE,
-      FOREIGN KEY (room_message_id) REFERENCES room_messages(id) ON DELETE CASCADE,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
-      FOREIGN KEY (plan_step_id) REFERENCES plan_steps(id) ON DELETE CASCADE
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_app_file_links_file_id ON app_file_links(app_file_id);
-    CREATE INDEX IF NOT EXISTS idx_app_file_links_room ON app_file_links(room_id);
-    CREATE INDEX IF NOT EXISTS idx_app_file_links_room_message ON app_file_links(room_message_id);
     CREATE INDEX IF NOT EXISTS idx_app_file_links_conversation ON app_file_links(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_app_file_links_message ON app_file_links(message_id);
     CREATE INDEX IF NOT EXISTS idx_app_file_links_work_item ON app_file_links(work_item_id);
@@ -575,16 +567,6 @@ function initDb(db: Database.Database): void {
       config_json TEXT NOT NULL DEFAULT '{}',
       PRIMARY KEY (app_id, tool_key),
       FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS home_agent_configs (
-      agent_key TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT '',
-      prompt TEXT NOT NULL DEFAULT '',
-      provider_id TEXT NOT NULL,
-      model_id TEXT NOT NULL,
-      updated_at TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY (agent_key)
     );
 
     CREATE TABLE IF NOT EXISTS global_skills (
@@ -726,120 +708,6 @@ function initDb(db: Database.Database): void {
     );
   `);
 
-  // ── Home rooms and structured plans ───────────────────────────
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS home_rooms (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      app_id INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      purpose TEXT DEFAULT '',
-      planning_context_md TEXT NOT NULL DEFAULT '',
-      planning_context_updated_at TEXT DEFAULT NULL,
-      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'archived')),
-      created_by INTEGER DEFAULT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
-      FOREIGN KEY (created_by) REFERENCES users(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_home_rooms_app_id ON home_rooms(app_id);
-    CREATE INDEX IF NOT EXISTS idx_home_rooms_status ON home_rooms(status);
-
-    CREATE TABLE IF NOT EXISTS room_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room_id INTEGER NOT NULL,
-      author_user_id INTEGER DEFAULT NULL,
-      agent_key TEXT DEFAULT NULL,
-      role TEXT NOT NULL CHECK(role IN ('user', 'agent', 'system')),
-      kind TEXT NOT NULL DEFAULT 'message' CHECK(kind IN ('message', 'decision', 'plan_update', 'execution_event', 'error')),
-      body_md TEXT NOT NULL DEFAULT '',
-      payload_json TEXT DEFAULT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE,
-      FOREIGN KEY (author_user_id) REFERENCES users(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_room_messages_room_id ON room_messages(room_id);
-
-    CREATE TABLE IF NOT EXISTS room_agent_runs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room_id INTEGER NOT NULL,
-      agent_key TEXT NOT NULL,
-      provider_id TEXT NOT NULL,
-      model_id TEXT DEFAULT NULL,
-      phase TEXT NOT NULL CHECK(phase IN ('planning', 'critique', 'coordination', 'review', 'security', 'qa')),
-      tool_policy_json TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed', 'stopped')),
-      input_json TEXT DEFAULT NULL,
-      result_json TEXT DEFAULT NULL,
-      error_text TEXT DEFAULT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_room_agent_runs_room_id ON room_agent_runs(room_id);
-    CREATE INDEX IF NOT EXISTS idx_room_agent_runs_status ON room_agent_runs(status);
-
-    CREATE TABLE IF NOT EXISTS plans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room_id INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      summary_md TEXT DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'ready', 'executing', 'completed', 'blocked', 'cancelled')),
-      execution_state TEXT NOT NULL DEFAULT 'idle' CHECK(execution_state IN ('idle', 'running', 'paused', 'completed')),
-      execution_started_at TEXT DEFAULT NULL,
-      execution_paused_at TEXT DEFAULT NULL,
-      execution_paused_ms INTEGER NOT NULL DEFAULT 0,
-      current_version INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (room_id) REFERENCES home_rooms(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_plans_room_id ON plans(room_id);
-    CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
-
-    CREATE TABLE IF NOT EXISTS plan_steps (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      plan_id INTEGER NOT NULL,
-      position INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      objective_md TEXT NOT NULL DEFAULT '',
-      implementation_prompt_md TEXT NOT NULL DEFAULT '',
-      acceptance_criteria_md TEXT NOT NULL DEFAULT '',
-      risk_level TEXT NOT NULL DEFAULT 'medium' CHECK(risk_level IN ('low', 'medium', 'high')),
-      requires_architecture_review INTEGER NOT NULL DEFAULT 0,
-      requires_security_review INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'implementing', 'reviewing', 'fixing', 'validating', 'committing', 'completed', 'blocked', 'failed', 'skipped')),
-      linked_work_item_id INTEGER DEFAULT NULL,
-      linked_conversation_id INTEGER DEFAULT NULL,
-      fix_attempts INTEGER NOT NULL DEFAULT 0,
-      base_commit_sha TEXT DEFAULT NULL,
-      commit_sha TEXT DEFAULT NULL,
-      result_summary_md TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE CASCADE,
-      FOREIGN KEY (linked_work_item_id) REFERENCES work_items(id),
-      FOREIGN KEY (linked_conversation_id) REFERENCES conversations(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_plan_steps_plan_id ON plan_steps(plan_id);
-    CREATE INDEX IF NOT EXISTS idx_plan_steps_status ON plan_steps(status);
-    CREATE INDEX IF NOT EXISTS idx_plan_steps_linked_conversation_id ON plan_steps(linked_conversation_id);
-
-    CREATE TABLE IF NOT EXISTS plan_step_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      plan_step_id INTEGER NOT NULL,
-      phase TEXT NOT NULL CHECK(phase IN ('implementation', 'architecture_review', 'code_review', 'security_review', 'qa_validation', 'commit')),
-      agent_key TEXT DEFAULT NULL,
-      status TEXT NOT NULL CHECK(status IN ('started', 'pending', 'running', 'completed', 'failed', 'skipped')),
-      summary_md TEXT DEFAULT '',
-      payload_json TEXT DEFAULT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (plan_step_id) REFERENCES plan_steps(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_plan_step_events_step_id ON plan_step_events(plan_step_id);
-  `);
-
   // ── Schema evolution (RFC 23) — add columns to existing tables ─
   addColumnIfMissing(db, "apps", "project_owner_user_id", "INTEGER DEFAULT NULL");
 
@@ -862,57 +730,7 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "conversations", "origin_automation_key", "TEXT DEFAULT NULL");
   addColumnIfMissing(db, "conversations", "origin_run_id", "INTEGER DEFAULT NULL");
 
-  addColumnIfMissing(db, "home_rooms", "planning_context_md", "TEXT NOT NULL DEFAULT ''");
-  addColumnIfMissing(db, "home_rooms", "planning_context_updated_at", "TEXT DEFAULT NULL");
-
   addColumnIfMissing(db, "global_skills", "parts_json", "TEXT NOT NULL DEFAULT '[]'");
-
-  addColumnIfMissing(db, "plans", "execution_state", "TEXT NOT NULL DEFAULT 'idle'");
-  addColumnIfMissing(db, "plans", "execution_started_at", "TEXT DEFAULT NULL");
-  addColumnIfMissing(db, "plans", "execution_paused_at", "TEXT DEFAULT NULL");
-  addColumnIfMissing(db, "plans", "execution_paused_ms", "INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing(db, "plan_steps", "fix_attempts", "INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing(db, "plan_steps", "base_commit_sha", "TEXT DEFAULT NULL");
-  addColumnIfMissing(db, "plan_step_events", "updated_at", "TEXT DEFAULT NULL");
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_plan_steps_linked_conversation_id ON plan_steps(linked_conversation_id);
-
-    UPDATE plan_step_events
-    SET updated_at = COALESCE(created_at, datetime('now'))
-    WHERE updated_at IS NULL;
-
-    UPDATE plan_step_events
-    SET phase = 'code_review'
-    WHERE phase NOT IN ('implementation', 'architecture_review', 'code_review', 'security_review', 'qa_validation', 'commit');
-
-    UPDATE plan_step_events
-    SET status = CASE
-      WHEN status IN ('passed', 'done') THEN 'completed'
-      WHEN status IN ('error', 'blocked') THEN 'failed'
-      ELSE 'pending'
-    END
-    WHERE status NOT IN ('started', 'pending', 'running', 'completed', 'failed', 'skipped');
-
-    UPDATE plans
-    SET execution_state = 'idle'
-    WHERE execution_state NOT IN ('idle', 'running', 'paused', 'completed');
-
-    UPDATE plans
-    SET execution_state = 'running',
-        execution_started_at = COALESCE(execution_started_at, updated_at, created_at)
-    WHERE status = 'executing' AND execution_state = 'idle';
-
-    UPDATE plans
-    SET execution_state = 'completed',
-        execution_paused_at = NULL
-    WHERE status = 'completed' AND execution_state != 'completed';
-
-    UPDATE plan_step_events
-    SET status = 'pending',
-        updated_at = datetime('now')
-    WHERE status = 'running'
-      AND datetime(COALESCE(updated_at, created_at)) < datetime('now', '-30 minutes');
-  `);
 
   // ── Migrate app file status constraints ───────────────────────
   ensureAppFilesUploadingStatus(db);

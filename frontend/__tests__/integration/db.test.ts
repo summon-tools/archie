@@ -74,12 +74,6 @@ describe("Database initialization", () => {
     expect(tables).toContain("system_settings");
     expect(tables).toContain("terminal_sessions");
     expect(tables).toContain("managed_processes");
-    expect(tables).toContain("home_rooms");
-    expect(tables).toContain("room_messages");
-    expect(tables).toContain("room_agent_runs");
-    expect(tables).toContain("plans");
-    expect(tables).toContain("plan_steps");
-    expect(tables).toContain("plan_step_events");
   });
 
   it("enables WAL journal mode", async () => {

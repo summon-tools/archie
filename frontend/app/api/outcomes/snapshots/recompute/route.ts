@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
-import { filterAppsForUser } from "@/lib/server/room-route-utils";
+import { filterAppsForUser } from "@/lib/server/route-utils";
 
 function parseWorkItemIds(value: unknown): number[] | undefined {
   if (value === undefined || value === null) return undefined;

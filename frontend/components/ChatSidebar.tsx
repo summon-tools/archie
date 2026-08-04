@@ -4,9 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
-import { App, Task, GitStatus, HomeRoom } from "@/lib/types";
+import { App, Task, GitStatus } from "@/lib/types";
 import { fetcher } from "@/lib/swr";
-import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, UsersThree, ChatsCircle, FileText, Kanban } from "@phosphor-icons/react";
+import { SpinnerGap, X, Plus, CaretRight, CaretLeft, CaretUpDown, Check, FolderSimplePlus, Brain, Lightning, CheckCircle, CaretDown, SquaresFour, GearSix, ArrowDown, Bell, ChatsCircle, FileText, Kanban } from "@phosphor-icons/react";
 import BackgroundJobsBar from "./BackgroundJobsBar";
 
 interface ChatSidebarProps {
@@ -14,14 +14,7 @@ interface ChatSidebarProps {
   app: App | null;
   apps?: App[];
   workItems: Task[];
-  rooms: HomeRoom[];
-  roomsLoading?: boolean;
-  selectedRoomId: number | null;
   selectedItemId: number | null;
-  activeWorkMode: "rooms" | "tasks";
-  onSelectRoom: (roomId: number) => void;
-  onNewRoom: () => void;
-  onCloseRoom?: (roomId: number) => void;
   onSelectItem: (itemId: number) => void;
   onNewItem: () => void;
   onMarkDone?: (itemId: number) => void;
@@ -67,14 +60,7 @@ export default function ChatSidebar({
   app,
   apps,
   workItems,
-  rooms,
-  roomsLoading,
-  selectedRoomId,
   selectedItemId,
-  activeWorkMode,
-  onSelectRoom,
-  onNewRoom,
-  onCloseRoom,
   onSelectItem,
   onNewItem,
   onMarkDone,
@@ -111,13 +97,6 @@ export default function ChatSidebar({
   }, [showProjectPicker]);
 
   const appInitial = app?.name?.charAt(0).toUpperCase() || "?";
-  const openRoomItems = rooms.filter((room) => room.status === "open");
-  const openRooms = () => {
-    if (selectedRoomId) onSelectRoom(selectedRoomId);
-    else if (openRoomItems[0]) onSelectRoom(openRoomItems[0].id);
-    else onViewChange?.("room");
-  };
-
   // Collapsed sidebar
   if (collapsed) {
     return (
@@ -142,26 +121,6 @@ export default function ChatSidebar({
         {/* Work group */}
         <div className="flex flex-col items-center py-1.5 gap-1">
           <button
-            onClick={openRooms}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              activeWorkMode === "rooms"
-                ? "bg-btn-secondary text-btn-secondary"
-                : "text-th-muted hover:text-th-primary hover:bg-th-muted"
-            }`}
-            title="Rooms"
-            aria-label="Rooms"
-          >
-            <UsersThree size={16} weight="bold" />
-          </button>
-          <button
-            onClick={onNewRoom}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-th-muted hover:text-th-primary hover:bg-th-muted"
-            title="New Room"
-            aria-label="New Room"
-          >
-            <Plus size={16} weight="bold" />
-          </button>
-          <button
             onClick={onNewItem}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
               isNewItemActive
@@ -177,21 +136,7 @@ export default function ChatSidebar({
 
         {/* Work dots */}
         <div className="flex-1 overflow-y-auto py-1">
-          {activeWorkMode === "rooms"
-            ? openRoomItems.map((room) => (
-                <button
-                  key={room.id}
-                  onClick={() => onSelectRoom(room.id)}
-                  className={`w-full flex items-center justify-center py-2 transition-colors ${
-                    room.id === selectedRoomId ? "bg-th-muted" : "hover:bg-th-subtle"
-                  }`}
-                  title={room.title}
-                  aria-label={room.title}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-th-muted" />
-                </button>
-              ))
-            : workItems.filter((item) => item.status !== "done").map((item) => (
+          {workItems.filter((item) => item.status !== "done").map((item) => (
                 <button
                   key={item.id}
                   onClick={() => onSelectItem(item.id)}
@@ -375,72 +320,30 @@ export default function ChatSidebar({
 
       {/* ── WORK ───────────────────────────────────────────── */}
       <SectionLabel label="Work" />
-      <div className="px-3 pb-2">
-        <div className="grid grid-cols-2 gap-1 rounded-lg bg-th-muted p-1">
-          <button
-            onClick={openRooms}
-            className={`px-2 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeWorkMode === "rooms" ? "bg-th-elevated text-th-primary shadow-sm" : "text-th-muted hover:text-th-primary"
-            }`}
-          >
-            Rooms
-          </button>
-          <button
-            onClick={() => onViewChange?.("tasks")}
-            className={`px-2 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeWorkMode === "tasks" ? "bg-th-elevated text-th-primary shadow-sm" : "text-th-muted hover:text-th-primary"
-            }`}
-          >
-            Tasks
-          </button>
-        </div>
-      </div>
-
       <div className="px-3 pb-1 space-y-0.5">
-        {activeWorkMode === "rooms" ? (
-          <button
-            onClick={onNewRoom}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors text-th-secondary hover:text-th-primary hover:bg-th-subtle"
-            title="New room"
-          >
-            <Plus size={15} weight="bold" className="text-th-muted" />
-            New room
-          </button>
-        ) : (
-          <button
-            onClick={onNewItem}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
-              isNewItemActive
-                ? "text-th-primary font-medium"
-                : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
-            }`}
-            title="New task (⌘K)"
-          >
-            <Plus size={15} weight="bold" className="text-th-muted" />
-            New task
-            <span className="ml-auto text-meta text-th-dimmed font-mono">⌘K</span>
-          </button>
-        )}
+        <button
+          onClick={onNewItem}
+          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
+            isNewItemActive
+              ? "text-th-primary font-medium"
+              : "text-th-secondary hover:text-th-primary hover:bg-th-subtle"
+          }`}
+          title="New task (⌘K)"
+        >
+          <Plus size={15} weight="bold" className="text-th-muted" />
+          New task
+          <span className="ml-auto text-meta text-th-dimmed font-mono">⌘K</span>
+        </button>
       </div>
 
-      {activeWorkMode === "rooms" ? (
-        <RoomList
-          rooms={rooms}
-          selectedRoomId={selectedRoomId}
-          loading={roomsLoading}
-          onSelectRoom={onSelectRoom}
-          onCloseRoom={onCloseRoom}
-        />
-      ) : (
-        <ConversationList
-          workItems={workItems}
-          selectedItemId={selectedItemId}
-          activeView={activeView}
-          onSelectItem={onSelectItem}
-          onViewChange={onViewChange}
-          onMarkDone={onMarkDone}
-        />
-      )}
+      <ConversationList
+        workItems={workItems}
+        selectedItemId={selectedItemId}
+        activeView={activeView}
+        onSelectItem={onSelectItem}
+        onViewChange={onViewChange}
+        onMarkDone={onMarkDone}
+      />
 
       {/* ── PROJECT CONTEXT ────────────────────────────────── */}
       <div className="border-t border-th" />
@@ -632,169 +535,6 @@ function ConversationList({
   );
 }
 
-function RoomList({
-  rooms,
-  selectedRoomId,
-  loading,
-  onSelectRoom,
-  onCloseRoom,
-}: {
-  rooms: HomeRoom[];
-  selectedRoomId: number | null;
-  loading?: boolean;
-  onSelectRoom: (roomId: number) => void;
-  onCloseRoom?: (roomId: number) => void;
-}) {
-  const [showClosed, setShowClosed] = useState(false);
-  const openRooms = rooms.filter((room) => room.status === "open");
-  const closedRooms = rooms.filter((room) => room.status !== "open");
-
-  return (
-    <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
-      {loading ? (
-        <div className="p-4 text-center text-sm text-th-muted">Loading rooms...</div>
-      ) : rooms.length === 0 ? (
-        <div className="p-4 text-center text-sm text-th-muted">
-          No rooms yet
-        </div>
-      ) : (
-        <>
-          <div>
-            {openRooms.length === 0 ? (
-              <div className="p-4 text-center text-sm text-th-muted">
-                No open rooms
-              </div>
-            ) : (
-              openRooms.map((room) => (
-                <RoomEntry
-                  key={room.id}
-                  room={room}
-                  isSelected={room.id === selectedRoomId}
-                  onSelect={() => onSelectRoom(room.id)}
-                  onClose={onCloseRoom ? () => onCloseRoom(room.id) : undefined}
-                />
-              ))
-            )}
-          </div>
-
-          {closedRooms.length > 0 && (
-            <div className="mt-auto">
-              <button
-                onClick={() => setShowClosed(!showClosed)}
-                className="w-full flex items-center gap-2 px-4 py-1.5 text-xs text-th-dimmed hover:text-th-muted transition-colors"
-              >
-                <CheckCircle size={12} />
-                <span>Closed ({closedRooms.length})</span>
-                <CaretDown
-                  size={10}
-                  className={`ml-auto transition-transform ${showClosed ? "" : "-rotate-90"}`}
-                />
-              </button>
-              {showClosed && (
-                <div className="pb-1">
-                  {closedRooms.map((room) => (
-                    <RoomEntry
-                      key={room.id}
-                      room={room}
-                      isSelected={room.id === selectedRoomId}
-                      isClosed
-                      onSelect={() => onSelectRoom(room.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function RoomEntry({
-  room,
-  isSelected,
-  isClosed,
-  onSelect,
-  onClose,
-}: {
-  room: HomeRoom;
-  isSelected: boolean;
-  isClosed?: boolean;
-  onSelect: () => void;
-  onClose?: () => void;
-}) {
-  const [confirmingClose, setConfirmingClose] = useState(false);
-  const closeRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!confirmingClose) return;
-    const handleClick = (event: MouseEvent) => {
-      if (closeRef.current && !closeRef.current.contains(event.target as Node)) {
-        setConfirmingClose(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [confirmingClose]);
-
-  return (
-    <div
-      className={`group w-full text-left px-4 py-2 transition-colors duration-150 ${
-        isSelected
-          ? "bg-th-muted border-l-2 border-l-th-strong"
-          : "border-l-2 border-l-transparent hover:bg-th-subtle"
-      } ${isClosed ? "opacity-50" : ""}`}
-    >
-      <div className="flex items-center gap-2 pl-2">
-        <button onClick={onSelect} className="min-w-0 flex-1 text-left" title={room.title}>
-          <p className="text-sm text-th-primary truncate">{room.title}</p>
-        </button>
-        {onClose && !isClosed && (
-          <div className="relative flex-shrink-0" ref={closeRef}>
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                setConfirmingClose(true);
-              }}
-              className="p-1.5 rounded text-th-muted opacity-0 group-hover:opacity-100 hover:text-st-red hover:bg-th-muted transition-all"
-              title="Close room"
-              aria-label="Close room"
-              aria-expanded={confirmingClose}
-            >
-              <CheckCircle size={14} weight="bold" />
-            </button>
-            {confirmingClose && (
-              <div
-                className="absolute right-0 top-full mt-1 w-52 bg-th-elevated border border-th rounded-xl shadow-xl overflow-hidden z-50 p-3"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <p className="text-xs text-th-muted mb-2.5">Close this room?</p>
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => setConfirmingClose(false)}
-                    className="flex-1 px-2.5 py-1 text-xs text-th-muted hover:text-th-primary transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      onClose();
-                      setConfirmingClose(false);
-                    }}
-                    className="flex-1 px-2.5 py-1 text-xs font-medium bg-st-red text-st-red-strong border border-st-red rounded-lg hover:bg-st-red-hover transition-colors"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function WorkItemEntry({
   item,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { FileStorageError, serializeAppFile, storeUploadedFile } from "@/lib/server/file-storage";
-import { handleRoomRouteError, requireAppAccess, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireAppAccess, RouteInputError } from "@/lib/server/route-utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export async function GET(
       files: dal.listAppFiles(app.id, includeDeleted).map(serializeAppFile),
     });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }
@@ -53,7 +53,7 @@ export async function POST(
     if (error instanceof FileStorageError) {
       return NextResponse.json({ detail: error.message }, { status: error.status });
     }
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

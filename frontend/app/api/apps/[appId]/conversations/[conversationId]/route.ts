@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
-import { CONVERSATION_STATUSES, handleRoomRouteError, readJsonBody, requireConversationAccess, requireEnumValue } from "@/lib/server/room-route-utils";
+import { CONVERSATION_STATUSES, handleRouteError, readJsonBody, requireConversationAccess, requireEnumValue } from "@/lib/server/route-utils";
 
 export async function GET(
   request: NextRequest,
@@ -12,7 +12,7 @@ export async function GET(
 
     return NextResponse.json(conversation);
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }
@@ -36,7 +36,7 @@ export async function PUT(
     const updated = dal.getConversation(conversation.id);
     return NextResponse.json(updated);
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }
@@ -54,7 +54,7 @@ export async function DELETE(
 
     return NextResponse.json({ message: "Conversation deleted" });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

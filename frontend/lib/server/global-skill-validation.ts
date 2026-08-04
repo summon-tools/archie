@@ -1,5 +1,5 @@
 import { normalizeGlobalSkillParts, normalizeGlobalSkillSlug, normalizeTriggerPhrases, type GlobalSkillWriteInput } from "./dal/global-skills";
-import { RouteInputError } from "./room-route-utils";
+import { RouteInputError } from "./route-utils";
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const MAX_NAME_LENGTH = 120;

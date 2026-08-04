@@ -3,7 +3,7 @@ import * as dal from "@/lib/server/dal";
 import { execFileSync } from "child_process";
 import { runStop } from "@/lib/server/runner";
 import { removeWorktree } from "@/lib/server/worktrees";
-import { handleRoomRouteError, requireConversationAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireConversationAccess } from "@/lib/server/route-utils";
 
 /**
  * POST /api/apps/{appId}/conversations/{conversationId}/archive
@@ -18,7 +18,7 @@ export async function POST(
     const { app, conversation, user } = await requireConversationAccess(request, appId, conversationId);
     return archiveConversation(app, conversation.id, user.id);
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
-import { handleRoomRouteError, requireAppAccess } from "@/lib/server/room-route-utils";
+import { handleRouteError, requireAppAccess } from "@/lib/server/route-utils";
 
 /**
  * GET /api/apps/{appId}/conversations — list all conversations for an app (for sidebar)
@@ -17,7 +17,7 @@ export async function GET(
     const conversations = dal.getConversationsForApp(app.id);
     return NextResponse.json(conversations);
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as dal from "@/lib/server/dal";
 import { enrichWorkItem } from "@/lib/server/work-item-view";
-import { handleRoomRouteError, parseFileIds, readJsonBody, requireAppAccess, requireAvailableAppFiles } from "@/lib/server/room-route-utils";
+import { handleRouteError, parseFileIds, readJsonBody, requireAppAccess, requireAvailableAppFiles } from "@/lib/server/route-utils";
 import type { WorkItemKind } from "@/lib/server/types";
 
 function parseWorkItemKind(value: unknown): WorkItemKind {
@@ -23,7 +23,7 @@ export async function GET(
 
     return NextResponse.json({ work_items: workItems });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }
@@ -124,7 +124,7 @@ export async function POST(
 
     return NextResponse.json(enriched, { status: 201 });
   } catch (e) {
-    const errorResponse = handleRoomRouteError(e);
+    const errorResponse = handleRouteError(e);
     if (errorResponse) return errorResponse;
     throw e;
   }

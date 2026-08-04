@@ -6,7 +6,7 @@ import {
   normalizeAllowedAppIds,
   normalizeScopes,
 } from "@/lib/server/mcp/auth";
-import { handleRoomRouteError, readJsonBody, RouteInputError } from "@/lib/server/room-route-utils";
+import { handleRouteError, readJsonBody, RouteInputError } from "@/lib/server/route-utils";
 
 function serializeToken(token: dal.McpTokenRecord) {
   return {
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       tokens: dal.listMcpTokens().map(serializeToken),
     });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       secret,
     }, { status: 201 });
   } catch (error) {
-    const errorResponse = handleRoomRouteError(error);
+    const errorResponse = handleRouteError(error);
     if (errorResponse) return errorResponse;
     throw error;
   }

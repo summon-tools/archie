@@ -3,7 +3,7 @@ import { AuthError, ForbiddenError, requireAdmin } from "@/lib/server/auth";
 import * as dal from "@/lib/server/dal";
 import { enqueueOutcomeJob, serializeOutcomeJob } from "@/lib/server/outcome-jobs";
 import { getOutcomesGitHubSyncSettings } from "@/lib/server/outcomes-github-sync";
-import { filterAppsForUser } from "@/lib/server/room-route-utils";
+import { filterAppsForUser } from "@/lib/server/route-utils";
 
 function parsePositiveInt(value: unknown, label: string, fallback: number, max: number): number {
   if (value === undefined || value === null) return fallback;

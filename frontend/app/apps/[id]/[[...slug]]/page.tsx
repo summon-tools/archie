@@ -3,13 +3,12 @@
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SpinnerGap, WarningCircle } from "@phosphor-icons/react";
-import { App, HomeRoom, Task } from "@/lib/types";
-import { getApp, getApps, getRooms, createRoom, updateRoom, getWorkItem, getWorkItems, startApp, stopApp, restartApp, archiveConversation } from "@/lib/api";
+import { App, Task } from "@/lib/types";
+import { getApp, getApps, getWorkItem, getWorkItems, startApp, stopApp, restartApp, archiveConversation } from "@/lib/api";
 import ChatSidebar from "@/components/ChatSidebar";
 import ConversationView from "@/components/ConversationView";
 import AppSettingsPanel from "@/components/AppSettingsPanel";
 import NewChatView from "@/components/NewChatView";
-import RoomWorkspace from "@/components/RoomWorkspace";
 import SplitPanelLayout from "@/components/SplitPanelLayout";
 import PreviewPanel from "@/components/PreviewPanel";
 import ProfilePanel from "@/components/ProfilePanel";
@@ -35,8 +34,6 @@ export default function AppPage() {
   // Parse workItemId from optional catch-all slug: /apps/[id]/conversation/[itemId]
   const slug = params.slug as string[] | undefined;
   const itemIdFromUrl = slug && slug[0] === "conversation" && slug[1] ? Number(slug[1]) : null;
-  const roomIdFromUrl = slug && slug[0] === "rooms" && slug[1] ? Number(slug[1]) : null;
-  const isRoomsPage = slug?.[0] === "rooms" || slug?.[0] === "home";
   const isSettingsPage = slug?.[0] === "settings";
   const isCodebaseIndexPage = slug?.[0] === "codebase-index" || slug?.[0] === "knowledge";
   const isSkillsPage = slug?.[0] === "skills";
@@ -46,17 +43,15 @@ export default function AppPage() {
   const [app, setApp] = useState<App | null>(null);
   const [allApps, setAllApps] = useState<App[]>([]);
   const [workItems, setWorkItems] = useState<Task[]>([]);
-  const [rooms, setRooms] = useState<HomeRoom[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(itemIdFromUrl);
-  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(roomIdFromUrl);
   const [selectedItem, setSelectedItem] = useState<Task | null>(null);
-  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isRoomsPage && !isTasksPage && !isSettingsPage && !isCodebaseIndexPage && !isSkillsPage && !isFilesPage && !isNotificationsPage);
+  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isTasksPage && !isSettingsPage && !isCodebaseIndexPage && !isSkillsPage && !isFilesPage && !isNotificationsPage);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Active view: null = conversation/new, "settings" = app settings, "profile" = profile
-  const [activeView, setActiveView] = useState<string | null>(isRoomsPage ? "room" : isTasksPage ? "tasks" : isSettingsPage ? "settings" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isFilesPage ? "files" : isNotificationsPage ? "notifications" : null);
+  const [activeView, setActiveView] = useState<string | null>(isTasksPage ? "tasks" : isSettingsPage ? "settings" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isFilesPage ? "files" : isNotificationsPage ? "notifications" : null);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const replacePath = useCallback((path: string) => {
@@ -92,16 +87,14 @@ export default function AppPage() {
   // Load app, all apps, and work items
   const loadData = useCallback(async () => {
     try {
-      const [appData, itemsData, appsData, roomsData] = await Promise.all([
+      const [appData, itemsData, appsData] = await Promise.all([
         getApp(appId),
         getWorkItems(appId),
         getApps(),
-        getRooms(appId),
       ]);
       setApp(appData);
       setWorkItems(itemsData);
       setAllApps(appsData);
-      setRooms(roomsData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load app — try refreshing the page");
@@ -118,21 +111,10 @@ export default function AppPage() {
   useEffect(() => {
     if (itemIdFromUrl && itemIdFromUrl !== selectedItemId) {
       setSelectedItemId(itemIdFromUrl);
-      setSelectedRoomId(null);
       setShowNewItem(false);
       setActiveView(null);
     }
   }, [itemIdFromUrl]);
-
-  // Sync room selection from URL
-  useEffect(() => {
-    if (roomIdFromUrl && roomIdFromUrl !== selectedRoomId) {
-      setSelectedRoomId(roomIdFromUrl);
-      setSelectedItemId(null);
-      setShowNewItem(false);
-      setActiveView("room");
-    }
-  }, [roomIdFromUrl]);
 
   // Load selected item details
   useEffect(() => {
@@ -152,78 +134,14 @@ export default function AppPage() {
   // Handle item selection
   const handleSelectItem = (itemId: number) => {
     setSelectedItemId(itemId);
-    setSelectedRoomId(null);
     setShowNewItem(false);
     setActiveView(null);
     replacePath(`/apps/${appId}/conversation/${itemId}`);
   };
 
-  const handleSelectRoom = useCallback((roomId: number) => {
-    setSelectedRoomId(roomId);
-    setSelectedItemId(null);
-    setSelectedItem(null);
-    setShowNewItem(false);
-    setActiveView("room");
-    replacePath(`/apps/${appId}/rooms/${roomId}`);
-  }, [appId, replacePath]);
-
-  const handleNewRoom = useCallback(async () => {
-    try {
-      const room = await createRoom(appId, {
-        title: `Planning Room ${rooms.length + 1}`,
-        purpose: "Plan and coordinate project work before creating implementation tasks.",
-      });
-      setRooms((prev) => [room, ...prev]);
-      handleSelectRoom(room.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create room");
-    }
-  }, [appId, rooms.length, handleSelectRoom]);
-
-  const handleCloseRoom = useCallback(async (roomId: number) => {
-    try {
-      const closedRoom = await updateRoom(appId, roomId, { status: "archived" });
-      let nextRoomId: number | null = null;
-      setRooms((currentRooms) => {
-        nextRoomId = currentRooms.find((room) => room.status === "open" && room.id !== roomId)?.id ?? null;
-        return currentRooms.map((room) => (room.id === roomId ? closedRoom : room));
-      });
-
-      if (selectedRoomId === roomId) {
-        if (nextRoomId) {
-          handleSelectRoom(nextRoomId);
-        } else {
-          setSelectedRoomId(null);
-          setSelectedItemId(null);
-          setSelectedItem(null);
-          setShowNewItem(false);
-          setActiveView("room");
-          replacePath(`/apps/${appId}/rooms`);
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to close room");
-    }
-  }, [appId, handleSelectRoom, replacePath, selectedRoomId]);
-
-  const handleRenameRoom = useCallback(async (roomId: number, title: string) => {
-    try {
-      const updatedRoom = await updateRoom(appId, roomId, { title });
-      setRooms((currentRooms) => currentRooms.map((room) => (
-        room.id === roomId ? updatedRoom : room
-      )));
-      setError(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to rename room";
-      setError(message);
-      throw new Error(message);
-    }
-  }, [appId]);
-
   // Handle new item
   const handleNewItem = () => {
     setSelectedItemId(null);
-    setSelectedRoomId(null);
     setSelectedItem(null);
     setShowNewItem(true);
     setActiveView(null);
@@ -233,23 +151,8 @@ export default function AppPage() {
   // Handle view change from sidebar (settings, profile)
   const handleViewChange = (view: string | null) => {
     setActiveView(view);
-    if (view === "room") {
+    if (view === "tasks") {
       setSelectedItemId(null);
-      setSelectedItem(null);
-      setShowNewItem(false);
-      if (selectedRoomId) {
-        replacePath(`/apps/${appId}/rooms/${selectedRoomId}`);
-      } else {
-        const firstOpenRoom = rooms.find((room) => room.status === "open");
-        if (firstOpenRoom) {
-          handleSelectRoom(firstOpenRoom.id);
-          return;
-        }
-        replacePath(`/apps/${appId}/rooms`);
-      }
-    } else if (view === "tasks") {
-      setSelectedItemId(null);
-      setSelectedRoomId(null);
       setSelectedItem(null);
       setShowNewItem(false);
       setActiveView("tasks");
@@ -328,7 +231,6 @@ export default function AppPage() {
   // Handle item created
   const handleItemCreated = (item: Task) => {
     setWorkItems((prev) => [item, ...prev]);
-    setSelectedRoomId(null);
     setShowNewItem(false);
     setActiveView(null);
     setPrefillMessage(null);
@@ -352,24 +254,12 @@ export default function AppPage() {
   // Handle item deleted
   const handleItemDeleted = () => {
     setSelectedItemId(null);
-    setSelectedRoomId(null);
     setSelectedItem(null);
     setShowNewItem(true);
     setActiveView(null);
     loadData();
     replacePath(`/apps/${appId}`);
   };
-
-  const selectedRoom = selectedRoomId
-    ? rooms.find((room) => room.id === selectedRoomId) || null
-    : null;
-
-  useEffect(() => {
-    if (loading || activeView !== "room" || selectedRoomId) return;
-    const firstOpenRoom = rooms.find((room) => room.status === "open");
-    if (!firstOpenRoom) return;
-    handleSelectRoom(firstOpenRoom.id);
-  }, [activeView, handleSelectRoom, loading, rooms, selectedRoomId]);
 
   // Handle marking a work item as done from the sidebar
   const handleSidebarMarkDone = useCallback(async (itemId: number) => {
@@ -469,19 +359,6 @@ export default function AppPage() {
       );
     }
 
-    if (activeView === "room") {
-      return (
-        <RoomWorkspace
-          appId={appId}
-          room={selectedRoom}
-          onOpenConversation={handleSelectItem}
-          onWorkItemCreated={handleItemCreated}
-          onCloseRoom={handleCloseRoom}
-          onRenameRoom={handleRenameRoom}
-        />
-      );
-    }
-
     if (activeView === "tasks") {
       return (
         <TaskBoard
@@ -575,14 +452,7 @@ export default function AppPage() {
         app={app}
         apps={allApps}
         workItems={workItems}
-        rooms={rooms}
-        roomsLoading={loading}
-        selectedRoomId={selectedRoomId}
         selectedItemId={selectedItemId}
-        activeWorkMode={activeView === "room" ? "rooms" : "tasks"}
-        onSelectRoom={handleSelectRoom}
-        onNewRoom={handleNewRoom}
-        onCloseRoom={handleCloseRoom}
         onSelectItem={handleSelectItem}
         onNewItem={handleNewItem}
         onMarkDone={handleSidebarMarkDone}
