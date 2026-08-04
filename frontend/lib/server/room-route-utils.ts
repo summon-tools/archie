@@ -10,6 +10,7 @@ import type {
   HomeRoomStatus,
   PlanRow,
   PlanStepRow,
+  TaskRow,
   WorkItemRow,
   WorkItemStatus,
 } from "@/lib/server/types";
@@ -179,6 +180,20 @@ export async function requireWorkItemAccess(
     throw new RouteInputError("Work item not found", 404);
   }
   return { user, app, workItem, appId, itemId };
+}
+
+export async function requireTaskAccess(
+  request: NextRequest,
+  appIdParam: string,
+  taskIdParam: string,
+): Promise<{ user: Awaited<ReturnType<typeof getAuthUser>>; app: AppRow; task: TaskRow; appId: number; taskId: number }> {
+  const { user, app, appId } = await requireAppAccess(request, appIdParam);
+  const taskId = parseRouteId(taskIdParam, "taskId");
+  const task = dal.getTask(taskId);
+  if (!task || task.app_id !== app.id) {
+    throw new RouteInputError("Task not found", 404);
+  }
+  return { user, app, task, appId, taskId };
 }
 
 export async function requireRoomPlanAccess(

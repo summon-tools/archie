@@ -72,6 +72,36 @@ export interface WorkItemRow {
   updated_at: string;
 }
 
+export type TaskStatus = "todo" | "in_progress" | "done";
+
+export interface TaskRow {
+  id: number;
+  app_id: number;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  position: number;
+  created_by: number | null;
+  assigned_to: number | null;
+  origin_type: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskWorkItemRow {
+  task_id: number;
+  work_item_id: number;
+  relation_type: string;
+  work_item_title: string;
+  work_item_status: WorkItemStatus;
+  primary_conversation_id: number | null;
+  branch_name: string | null;
+  pr_url: string | null;
+  pr_number: number | null;
+  created_at: string;
+}
+
 export interface WorkItemEnvRow {
   work_item_id: number;
   branch_name: string | null;

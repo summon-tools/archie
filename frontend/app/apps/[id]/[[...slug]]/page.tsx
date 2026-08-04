@@ -17,6 +17,7 @@ import CodebaseIndexPanel from "@/components/CodebaseIndexPanel";
 import SkillsPanel from "@/components/SkillsPanel";
 import NotificationPanel from "@/components/NotificationPanel";
 import AppFilesPanel from "@/components/AppFilesPanel";
+import TaskBoard from "@/components/TaskBoard";
 
 
 import { usePreviewControls } from "@/hooks/usePreviewControls";
@@ -41,6 +42,7 @@ export default function AppPage() {
   const isSkillsPage = slug?.[0] === "skills";
   const isFilesPage = slug?.[0] === "files";
   const isNotificationsPage = slug?.[0] === "notifications";
+  const isTasksPage = slug?.[0] === "tasks";
   const [app, setApp] = useState<App | null>(null);
   const [allApps, setAllApps] = useState<App[]>([]);
   const [workItems, setWorkItems] = useState<Task[]>([]);
@@ -48,13 +50,13 @@ export default function AppPage() {
   const [selectedItemId, setSelectedItemId] = useState<number | null>(itemIdFromUrl);
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(roomIdFromUrl);
   const [selectedItem, setSelectedItem] = useState<Task | null>(null);
-  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isRoomsPage && !isSettingsPage && !isCodebaseIndexPage && !isSkillsPage && !isFilesPage && !isNotificationsPage);
+  const [showNewItem, setShowNewItem] = useState(!itemIdFromUrl && !isRoomsPage && !isTasksPage && !isSettingsPage && !isCodebaseIndexPage && !isSkillsPage && !isFilesPage && !isNotificationsPage);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Active view: null = conversation/new, "settings" = app settings, "profile" = profile
-  const [activeView, setActiveView] = useState<string | null>(isRoomsPage ? "room" : isSettingsPage ? "settings" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isFilesPage ? "files" : isNotificationsPage ? "notifications" : null);
+  const [activeView, setActiveView] = useState<string | null>(isRoomsPage ? "room" : isTasksPage ? "tasks" : isSettingsPage ? "settings" : isCodebaseIndexPage ? "codebase-index" : isSkillsPage ? "skills" : isFilesPage ? "files" : isNotificationsPage ? "notifications" : null);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const replacePath = useCallback((path: string) => {
@@ -245,6 +247,13 @@ export default function AppPage() {
         }
         replacePath(`/apps/${appId}/rooms`);
       }
+    } else if (view === "tasks") {
+      setSelectedItemId(null);
+      setSelectedRoomId(null);
+      setSelectedItem(null);
+      setShowNewItem(false);
+      setActiveView("tasks");
+      replacePath(`/apps/${appId}/tasks`);
     } else if (view === "settings") {
       replacePath(`/apps/${appId}/settings`);
     } else if (view === "codebase-index") {
@@ -469,6 +478,16 @@ export default function AppPage() {
           onWorkItemCreated={handleItemCreated}
           onCloseRoom={handleCloseRoom}
           onRenameRoom={handleRenameRoom}
+        />
+      );
+    }
+
+    if (activeView === "tasks") {
+      return (
+        <TaskBoard
+          appId={appId}
+          onOpenConversation={handleSelectItem}
+          onWorkItemCreated={handleItemCreated}
         />
       );
     }

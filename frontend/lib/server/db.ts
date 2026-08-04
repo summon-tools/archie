@@ -118,6 +118,38 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_work_items_app_id ON work_items(app_id);
     CREATE INDEX IF NOT EXISTS idx_work_items_status ON work_items(status);
 
+    CREATE TABLE IF NOT EXISTS tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'in_progress', 'done')),
+      priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
+      position INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER DEFAULT NULL,
+      assigned_to INTEGER DEFAULT NULL,
+      origin_type TEXT NOT NULL DEFAULT 'user',
+      completed_at TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id),
+      FOREIGN KEY (assigned_to) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tasks_app_id ON tasks(app_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(app_id, status);
+
+    CREATE TABLE IF NOT EXISTS task_work_items (
+      task_id INTEGER NOT NULL,
+      work_item_id INTEGER NOT NULL,
+      relation_type TEXT NOT NULL DEFAULT 'implementation',
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (task_id, work_item_id),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_work_items_work_item_id ON task_work_items(work_item_id);
+
     CREATE TABLE IF NOT EXISTS work_item_env (
       work_item_id INTEGER PRIMARY KEY,
       branch_name TEXT DEFAULT NULL,
@@ -896,6 +928,73 @@ function initDb(db: Database.Database): void {
 
   // ── Ensure automation system user exists (RFC 23) ─────────────
   ensureAutomationUser(db);
+
+  // ── Migrate planning task statuses ────────────────────────────
+  ensureTaskStatusSchema(db);
+
+  // ── Backfill planning tasks for existing task conversations ────
+  backfillTasksFromWorkItems(db);
+}
+
+function ensureTaskStatusSchema(db: Database.Database): void {
+  const row = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'"
+  ).get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'todo'")) return;
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec("BEGIN");
+    db.exec(`
+      CREATE TABLE tasks_migrated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        parent_task_id INTEGER DEFAULT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'in_progress', 'done')),
+        priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
+        position INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER DEFAULT NULL,
+        assigned_to INTEGER DEFAULT NULL,
+        origin_type TEXT NOT NULL DEFAULT 'user',
+        blocked_reason TEXT DEFAULT NULL,
+        completed_at TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_task_id) REFERENCES tasks_migrated(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id),
+        FOREIGN KEY (assigned_to) REFERENCES users(id)
+      );
+      INSERT INTO tasks_migrated (
+        id, app_id, parent_task_id, title, description, status, priority, position,
+        created_by, assigned_to, origin_type, blocked_reason, completed_at, created_at, updated_at
+      )
+      SELECT
+        id, app_id, parent_task_id, title, description,
+        CASE status
+          WHEN 'backlog' THEN 'todo'
+          WHEN 'ready' THEN 'todo'
+          WHEN 'review' THEN 'in_progress'
+          WHEN 'blocked' THEN 'todo'
+          ELSE status
+        END,
+        priority, position, created_by, assigned_to, origin_type, blocked_reason,
+        completed_at, created_at, updated_at
+      FROM tasks;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_migrated RENAME TO tasks;
+      CREATE INDEX IF NOT EXISTS idx_tasks_app_id ON tasks(app_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(app_id, status);
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw error;
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }
 
 /**
@@ -906,9 +1005,20 @@ function resetIfLegacySchema(db: Database.Database): void {
   const hasLegacyThreads = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='threads'"
   ).get();
-  const hasLegacyTasks = db.prepare(
+  const taskTable = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'"
   ).get();
+  const taskColumns = taskTable
+    ? db.prepare("PRAGMA table_info(\"tasks\")").all() as { name: string }[]
+    : [];
+  // Before the current planning-task schema, `tasks` belonged to the legacy
+  // conversation model. Preserve that reset behavior without treating the
+  // current task table as legacy on every application boot.
+  const hasCurrentTasks = Boolean(taskTable)
+    && taskColumns.some((column) => column.name === "app_id")
+    && taskColumns.some((column) => column.name === "description")
+    && taskColumns.some((column) => column.name === "status");
+  const hasLegacyTasks = Boolean(taskTable) && !hasCurrentTasks;
 
   if (hasLegacyThreads || hasLegacyTasks) {
     // Drop all tables and let initDb recreate with clean schema
@@ -932,6 +1042,60 @@ function addColumnIfMissing(db: Database.Database, table: string, column: string
   if (!columns.some((c) => c.name === column)) {
     db.exec(`ALTER TABLE "${table}" ADD COLUMN ${column} ${definition}`);
   }
+}
+
+function backfillTasksFromWorkItems(db: Database.Database): void {
+  const legacyItems = db.prepare(
+    `SELECT wi.*
+     FROM work_items wi
+     LEFT JOIN task_work_items twi ON twi.work_item_id = wi.id
+     WHERE wi.kind = 'task' AND twi.work_item_id IS NULL
+     ORDER BY wi.created_at ASC, wi.id ASC`
+  ).all() as {
+    id: number;
+    app_id: number;
+    title: string;
+    summary: string;
+    status: "proposed" | "in_progress" | "done";
+    position: number;
+    created_by: number | null;
+    completed_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }[];
+  if (legacyItems.length === 0) return;
+
+  const transaction = db.transaction(() => {
+    const maxPosition = db.prepare(
+      "SELECT COALESCE(MAX(position), -1) AS max_pos FROM tasks WHERE app_id = ? AND status = ?"
+    );
+    const insertTask = db.prepare(
+      `INSERT INTO tasks (
+        app_id, title, description, status, priority, position, created_by,
+        origin_type, completed_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'medium', ?, ?, 'legacy_work_item', ?, ?, ?)`
+    );
+    const insertLink = db.prepare(
+      "INSERT OR IGNORE INTO task_work_items (task_id, work_item_id, relation_type) VALUES (?, ?, 'implementation')"
+    );
+    for (const item of legacyItems) {
+      const status = item.status === "done" ? "done" : item.status === "in_progress" ? "in_progress" : "todo";
+      const nextPosition = (maxPosition.get(item.app_id, status) as { max_pos: number }).max_pos + 1;
+      const result = insertTask.run(
+        item.app_id,
+        item.title,
+        item.summary || "",
+        status,
+        nextPosition,
+        item.created_by,
+        item.completed_at,
+        item.created_at,
+        item.updated_at,
+      );
+      insertLink.run(result.lastInsertRowid, item.id);
+    }
+  });
+  transaction();
 }
 
 function ensureAppFilesUploadingStatus(db: Database.Database): void {

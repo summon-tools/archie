@@ -294,10 +294,45 @@ export type EnrichedWorkItem = WorkItem & {
   demo_seed_output: string | null;
   walkthrough_script: string | null;
   task_type: string | null;
+  task_ids: number[];
 };
 
 /** Alias kept for widespread usage */
 export type Task = EnrichedWorkItem;
+
+export type ProjectTaskStatus = "todo" | "in_progress" | "done";
+
+export interface TaskWorkItemLink {
+  task_id: number;
+  work_item_id: number;
+  relation_type: string;
+  work_item_title: string;
+  work_item_status: "proposed" | "in_progress" | "done";
+  primary_conversation_id: number | null;
+  branch_name: string | null;
+  pr_url: string | null;
+  pr_number: number | null;
+  created_at: string;
+}
+
+export interface ProjectTask {
+  id: number;
+  app_id: number;
+  title: string;
+  description: string;
+  status: ProjectTaskStatus;
+  position: number;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_by_color: string | null;
+  assigned_to: number | null;
+  assigned_to_name: string | null;
+  origin_type: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  linked_work_items: TaskWorkItemLink[];
+}
 
 /** Conversation message as returned by the API */
 export interface ConversationMessage {

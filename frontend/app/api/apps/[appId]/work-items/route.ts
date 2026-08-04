@@ -47,12 +47,36 @@ export async function POST(
 
     const taskType = parseWorkItemKind(body.task_type);
     const bodyMd = typeof message === "string" ? message : "";
+    let taskId = body.task_id === undefined || body.task_id === null ? null : Number(body.task_id);
+    if (taskId !== null && (!Number.isInteger(taskId) || taskId <= 0)) {
+      return NextResponse.json({ detail: "task_id must be a positive integer" }, { status: 400 });
+    }
+    if (taskId !== null) {
+      const task = dal.getTask(taskId);
+      if (!task || task.app_id !== access.app.id) {
+        return NextResponse.json({ detail: "Task not found" }, { status: 404 });
+      }
+    }
 
     // Auto-generate title from message
     const titleSource = bodyMd.trim() || "File attachment task";
     const title = titleSource.length > 60
       ? titleSource.slice(0, 60) + "..."
       : titleSource;
+
+    // The existing "create and start" flow remains available, but it now
+    // creates the planning record as well so every user-started task can be
+    // found on the task board later.
+    if (taskId === null && taskType === "task") {
+      const task = dal.createTask({
+        app_id: access.app.id,
+        title,
+        description: bodyMd,
+        status: "in_progress",
+        created_by: access.user.id,
+      });
+      taskId = task.id;
+    }
 
     // Create conversation first
     const conversation = dal.createConversation({
@@ -87,6 +111,10 @@ export async function POST(
       work_item_id: workItem.id,
       link_type: "attachment",
     });
+    if (taskId !== null) {
+      dal.linkTaskToWorkItem(taskId, workItem.id);
+      dal.updateTask(taskId, { status: "in_progress" });
+    }
 
     const enriched = enrichWorkItem({
       ...workItem,
