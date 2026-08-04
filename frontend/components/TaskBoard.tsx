@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Check,
   CaretDown,
@@ -18,22 +18,12 @@ import {
   getProjectTasks,
   updateProjectTask,
 } from "@/lib/api";
-import type { ProjectTask, ProjectTaskPriority, ProjectTaskStatus, Task } from "@/lib/types";
+import type { ProjectTask, ProjectTaskStatus, Task } from "@/lib/types";
 
-const COLUMNS: { status: ProjectTaskStatus; label: string; description: string }[] = [
-  { status: "backlog", label: "Backlog", description: "Ideas and work not yet ready" },
-  { status: "ready", label: "Ready", description: "Defined and ready to pick up" },
-  { status: "in_progress", label: "In progress", description: "Currently being implemented" },
-  { status: "review", label: "Review", description: "Waiting for review or approval" },
-  { status: "blocked", label: "Blocked", description: "Waiting on a decision or dependency" },
-  { status: "done", label: "Done", description: "Accepted or completed" },
-];
-
-const PRIORITIES: { value: ProjectTaskPriority; label: string }[] = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "urgent", label: "Urgent" },
+const COLUMNS: { status: ProjectTaskStatus; label: string }[] = [
+  { status: "todo", label: "Todo" },
+  { status: "in_progress", label: "In progress" },
+  { status: "done", label: "Done" },
 ];
 
 interface TaskBoardProps {
@@ -117,16 +107,13 @@ export default function TaskBoard({ appId, onOpenConversation, onWorkItemCreated
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-th-bg">
-      <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-th">
-        <div>
-          <h1 className="text-lg font-semibold text-th-primary">Tasks</h1>
-          <p className="text-sm text-th-muted mt-0.5">Plan work now. Start implementation when a task is ready.</p>
-        </div>
+      <div className="h-10 flex items-center justify-between gap-4 px-6 border-b border-th">
+        <h1 className="text-sm font-semibold text-th-primary">Tasks</h1>
         <button
           onClick={() => setCreating(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-btn-primary px-3 py-2 text-sm font-medium text-btn-primary hover:opacity-90"
+          className="h-7 inline-flex items-center gap-1.5 rounded-md border border-th bg-transparent px-2.5 text-xs font-medium text-th-secondary transition-colors hover:bg-th-muted hover:text-th-primary"
         >
-          <Plus size={16} weight="bold" />
+          <Plus size={14} weight="bold" />
           New task
         </button>
       </div>
@@ -160,14 +147,13 @@ export default function TaskBoard({ appId, onOpenConversation, onWorkItemCreated
                     setDraggedTaskId(null);
                   }}
                 >
-                  <div className="flex items-start justify-between gap-2 px-3 py-3">
+                  <div className="flex items-center justify-between gap-2 px-3 py-3">
                     <div>
                       <div className="flex items-center gap-2 text-sm font-semibold text-th-primary">
                         <span className={`h-2 w-2 rounded-full ${statusDot(column.status)}`} />
                         {column.label}
                         <span className="text-xs font-normal text-th-dimmed">{columnTasks.length}</span>
                       </div>
-                      <p className="mt-1 text-xs text-th-dimmed">{column.description}</p>
                     </div>
                     <button
                       onClick={() => setCreating(true)}
@@ -206,7 +192,6 @@ export default function TaskBoard({ appId, onOpenConversation, onWorkItemCreated
         <TaskEditor
           appId={appId}
           task={editingTask}
-          tasks={tasks}
           saving={saving}
           onCancel={() => { setCreating(false); setEditingTask(null); }}
           onSaving={setSaving}
@@ -248,27 +233,18 @@ function TaskCard({
           <PencilSimple size={14} />
         </button>
       </div>
-      {task.description && <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-th-muted">{task.description}</p>}
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${priorityStyle(task.priority)}`}>{task.priority}</span>
-        {task.dependencies.length > 0 && (
-          <span className="rounded bg-th-muted px-1.5 py-0.5 text-[10px] text-th-muted" title="Dependencies">
-            {task.dependencies.length} dep{task.dependencies.length === 1 ? "" : "s"}
-          </span>
-        )}
-        {task.parent_task_id && <span className="rounded bg-th-muted px-1.5 py-0.5 text-[10px] text-th-muted">Subtask</span>}
-        {activeWorkItem && <span className="rounded bg-st-blue/10 px-1.5 py-0.5 text-[10px] text-st-blue">Execution linked</span>}
-      </div>
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-th pt-2">
-        {activeWorkItem?.pr_url ? (
-          <a href={activeWorkItem.pr_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-st-blue hover:underline">
-            <GitPullRequest size={13} /> PR #{activeWorkItem.pr_number}
-          </a>
-        ) : activeWorkItem?.primary_conversation_id ? (
-          <button onClick={() => onOpenConversation(activeWorkItem.work_item_id)} className="text-[11px] text-st-blue hover:underline">Open conversation</button>
-        ) : (
-          <span className="text-[11px] text-th-dimmed">Not started</span>
-        )}
+        <div className="flex min-w-0 items-center gap-3">
+          {activeWorkItem?.pr_url && (
+            <a href={activeWorkItem.pr_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-st-blue hover:underline">
+              <GitPullRequest size={13} /> PR #{activeWorkItem.pr_number}
+            </a>
+          )}
+          {activeWorkItem?.primary_conversation_id && (
+            <button onClick={() => onOpenConversation(activeWorkItem.work_item_id)} className="text-[11px] text-st-blue hover:underline">Open conversation</button>
+          )}
+          {!activeWorkItem && <span className="text-[11px] text-th-dimmed">Not started</span>}
+        </div>
         {!activeWorkItem && task.status !== "done" && (
           <button onClick={onStart} disabled={starting} className="inline-flex items-center gap-1 rounded-md bg-btn-secondary px-2 py-1 text-[11px] font-medium text-btn-secondary hover:opacity-80 disabled:opacity-50">
             {starting ? <SpinnerGap size={12} className="animate-spin" /> : <Play size={12} weight="fill" />}
@@ -283,7 +259,6 @@ function TaskCard({
 function TaskEditor({
   appId,
   task,
-  tasks,
   saving,
   onCancel,
   onSaving,
@@ -292,7 +267,6 @@ function TaskEditor({
 }: {
   appId: number;
   task: ProjectTask | null;
-  tasks: ProjectTask[];
   saving: boolean;
   onCancel: () => void;
   onSaving: (saving: boolean) => void;
@@ -301,11 +275,7 @@ function TaskEditor({
 }) {
   const [title, setTitle] = useState(task?.title || "");
   const [description, setDescription] = useState(task?.description || "");
-  const [status, setStatus] = useState<ProjectTaskStatus>(task?.status || "backlog");
-  const [priority, setPriority] = useState<ProjectTaskPriority>(task?.priority || "medium");
-  const [parentTaskId, setParentTaskId] = useState<number | null>(task?.parent_task_id || null);
-  const [dependencyIds, setDependencyIds] = useState<number[]>(task?.dependencies.map((dependency) => dependency.depends_on_task_id) || []);
-  const availableTasks = tasks.filter((candidate) => candidate.id !== task?.id);
+  const [status, setStatus] = useState<ProjectTaskStatus>(task?.status || "todo");
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -313,18 +283,14 @@ function TaskEditor({
     onSaving(true);
     try {
       const saved = task
-        ? await updateProjectTask(appId, task.id, { title: title.trim(), description, status, priority, parent_task_id: parentTaskId, dependency_ids: dependencyIds })
-        : await createProjectTask(appId, { title: title.trim(), description, status, priority, parent_task_id: parentTaskId, dependency_ids: dependencyIds });
+        ? await updateProjectTask(appId, task.id, { title: title.trim(), description, status })
+        : await createProjectTask(appId, { title: title.trim(), description, status });
       await onSaved(saved);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to save task");
     } finally {
       onSaving(false);
     }
-  };
-
-  const toggleDependency = (id: number) => {
-    setDependencyIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   };
 
   return (
@@ -344,26 +310,8 @@ function TaskEditor({
         <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-th-dimmed">Description</label>
         <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} placeholder="Add context, acceptance criteria, or notes..." className="mt-1.5 w-full resize-y rounded-lg border border-th bg-th-subtle px-3 py-2 text-sm text-th-primary outline-none focus:border-st-blue" />
 
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="mt-4">
           <FieldSelect label="Status" value={status} onChange={(value) => setStatus(value as ProjectTaskStatus)} options={COLUMNS.map((column) => ({ value: column.status, label: column.label }))} />
-          <FieldSelect label="Priority" value={priority} onChange={(value) => setPriority(value as ProjectTaskPriority)} options={PRIORITIES} />
-        </div>
-
-        <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-th-dimmed">Parent task</label>
-        <select value={parentTaskId || ""} onChange={(event) => setParentTaskId(event.target.value ? Number(event.target.value) : null)} className="mt-1.5 w-full rounded-lg border border-th bg-th-subtle px-3 py-2 text-sm text-th-primary outline-none focus:border-st-blue">
-          <option value="">No parent task</option>
-          {availableTasks.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}
-        </select>
-
-        <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-th-dimmed">Dependencies</label>
-        <div className="mt-1.5 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-th bg-th-subtle p-2">
-          {availableTasks.length === 0 ? <p className="px-1 py-2 text-xs text-th-dimmed">No other tasks yet.</p> : availableTasks.map((candidate) => (
-            <label key={candidate.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-th-secondary hover:bg-th-muted">
-              <input type="checkbox" checked={dependencyIds.includes(candidate.id)} onChange={() => toggleDependency(candidate.id)} />
-              <span className="truncate">{candidate.title}</span>
-              <span className="ml-auto text-[10px] text-th-dimmed">{candidate.status.replace("_", " ")}</span>
-            </label>
-          ))}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
@@ -379,30 +327,79 @@ function TaskEditor({
 }
 
 function FieldSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: { value: string; label: string }[] }) {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const selectedOption = options.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
   return (
     <label className="block text-xs font-semibold uppercase tracking-wide text-th-dimmed">
       {label}
-      <span className="relative mt-1.5 block">
-        <select value={value} onChange={(event) => onChange(event.target.value)} className="w-full appearance-none rounded-lg border border-th bg-th-subtle px-3 py-2 pr-8 text-sm font-normal capitalize text-th-primary outline-none focus:border-st-blue">
-          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-        <CaretDown size={14} className="pointer-events-none absolute right-2.5 top-2.5 text-th-muted" />
-      </span>
+      <div className="relative mt-1.5" ref={pickerRef}>
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-th bg-th-subtle px-3 py-2 text-left text-sm font-normal text-th-primary outline-none transition-colors hover:bg-th-muted focus:border-st-blue focus:ring-1 focus:ring-st-blue"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot(value as ProjectTaskStatus)}`} />
+            <span className="truncate">{selectedOption?.label || value}</span>
+          </span>
+          <CaretDown size={14} className={`shrink-0 text-th-muted transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+
+        {open && (
+          <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-th bg-th-elevated p-1 shadow-xl" role="listbox" aria-label={label}>
+            {options.map((option) => {
+              const isSelected = option.value === value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => {
+                    onChange(option.value);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors ${
+                    isSelected ? "bg-st-blue/15 text-th-primary" : "text-th-secondary hover:bg-th-muted hover:text-th-primary"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={`h-2 w-2 rounded-full ${statusDot(option.value as ProjectTaskStatus)}`} />
+                    {option.label}
+                  </span>
+                  {isSelected && <Check size={14} className="text-st-blue" weight="bold" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </label>
   );
 }
 
 function statusDot(status: ProjectTaskStatus): string {
   if (status === "done") return "bg-st-green";
-  if (status === "blocked") return "bg-st-red";
   if (status === "in_progress") return "bg-st-blue";
-  if (status === "review") return "bg-st-amber";
   return "bg-th-dimmed";
-}
-
-function priorityStyle(priority: ProjectTaskPriority): string {
-  if (priority === "urgent") return "bg-st-red/15 text-st-red";
-  if (priority === "high") return "bg-st-amber/15 text-st-amber";
-  if (priority === "low") return "bg-th-muted text-th-dimmed";
-  return "bg-st-blue/10 text-st-blue";
 }

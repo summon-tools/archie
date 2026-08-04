@@ -43,23 +43,26 @@ describe("project task API", () => {
     const createdResponse = await routes.POST(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/tasks`, {
         token,
-        body: { title: "Add planning board", description: "Create the board before automation.", priority: "high" },
+        body: { title: "Add planning board", description: "Create the board before automation." },
       }),
       { params: Promise.resolve({ appId: String(app.id) }) },
     );
     expect(createdResponse.status).toBe(201);
     const created = await createdResponse.json();
-    expect(created).toMatchObject({ title: "Add planning board", status: "backlog", priority: "high", dependencies: [], linked_work_items: [] });
+    expect(created).toMatchObject({ title: "Add planning board", status: "todo", linked_work_items: [] });
+    expect(created).not.toHaveProperty("priority");
+    expect(created).not.toHaveProperty("parent_task_id");
+    expect(created).not.toHaveProperty("dependencies");
 
     const updatedResponse = await detailRoutes.PATCH(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/tasks/${created.id}`, {
         token,
-        body: { status: "ready", description: "Ready for implementation." },
+        body: { status: "todo", description: "Ready for implementation." },
       }),
       { params: Promise.resolve({ appId: String(app.id), taskId: String(created.id) }) },
     );
     expect(updatedResponse.status).toBe(200);
-    await expect(updatedResponse.json()).resolves.toMatchObject({ status: "ready", description: "Ready for implementation." });
+    await expect(updatedResponse.json()).resolves.toMatchObject({ status: "todo", description: "Ready for implementation." });
 
     const listedResponse = await routes.GET(
       makeRequest(`http://localhost:8080/api/apps/${app.id}/tasks`, { token }),
@@ -89,18 +92,17 @@ describe("project task API", () => {
     expect(db.prepare("SELECT status FROM tasks WHERE id = ?").get(task.id)).toMatchObject({ status: "in_progress" });
   });
 
-  it("rejects a dependency from another project", async () => {
-    const app = seedApp(db, { name: "First" });
-    const otherApp = seedApp(db, { name: "Second" });
+  it.each(["backlog", "ready", "review", "blocked"])("rejects the removed %s status", async (status) => {
+    const app = seedApp(db);
     const token = await authToken();
-    const dal = await import("@/lib/server/dal/tasks");
-    const dependency = dal.createTask({ app_id: otherApp.id, title: "Other project task" });
     const routes = await import("@/app/api/apps/[appId]/tasks/route");
 
     const response = await routes.POST(
-      makeRequest(`http://localhost:8080/api/apps/${app.id}/tasks`, { token, body: { title: "Invalid dependency", dependency_ids: [dependency.id] } }),
+      makeRequest(`http://localhost:8080/api/apps/${app.id}/tasks`, { token, body: { title: "Unsupported status", status } }),
       { params: Promise.resolve({ appId: String(app.id) }) },
     );
+
     expect(response.status).toBe(400);
   });
+
 });

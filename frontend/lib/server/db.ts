@@ -121,38 +121,23 @@ function initDb(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL,
-      parent_task_id INTEGER DEFAULT NULL,
       title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog', 'ready', 'in_progress', 'review', 'done', 'blocked')),
+      status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'in_progress', 'done')),
       priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
       position INTEGER NOT NULL DEFAULT 0,
       created_by INTEGER DEFAULT NULL,
       assigned_to INTEGER DEFAULT NULL,
       origin_type TEXT NOT NULL DEFAULT 'user',
-      blocked_reason TEXT DEFAULT NULL,
       completed_at TEXT DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
-      FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
       FOREIGN KEY (created_by) REFERENCES users(id),
       FOREIGN KEY (assigned_to) REFERENCES users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_app_id ON tasks(app_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(app_id, status);
-    CREATE INDEX IF NOT EXISTS idx_tasks_parent_task_id ON tasks(parent_task_id);
-
-    CREATE TABLE IF NOT EXISTS task_dependencies (
-      task_id INTEGER NOT NULL,
-      depends_on_task_id INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY (task_id, depends_on_task_id),
-      CHECK(task_id <> depends_on_task_id),
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-      FOREIGN KEY (depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on ON task_dependencies(depends_on_task_id);
 
     CREATE TABLE IF NOT EXISTS task_work_items (
       task_id INTEGER NOT NULL,
@@ -944,8 +929,72 @@ function initDb(db: Database.Database): void {
   // ── Ensure automation system user exists (RFC 23) ─────────────
   ensureAutomationUser(db);
 
+  // ── Migrate planning task statuses ────────────────────────────
+  ensureTaskStatusSchema(db);
+
   // ── Backfill planning tasks for existing task conversations ────
   backfillTasksFromWorkItems(db);
+}
+
+function ensureTaskStatusSchema(db: Database.Database): void {
+  const row = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'"
+  ).get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'todo'")) return;
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec("BEGIN");
+    db.exec(`
+      CREATE TABLE tasks_migrated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        parent_task_id INTEGER DEFAULT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'in_progress', 'done')),
+        priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
+        position INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER DEFAULT NULL,
+        assigned_to INTEGER DEFAULT NULL,
+        origin_type TEXT NOT NULL DEFAULT 'user',
+        blocked_reason TEXT DEFAULT NULL,
+        completed_at TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_task_id) REFERENCES tasks_migrated(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id),
+        FOREIGN KEY (assigned_to) REFERENCES users(id)
+      );
+      INSERT INTO tasks_migrated (
+        id, app_id, parent_task_id, title, description, status, priority, position,
+        created_by, assigned_to, origin_type, blocked_reason, completed_at, created_at, updated_at
+      )
+      SELECT
+        id, app_id, parent_task_id, title, description,
+        CASE status
+          WHEN 'backlog' THEN 'todo'
+          WHEN 'ready' THEN 'todo'
+          WHEN 'review' THEN 'in_progress'
+          WHEN 'blocked' THEN 'todo'
+          ELSE status
+        END,
+        priority, position, created_by, assigned_to, origin_type, blocked_reason,
+        completed_at, created_at, updated_at
+      FROM tasks;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_migrated RENAME TO tasks;
+      CREATE INDEX IF NOT EXISTS idx_tasks_app_id ON tasks(app_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(app_id, status);
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw error;
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }
 
 /**
@@ -965,7 +1014,11 @@ function resetIfLegacySchema(db: Database.Database): void {
   // Before the current planning-task schema, `tasks` belonged to the legacy
   // conversation model. Preserve that reset behavior without treating the
   // current task table as legacy on every application boot.
-  const hasLegacyTasks = Boolean(taskTable) && !taskColumns.some((column) => column.name === "parent_task_id");
+  const hasCurrentTasks = Boolean(taskTable)
+    && taskColumns.some((column) => column.name === "app_id")
+    && taskColumns.some((column) => column.name === "description")
+    && taskColumns.some((column) => column.name === "status");
+  const hasLegacyTasks = Boolean(taskTable) && !hasCurrentTasks;
 
   if (hasLegacyThreads || hasLegacyTasks) {
     // Drop all tables and let initDb recreate with clean schema
@@ -1026,7 +1079,7 @@ function backfillTasksFromWorkItems(db: Database.Database): void {
       "INSERT OR IGNORE INTO task_work_items (task_id, work_item_id, relation_type) VALUES (?, ?, 'implementation')"
     );
     for (const item of legacyItems) {
-      const status = item.status === "done" ? "done" : item.status === "in_progress" ? "in_progress" : "backlog";
+      const status = item.status === "done" ? "done" : item.status === "in_progress" ? "in_progress" : "todo";
       const nextPosition = (maxPosition.get(item.app_id, status) as { max_pos: number }).max_pos + 1;
       const result = insertTask.run(
         item.app_id,

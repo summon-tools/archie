@@ -8,9 +8,14 @@ type TaskWithUsers = TaskRow & {
 };
 
 export function serializeTask(task: TaskWithUsers) {
+  const {
+    priority: _legacyPriority,
+    parent_task_id: _legacyParentTaskId,
+    blocked_reason: _legacyBlockedReason,
+    ...taskWithoutLegacyFields
+  } = task as TaskWithUsers & { priority?: unknown; parent_task_id?: unknown; blocked_reason?: unknown };
   return {
-    ...task,
-    dependencies: dal.getTaskDependencies(task.id),
+    ...taskWithoutLegacyFields,
     linked_work_items: dal.getTaskWorkItems(task.id),
   };
 }

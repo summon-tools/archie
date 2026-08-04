@@ -27,39 +27,12 @@ describe("tasks DAL", () => {
       app_id: app.id,
       title: "Add a task board",
       description: "Let users plan work before starting an agent.",
-      priority: "high",
       created_by: user.id,
     });
 
     expect(task.title).toBe("Add a task board");
-    expect(task.status).toBe("backlog");
-    expect(task.priority).toBe("high");
+    expect(task.status).toBe("todo");
     expect(dal.getTasksByApp(app.id)[0].created_by_name).toBe("Planner");
-  });
-
-  it("stores parent tasks and dependencies", async () => {
-    const dal = await loadDal();
-    const app = seedApp(db);
-    const parent = dal.createTask({ app_id: app.id, title: "Blog feature" });
-    const dependency = dal.createTask({ app_id: app.id, title: "Design blog schema" });
-    const child = dal.createTask({ app_id: app.id, title: "Build blog editor", parent_task_id: parent.id });
-
-    dal.setTaskDependencies(child.id, [dependency.id]);
-
-    expect(dal.getTask(child.id)?.parent_task_id).toBe(parent.id);
-    expect(dal.getTaskDependencies(child.id)).toMatchObject([
-      { task_id: child.id, depends_on_task_id: dependency.id, depends_on_title: "Design blog schema" },
-    ]);
-  });
-
-  it("rejects dependency cycles", async () => {
-    const dal = await loadDal();
-    const app = seedApp(db);
-    const first = dal.createTask({ app_id: app.id, title: "First" });
-    const second = dal.createTask({ app_id: app.id, title: "Second" });
-    dal.setTaskDependencies(first.id, [second.id]);
-
-    expect(() => dal.setTaskDependencies(second.id, [first.id])).toThrow("cannot contain a cycle");
   });
 
   it("links one execution work item to a planning task", async () => {

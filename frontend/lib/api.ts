@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse, ProjectTask, ProjectTaskPriority, ProjectTaskStatus } from "./types";
+import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, HomeRoom, RoomMessage, RoomPlanResponse, PlanStep, PlanExecutionResponse, PlanStepGateResponse, HomeAgentConfig, AgentModelOption, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse, ProjectTask, ProjectTaskStatus } from "./types";
 
 const BASE = "/api";
 
@@ -387,9 +387,6 @@ export async function createProjectTask(appId: number, data: {
   title: string;
   description?: string;
   status?: ProjectTaskStatus;
-  priority?: ProjectTaskPriority;
-  parent_task_id?: number | null;
-  dependency_ids?: number[];
   assigned_to?: number | null;
 }): Promise<ProjectTask> {
   return fetchJSON(`${BASE}/apps/${appId}/tasks`, {
@@ -402,11 +399,7 @@ export async function updateProjectTask(appId: number, taskId: number, data: Par
   title: string;
   description: string;
   status: ProjectTaskStatus;
-  priority: ProjectTaskPriority;
-  parent_task_id: number | null;
-  dependency_ids: number[];
   assigned_to: number | null;
-  blocked_reason: string | null;
   position: number;
 }>): Promise<ProjectTask> {
   return fetchJSON(`${BASE}/apps/${appId}/tasks/${taskId}`, {

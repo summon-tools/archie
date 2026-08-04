@@ -72,33 +72,21 @@ export interface WorkItemRow {
   updated_at: string;
 }
 
-export type TaskStatus = "backlog" | "ready" | "in_progress" | "review" | "done" | "blocked";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TaskStatus = "todo" | "in_progress" | "done";
 
 export interface TaskRow {
   id: number;
   app_id: number;
-  parent_task_id: number | null;
   title: string;
   description: string;
   status: TaskStatus;
-  priority: TaskPriority;
   position: number;
   created_by: number | null;
   assigned_to: number | null;
   origin_type: string;
-  blocked_reason: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface TaskDependencyRow {
-  task_id: number;
-  depends_on_task_id: number;
-  depends_on_title: string;
-  depends_on_status: TaskStatus;
-  created_at: string;
 }
 
 export interface TaskWorkItemRow {
