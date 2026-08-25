@@ -7,6 +7,7 @@
 import type { ContextNeeds } from "./context";
 
 export const TASK_CONTEXT: ContextNeeds = {
+  project_dependencies: true,
   knowledge_topics: ["brief"],
   work_item_brief: true,
   recent_briefs: { limit: 3 },

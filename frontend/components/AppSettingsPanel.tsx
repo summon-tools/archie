@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { SpinnerGap, Play, Stop, ArrowsClockwise, CaretDown, Robot, Trash } from "@phosphor-icons/react";
 import GitHubSection from "./GitHubSection";
 import EnvVarsSection from "./EnvVarsSection";
+import ProjectDependenciesSection from "./ProjectDependenciesSection";
 
 import {
   getAutomationConfigs,
@@ -330,6 +331,8 @@ export default function AppSettingsPanel({
           </div>
         )}
       </div>
+
+      <ProjectDependenciesSection appId={appId} />
 
       {/* Automations */}
       <div className="border-t border-th pt-4">

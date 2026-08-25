@@ -47,6 +47,17 @@ export const importAppSchema = z.object({
   local_path: z.string().optional(),
 });
 
+export const createAppDependencySchema = z.object({
+  dependency_app_id: z.number().int().positive("Dependency project is required"),
+  role: z.string().trim().min(1, "Role is required").max(120, "Role is too long"),
+  purpose: z.string().trim().min(1, "Relationship purpose is required").max(2000, "Relationship purpose is too long"),
+});
+
+export const updateAppDependencySchema = z.object({
+  role: z.string().trim().min(1, "Role is required").max(120, "Role is too long").optional(),
+  purpose: z.string().trim().min(1, "Relationship purpose is required").max(2000, "Relationship purpose is too long").optional(),
+});
+
 // ── Tasks ──
 
 export const createTaskSchema = z.object({

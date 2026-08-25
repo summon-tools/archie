@@ -50,6 +50,7 @@ export interface AgentResult {
 export interface StreamTaskParams {
   prompt: string;
   cwd?: string;
+  additionalDirectories?: string[];
   model?: string;
   effort?: EffortLevel;
   abortController?: AbortController;

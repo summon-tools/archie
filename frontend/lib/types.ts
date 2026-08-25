@@ -31,6 +31,20 @@ export interface App {
   created_at: string;
 }
 
+export interface AppDependency {
+  id: number;
+  app_id: number;
+  dependency_app_id: number;
+  role: string;
+  purpose: string;
+  dependency_name: string;
+  dependency_description: string;
+  dependency_directory: string;
+  dependency_github_repo: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export const TTS_VOICES = [
   { id: "en-US-AndrewNeural", label: "Andrew (English)" },
   { id: "en-US-BrianNeural", label: "Brian (English)" },

@@ -10,6 +10,7 @@ import { refreshIfStale } from "./indexer";
 import * as dal from "../dal";
 
 export interface ContextNeeds {
+  project_dependencies?: boolean;
   all_knowledge?: boolean;
   knowledge_topics?: string[];
   git_diff?: { base?: string; nameOnly?: boolean };
@@ -55,7 +56,7 @@ function truncate(text: string, maxChars: number): string {
  * Fills sections in priority order, each truncated if it would exceed remaining budget.
  */
 export async function assembleContext(req: ContextRequest): Promise<ContextResult> {
-  const budget = req.budget || 16000;
+  const budget = req.budget || 24000;
   const sections: ContextSection[] = [];
   const staleKnowledge: string[] = [];
   let totalChars = 0;
@@ -69,6 +70,24 @@ export async function assembleContext(req: ContextRequest): Promise<ContextResul
     sections.push({ label, content: truncated, chars });
     totalChars += chars;
   };
+
+  // ── Project dependencies ───────────────────────────────────────
+  if (req.needs.project_dependencies) {
+    const dependencies = dal.listAppDependencies(req.appId);
+    if (dependencies.length > 0) {
+      const lines = [
+        "The current task is implemented in the primary project. The projects below are declared dependencies. Their own repository configuration is the source of truth; use their local project directories to read relevant source, API contracts, shared types, and documentation. Keep implementation changes in the current project unless the user explicitly asks to modify a dependency.",
+        ...dependencies.map((dependency) => [
+          `- ${dependency.dependency_name} — Role: ${dependency.role}`,
+          `  Relationship purpose: ${dependency.purpose}`,
+          dependency.dependency_description ? `  Project description: ${dependency.dependency_description}` : "",
+          dependency.dependency_directory ? `  Dependency project directory: ${dependency.dependency_directory}` : "  Dependency project directory: not configured",
+          dependency.dependency_github_repo ? `  Dependency repository: ${dependency.dependency_github_repo}` : "",
+        ].filter(Boolean).join("\n")),
+      ];
+      addSection("Project Dependencies", lines.join("\n"));
+    }
+  }
 
   // ── Knowledge topics (highest priority) ──────────────────────────
   if (req.needs.all_knowledge) {

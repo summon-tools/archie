@@ -38,6 +38,22 @@ function initDb(db: Database.Database): void {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS app_dependencies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      dependency_app_id INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (dependency_app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      CHECK (app_id != dependency_app_id),
+      UNIQUE (app_id, dependency_app_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_app_dependencies_app_id ON app_dependencies(app_id);
+    CREATE INDEX IF NOT EXISTS idx_app_dependencies_dependency_app_id ON app_dependencies(dependency_app_id);
+
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,

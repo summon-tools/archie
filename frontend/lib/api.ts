@@ -1,4 +1,4 @@
-import { App, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse, ProjectTask, ProjectTaskStatus } from "./types";
+import { App, AppDependency, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse, ProjectTask, ProjectTaskStatus } from "./types";
 
 const BASE = "/api";
 
@@ -94,6 +94,36 @@ export async function updateApp(
     method: "PATCH",
     body: JSON.stringify(fields),
   });
+}
+
+export async function getAppDependencies(appId: number): Promise<AppDependency[]> {
+  const data = await fetchJSON<{ dependencies: AppDependency[] }>(`${BASE}/apps/${appId}/dependencies`);
+  return data.dependencies;
+}
+
+export async function createAppDependency(appId: number, data: {
+  dependency_app_id: number;
+  role: string;
+  purpose: string;
+}): Promise<AppDependency> {
+  return fetchJSON<AppDependency>(`${BASE}/apps/${appId}/dependencies`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAppDependency(appId: number, dependencyId: number, data: Partial<{
+  role: string;
+  purpose: string;
+}>): Promise<AppDependency> {
+  return fetchJSON<AppDependency>(`${BASE}/apps/${appId}/dependencies/${dependencyId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAppDependency(appId: number, dependencyId: number): Promise<void> {
+  await fetchJSON(`${BASE}/apps/${appId}/dependencies/${dependencyId}`, { method: "DELETE" });
 }
 
 export async function startApp(appId: number): Promise<{ success: boolean; message: string }> {
