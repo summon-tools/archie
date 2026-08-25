@@ -66,10 +66,11 @@ function getPermissionOptions(): Partial<Options> {
   return { permissionMode: "acceptEdits" as const };
 }
 
-function buildSdkOptions(cwd?: string, sessionId?: string): Options {
+function buildSdkOptions(cwd?: string, sessionId?: string, additionalDirectories?: string[]): Options {
   const opts: Options = {};
   if (cwd) opts.cwd = cwd;
   if (sessionId) opts.resume = sessionId;
+  if (additionalDirectories?.length) opts.additionalDirectories = additionalDirectories;
   if (CLAUDE_DANGEROUS_PERMISSIONS) {
     opts.permissionMode = "bypassPermissions";
     opts.allowDangerouslySkipPermissions = true;
@@ -146,7 +147,7 @@ export class ClaudeProvider implements AgentProvider {
     sessionId?: string
   ): AsyncGenerator<AgentStreamEvent> {
     const sdkQuery = await getSdkQuery();
-    const opts = buildSdkOptions(params.cwd, sessionId);
+    const opts = buildSdkOptions(params.cwd, sessionId, params.additionalDirectories);
     if (params.abortController) opts.abortController = params.abortController;
     opts.includePartialMessages = true;
     if (params.model) opts.model = params.model;

@@ -15,6 +15,7 @@ import { createTestContext, getTestDb, type TestContext } from "../helpers/test-
 import { seedApp, seedConversation, seedUser, seedWorkItem } from "../helpers/seed";
 import { createMockProvider } from "../helpers/mock-provider";
 import type Database from "better-sqlite3";
+import type { ResumeSessionParams } from "@/lib/server/agent/types";
 
 let ctx: TestContext;
 let db: Database.Database;
@@ -179,7 +180,7 @@ describe("conversation streaming", () => {
         },
       };
     });
-    const resumeSession = vi.fn(async function* () {
+    const resumeSession = vi.fn(async function* (_params: ResumeSessionParams) {
       yield {
         type: "result" as const,
         result: {
@@ -246,6 +247,89 @@ describe("conversation streaming", () => {
       cost: 0.001,
       usage: { inputTokens: 10, outputTokens: 5 },
     });
+  });
+
+  it("rebuilds project and dependency context when resuming a task", async () => {
+    const app = seedApp(db, {
+      name: "Storefront",
+      description: "The customer-facing commerce application.",
+      directory: ctx.tmpDir,
+    });
+    const dependencyApp = seedApp(db, {
+      name: "Identity API",
+      description: "Authentication and identity service.",
+      directory: "/tmp/identity-api",
+    });
+    const conversation = seedConversation(db, app.id, { kind: "task" });
+    const workItem = seedWorkItem(db, app.id, conversation.id);
+    db.prepare(
+      "INSERT INTO work_item_env (work_item_id, branch_name, worktree_dir, worktree_status) VALUES (?, ?, ?, ?)",
+    ).run(workItem.id, "task/dependency-context", ctx.tmpDir, "ready");
+    db.prepare(
+      "INSERT INTO app_dependencies (app_id, dependency_app_id, role, purpose) VALUES (?, ?, ?, ?)",
+    ).run(app.id, dependencyApp.id, "Authentication backend", "Read the API implementation when working on sign-in.");
+    db.prepare(
+      "INSERT INTO agent_sessions (conversation_id, provider_id, external_session_id, status) VALUES (?, ?, ?, ?)",
+    ).run(conversation.id, "codex", "codex-session-1", "completed");
+
+    const resumeSession = vi.fn(async function* (_params: ResumeSessionParams) {
+      yield {
+        type: "result" as const,
+        result: {
+          text: "Implemented the follow-up.",
+          sessionId: "codex-session-2",
+          costUsd: 0.001,
+          durationMs: 50,
+          numTurns: 1,
+          usage: { inputTokens: 10, outputTokens: 5 },
+          models: ["gpt-5.6-sol"],
+        },
+      };
+    });
+    const assembleContext = vi.fn(async () => ({
+      formatted: "## PROJECT DEPENDENCIES\nIdentity API — Role: Authentication backend",
+    }));
+
+    vi.doMock("@/lib/server/agent", () => ({
+      getProvider: () => createMockProvider({ resumeSession }),
+    }));
+    vi.doMock("@/lib/server/knowledge/indexer", () => ({ refreshIfStale: async () => {} }));
+    vi.doMock("@/lib/server/knowledge/brief", () => ({ generateWorkItemBrief: async () => "" }));
+    vi.doMock("@/lib/server/knowledge/context", () => ({ assembleContext }));
+    vi.doMock("@/lib/server/knowledge/preflight", () => ({ preflightCheck: async () => ({ ok: true }) }));
+    vi.doMock("@/lib/server/skills", () => ({ readSkillsIndex: () => null }));
+
+    const { streamConversationMessage } = await import("@/lib/server/conversation");
+    const stream = await streamConversationMessage(
+      conversation.id,
+      "Now connect the sign-in form.",
+      "Storefront",
+      ctx.tmpDir,
+      "gpt-5.6-sol",
+      undefined,
+      false,
+      "codex",
+    );
+
+    const reader = stream.getReader();
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    expect(assembleContext).toHaveBeenCalledWith(expect.objectContaining({
+      appId: app.id,
+      workItemId: workItem.id,
+      needs: expect.objectContaining({ project_dependencies: true }),
+    }));
+    expect(resumeSession).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining("Project description: The customer-facing commerce application."),
+      additionalDirectories: ["/tmp/identity-api"],
+    }));
+    const resumePrompt = resumeSession.mock.calls[0]![0].prompt;
+    expect(resumePrompt).toContain("## PROJECT DEPENDENCIES");
+    expect(resumePrompt).toContain("Identity API — Role: Authentication backend");
+    expect(resumePrompt).toContain("Now connect the sign-in form.");
   });
 
   it("persists failed provider diagnostics for the conversation status endpoint", async () => {

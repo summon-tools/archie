@@ -186,8 +186,14 @@ if (typeof process !== "undefined" && !(globalThis as any)[_shutdownKey]) {
   process.on("beforeExit", onExit);
 }
 
-async function buildConversationSystemPrompt(appId: number, appName: string, directory: string, workItemId?: number): Promise<string> {
-  let prompt = buildConversationSystemPromptBase({ appName, directory });
+async function buildConversationSystemPrompt(
+  appId: number,
+  appName: string,
+  appDescription: string,
+  directory: string,
+  workItemId?: number,
+): Promise<string> {
+  let prompt = buildConversationSystemPromptBase({ appName, appDescription, directory });
 
   // Assemble rich context from knowledge layer
   try {
@@ -496,6 +502,7 @@ export async function streamConversationMessage(
 
   const conversation = dal.getConversation(conversationId);
   if (!conversation) throw new Error("Conversation not found");
+  const appDescription = dal.getApp(conversation.app_id)?.description || "";
 
   // Save user message (skip on retry to avoid duplicates)
   if (!retry) {
@@ -603,10 +610,28 @@ export async function streamConversationMessage(
     targetDirectory: effectiveCwd,
   }) : "";
   const globalSkillsContext = buildGlobalSkillPromptContext(content);
+  const dependencyDirectories = Array.from(new Set(
+    dal.listAppDependencies(conversation.app_id)
+      .map((dependency) => dependency.dependency_directory.trim())
+      .filter(Boolean),
+  ));
+  const systemPrompt = conversation.kind === "task" && workItem
+    ? await buildConversationSystemPrompt(
+        conversation.app_id,
+        appName,
+        appDescription,
+        effectiveCwd || directory,
+        workItem.id,
+      )
+    : "";
+  const stableTaskPrefix = systemPrompt
+    ? `${systemPrompt}${globalSkillsContext.promptText ? `\n\n${globalSkillsContext.promptText}` : ""}\n\n---\n\n`
+    : "";
   // Build prompt
   let prompt: string;
   if (sessionId) {
-    // Continued session: include recent context + briefs from previous tasks
+    // Continued session: rebuild stable project context because some providers
+    // resume by starting a fresh execution with the caller's complete prompt.
     const recentMessages = dal.getConversationMessages(conversationId, 12);
     const prior = recentMessages.slice(0, -1).filter(m => m.role === "user").slice(-10);
     const contextMessages = prior.map(m => `[Team member]: ${m.body_md}`);
@@ -626,19 +651,19 @@ export async function streamConversationMessage(
       } catch {}
     }
 
-    if (contextMessages.length > 0) {
-      prompt = prependPromptContext(`Here is the recent team discussion for context:\n\n${contextMessages.join("\n\n")}${briefContext}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\nNow the user asks:\n${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`, globalSkillsContext.promptText);
-    } else {
-      prompt = prependPromptContext(`${briefContext ? briefContext + "\n\n" : ""}${attachmentContext ? attachmentContext + "\n\n" : ""}${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`, globalSkillsContext.promptText);
-    }
+    const continuedPrompt = contextMessages.length > 0
+      ? `Here is the recent team discussion for context:\n\n${contextMessages.join("\n\n")}${briefContext}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\nNow the user asks:\n${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`
+      : `${briefContext ? briefContext + "\n\n" : ""}${attachmentContext ? attachmentContext + "\n\n" : ""}${content}\n\nIMPORTANT: If this request is ambiguous or you need more information before implementing, ask clarifying questions first instead of guessing.`;
+    prompt = stableTaskPrefix
+      ? `${stableTaskPrefix}${continuedPrompt}`
+      : prependPromptContext(continuedPrompt, globalSkillsContext.promptText);
   } else if (conversation.kind === "task" && workItem) {
-    const systemPrompt = await buildConversationSystemPrompt(conversation.app_id, appName, effectiveCwd || directory, workItem.id);
     const taskDescription = workItem.summary || "";
 
     if (taskDescription && taskDescription !== content) {
-      prompt = `${systemPrompt}${globalSkillsContext.promptText ? `\n\n${globalSkillsContext.promptText}` : ""}\n\n---\n\nTask instructions:\n${taskDescription}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\n---\n\nUser message:\n${content}`;
+      prompt = `${stableTaskPrefix}Task instructions:\n${taskDescription}${attachmentContext ? `\n\n${attachmentContext}` : ""}\n\n---\n\nUser message:\n${content}`;
     } else {
-      prompt = `${systemPrompt}${globalSkillsContext.promptText ? `\n\n${globalSkillsContext.promptText}` : ""}\n\n---\n\n${attachmentContext ? `${attachmentContext}\n\n` : ""}User task request:\n${content}`;
+      prompt = `${stableTaskPrefix}${attachmentContext ? `${attachmentContext}\n\n` : ""}User task request:\n${content}`;
     }
   } else {
     // Chat or conversation type — just pass the message
@@ -701,9 +726,12 @@ export async function streamConversationMessage(
 
   // Get the event stream from the provider
   const provider = getProvider(resolvedProviderId);
+  const providerDirectoryOptions = dependencyDirectories.length > 0
+    ? { additionalDirectories: dependencyDirectories }
+    : {};
   const events = sessionId
-    ? provider.resumeSession({ prompt, cwd: streamCwd, model, sessionId, effort, abortController })
-    : provider.streamTask({ prompt, cwd: streamCwd, model, effort, abortController });
+    ? provider.resumeSession({ prompt, cwd: streamCwd, model, sessionId, effort, abortController, ...providerDirectoryOptions })
+    : provider.streamTask({ prompt, cwd: streamCwd, model, effort, abortController, ...providerDirectoryOptions });
 
   const encoder = new TextEncoder();
 

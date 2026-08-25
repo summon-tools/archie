@@ -50,4 +50,44 @@ describe("ClaudeProvider", () => {
     expect(capturedOptions.allowDangerouslySkipPermissions).toBeUndefined();
     expect(close).toHaveBeenCalled();
   });
+
+  it("authorizes dependency directories for streamed project tasks", async () => {
+    let capturedOptions: any = null;
+    const close = vi.fn();
+
+    vi.doMock("@anthropic-ai/claude-agent-sdk", () => ({
+      query: ({ options }: any) => {
+        capturedOptions = options;
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              type: "result",
+              subtype: "success",
+              result: "Done",
+              session_id: "claude-session-2",
+              usage: { input_tokens: 1, output_tokens: 1 },
+              modelUsage: {},
+            };
+          },
+          close,
+        };
+      },
+    }));
+
+    const { ClaudeProvider } = await import("@/lib/server/agent/providers/claude");
+    const provider = new ClaudeProvider();
+    for await (const _event of provider.streamTask({
+      prompt: "Inspect the API dependency",
+      cwd: "/tmp/frontend",
+      additionalDirectories: ["/tmp/identity-api", "/tmp/shared-types"],
+    })) {
+      // Consume the stream so the SDK query runs to completion.
+    }
+
+    expect(capturedOptions).toMatchObject({
+      cwd: "/tmp/frontend",
+      additionalDirectories: ["/tmp/identity-api", "/tmp/shared-types"],
+    });
+    expect(close).toHaveBeenCalled();
+  });
 });
