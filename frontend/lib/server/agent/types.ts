@@ -43,7 +43,7 @@ export interface AgentResult {
   costUsd: number | null;
   durationMs: number | null;
   numTurns: number | null;
-  usage: { inputTokens: number; outputTokens: number } | null;
+  usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null;
   models: string[];
 }
 
@@ -91,6 +91,7 @@ export interface AgentProvider {
   streamTask(params: StreamTaskParams): AsyncIterable<AgentStreamEvent>;
   resumeSession(params: ResumeSessionParams): AsyncIterable<AgentStreamEvent>;
   ephemeralQuery(prompt: string, opts?: EphemeralOpts): Promise<string>;
+  ephemeralQueryWithMetrics(prompt: string, opts?: EphemeralOpts): Promise<AgentResult>;
   toolEnabledStream(prompt: string, opts?: EphemeralOpts): AsyncGenerator<ToolStreamEvent>;
   listModels(): ModelEntry[];
   isAvailable(): Promise<boolean>;

@@ -51,6 +51,43 @@ describe("ClaudeProvider", () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it("preserves reported cost and token metrics for ephemeral queries", async () => {
+    vi.doMock("@anthropic-ai/claude-agent-sdk", () => ({
+      query: () => ({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "result",
+            subtype: "success",
+            result: "Measured answer",
+            session_id: "claude-session-cost",
+            total_cost_usd: 0.07,
+            duration_ms: 250,
+            num_turns: 1,
+            usage: {
+              input_tokens: 100,
+              cache_read_input_tokens: 40,
+              cache_creation_input_tokens: 10,
+              output_tokens: 20,
+            },
+            modelUsage: { "claude-sonnet-5": {} },
+          };
+        },
+        close: vi.fn(),
+      }),
+    }));
+
+    const { ClaudeProvider } = await import("@/lib/server/agent/providers/claude");
+    const result = await new ClaudeProvider().ephemeralQueryWithMetrics("Measure this");
+
+    expect(result).toMatchObject({
+      text: "Measured answer",
+      costUsd: 0.07,
+      durationMs: 250,
+      usage: { inputTokens: 150, outputTokens: 20, cachedInputTokens: 40 },
+      models: ["claude-sonnet-5"],
+    });
+  });
+
   it("authorizes dependency directories for streamed project tasks", async () => {
     let capturedOptions: any = null;
     const close = vi.fn();

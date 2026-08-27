@@ -183,7 +183,7 @@ interface ParseState {
   threadId: string | null;
   lastText: string;
   allText: string[];
-  usage: { input_tokens: number; output_tokens: number } | null;
+  usage: { input_tokens: number; output_tokens: number; cached_input_tokens?: number } | null;
   sawToolActivity: boolean;
 }
 
@@ -247,7 +247,11 @@ export function buildResultFromState(
     durationMs: null,
     numTurns: 1,
     usage: state.usage
-      ? { inputTokens: state.usage.input_tokens || 0, outputTokens: state.usage.output_tokens || 0 }
+      ? {
+        inputTokens: state.usage.input_tokens || 0,
+        outputTokens: state.usage.output_tokens || 0,
+        ...(state.usage.cached_input_tokens ? { cachedInputTokens: state.usage.cached_input_tokens } : {}),
+      }
       : (opts?.synthesized ? { inputTokens: 0, outputTokens: 0 } : null),
     models: [],
   };
@@ -425,6 +429,7 @@ export function parseCodexEvent(line: string, state: ParseState): AgentStreamEve
     state.usage = {
       input_tokens: data.input_tokens || 0,
       output_tokens: data.output_tokens || 0,
+      ...(data.cached_input_tokens ? { cached_input_tokens: data.cached_input_tokens } : {}),
     };
     // token_count is the last event in the new format — build result
     return { type: "result", result: buildResultFromState(state) };
@@ -616,6 +621,10 @@ export class CodexCliProvider implements AgentProvider {
   }
 
   async ephemeralQuery(prompt: string, opts?: EphemeralOpts): Promise<string> {
+    return (await this.ephemeralQueryWithMetrics(prompt, opts)).text;
+  }
+
+  async ephemeralQueryWithMetrics(prompt: string, opts?: EphemeralOpts): Promise<AgentResult> {
     const args = buildCodexExecArgs(
       opts?.model,
       opts?.cwd,
@@ -629,26 +638,23 @@ export class CodexCliProvider implements AgentProvider {
     if (spawnError) throw new Error(spawnError);
 
     const exitPromise = waitForExit(child);
-    let resultText = "";
+    let resultInfo: AgentResult | null = null;
     const state = createParseState();
     for await (const line of readLines(child)) {
       const event = parseCodexEvent(line, state);
       if (event?.type === "result") {
-        resultText = event.result.text;
+        resultInfo = event.result;
         break;
-      }
-      if (event?.type === "text") {
-        resultText += event.text;
       }
       if (event?.type === "error") {
         throw new Error(`Codex error: ${event.error}`);
       }
     }
 
-    if (!resultText) {
+    if (!resultInfo) {
       const exitError = await exitPromise;
       if (state.lastText || state.allText.length > 0) {
-        return buildResultFromState(state, { synthesized: true }).text;
+        return buildResultFromState(state, { synthesized: true });
       }
 
       const errorDetail = formatChildCodexFailure(child, exitError);
@@ -661,7 +667,7 @@ export class CodexCliProvider implements AgentProvider {
       );
     }
 
-    return resultText;
+    return resultInfo;
   }
 
   async *toolEnabledStream(prompt: string, opts?: EphemeralOpts): AsyncGenerator<ToolStreamEvent> {

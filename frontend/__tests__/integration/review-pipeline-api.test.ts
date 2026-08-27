@@ -312,13 +312,29 @@ describe("review pipeline configuration", () => {
       review_comments: [{ id: 100, body: "Original Archie finding" }],
     });
     const replySpy = vi.spyOn(githubApi, "replyToGitHubReviewComment").mockResolvedValue({ id: 201, html_url: "reply-url" });
-    vi.spyOn(sdkHelpers, "runEphemeralQuery").mockResolvedValue(JSON.stringify({ response: "Confirmed fixed.", disposition: "resolved" }));
+    vi.spyOn(sdkHelpers, "runEphemeralQueryWithMetrics").mockResolvedValue({
+      text: JSON.stringify({ response: "Confirmed fixed.", disposition: "resolved" }),
+      sessionId: null,
+      costUsd: 0.025,
+      durationMs: 350,
+      numTurns: 1,
+      usage: { inputTokens: 120, outputTokens: 30 },
+      models: ["review-model"],
+    });
 
     const { runReviewThreadInteractionNow } = await import("@/lib/server/review-thread-jobs");
     await runReviewThreadInteractionNow(interaction.github_comment_id);
 
     expect(replySpy).toHaveBeenCalledWith(expect.objectContaining({ commentId: 100, body: "Confirmed fixed." }));
-    expect(db.prepare("SELECT status, disposition FROM review_thread_interactions WHERE id = ?").get(interaction.id)).toMatchObject({ status: "completed", disposition: "resolved" });
+    const completedInteraction = db.prepare("SELECT status, disposition, model_usage_json FROM review_thread_interactions WHERE id = ?").get(interaction.id) as any;
+    expect(completedInteraction).toMatchObject({ status: "completed", disposition: "resolved" });
+    expect(JSON.parse(completedInteraction.model_usage_json)).toMatchObject({
+      model_calls: 1,
+      known_cost_usd: 0.025,
+      reported_cost_usd: 0.025,
+      unknown_cost_calls: 0,
+      cost_source: "reported",
+    });
     expect(dal.listReviewFindings(queued.review!.id)[0]).toMatchObject({ status: "fixed" });
   });
 });

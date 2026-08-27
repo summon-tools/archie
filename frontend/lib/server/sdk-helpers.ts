@@ -6,6 +6,7 @@
 import { getProvider } from "./agent";
 import { getModelForCategory, type ModelCategory } from "./config";
 import type { EffortLevel } from "@/lib/effort";
+import type { AgentResult } from "./agent";
 
 // Re-export types for existing callers
 export type { ToolStreamEvent as ToolActivity } from "./agent";
@@ -31,6 +32,17 @@ export async function runEphemeralQuery(
   const resolved = getModelForCategory(category);
   const model = opts?.model || resolved.model;
   return getProvider(resolved.provider).ephemeralQuery(prompt, { ...opts, model });
+}
+
+/** Run a tool-free query while preserving provider-reported usage and cost metrics. */
+export async function runEphemeralQueryWithMetrics(
+  prompt: string,
+  opts?: { model?: string; effort?: EffortLevel; maxTurns?: number; abortController?: AbortController; category?: ModelCategory }
+): Promise<AgentResult> {
+  const category = opts?.category || "background";
+  const resolved = getModelForCategory(category);
+  const model = opts?.model || resolved.model;
+  return getProvider(resolved.provider).ephemeralQueryWithMetrics(prompt, { ...opts, model });
 }
 
 /**

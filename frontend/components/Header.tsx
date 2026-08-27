@@ -55,6 +55,9 @@ export default function Header() {
             <Link href="/" className={navLinkClass(pathname === "/")}>
               Projects
             </Link>
+            <Link href="/reviews" className={navLinkClass(pathname === "/reviews" || pathname.startsWith("/reviews/"))}>
+              Reviews
+            </Link>
             {role === "admin" && (
               <Link href="/outcomes" className={navLinkClass(pathname === "/outcomes")}>
                 Outcomes

@@ -5,6 +5,8 @@ import type {
   GitHubWebhookEventRow,
   ProjectRepositoryRow,
   PullRequestReviewRow,
+  PullRequestReviewStatus,
+  PullRequestReviewSummaryRow,
 } from "../types";
 
 const PROJECT_REPOSITORY_SELECT = `
@@ -301,7 +303,11 @@ export function getPullRequestReviewByGitHubReviewId(githubReviewId: number): Pu
   return getDb().prepare("SELECT * FROM pull_request_reviews WHERE github_review_id = ? ORDER BY id DESC LIMIT 1").get(githubReviewId) as PullRequestReviewRow | undefined;
 }
 
-export function queueManualPullRequestReview(review: PullRequestReviewRow, mode: "targeted" | "full"): PullRequestReviewRow {
+export function queueManualPullRequestReview(
+  review: PullRequestReviewRow,
+  mode: "targeted" | "full",
+  currentIdentity?: { base_sha: string; head_sha: string },
+): PullRequestReviewRow {
   const db = getDb();
   const result = db.prepare(
     `INSERT INTO pull_request_reviews (
@@ -314,8 +320,8 @@ export function queueManualPullRequestReview(review: PullRequestReviewRow, mode:
     review.owner,
     review.repo,
     review.pr_number,
-    review.base_sha,
-    review.head_sha,
+    currentIdentity?.base_sha || review.base_sha,
+    currentIdentity?.head_sha || review.head_sha,
     review.requested_reviewer_login,
     mode,
     review.id,
@@ -406,4 +412,203 @@ export function listActivePullRequestReviewsForApp(appId: number): PullRequestRe
      WHERE app_id = ? AND status IN ('queued', 'running')
      ORDER BY id ASC`
   ).all(appId) as PullRequestReviewRow[];
+}
+
+export interface PullRequestReviewListFilters {
+  app_id?: number;
+  search?: string;
+}
+
+function reviewListWhere(
+  filters: PullRequestReviewListFilters,
+  options: { statuses?: PullRequestReviewStatus[] } = {},
+): { sql: string; values: Array<string | number> } {
+  const clauses: string[] = [];
+  const values: Array<string | number> = [];
+  if (options.statuses?.length) {
+    clauses.push(`r.status IN (${options.statuses.map(() => "?").join(", ")})`);
+    values.push(...options.statuses);
+  }
+  if (filters.app_id) {
+    clauses.push("r.app_id = ?");
+    values.push(filters.app_id);
+  }
+  if (filters.search) {
+    const term = `%${filters.search.trim().toLowerCase()}%`;
+    clauses.push(`(
+      lower(a.name) LIKE ?
+      OR lower(r.owner || '/' || r.repo) LIKE ?
+      OR lower(COALESCE(r.pr_title, '')) LIKE ?
+      OR CAST(r.pr_number AS TEXT) LIKE ?
+    )`);
+    values.push(term, term, term, term);
+  }
+  return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", values };
+}
+
+const REVIEW_SUMMARY_SELECT = `
+  SELECT
+    r.*,
+    a.name AS app_name,
+    (SELECT COUNT(*) FROM review_findings f WHERE f.review_id = r.id) AS findings_count,
+    1 AS review_run_count
+  FROM pull_request_reviews r
+  JOIN apps a ON a.id = r.app_id
+`;
+
+export function listActivePullRequestReviewSummaries(
+  filters: PullRequestReviewListFilters = {},
+): PullRequestReviewSummaryRow[] {
+  const where = reviewListWhere(filters, { statuses: ["queued", "running"] });
+  return getDb().prepare(`${REVIEW_SUMMARY_SELECT} ${where.sql} ORDER BY r.created_at ASC, r.id ASC`)
+    .all(...where.values) as PullRequestReviewSummaryRow[];
+}
+
+export function countPullRequestReviewHistoryGroups(
+  filters: PullRequestReviewListFilters = {},
+): number {
+  const where = reviewListWhere(filters, { statuses: ["completed", "failed", "not_supported"] });
+  const row = getDb().prepare(
+    `SELECT COUNT(*) AS count FROM (
+       SELECT 1
+       FROM pull_request_reviews r
+       JOIN apps a ON a.id = r.app_id
+       ${where.sql}
+       GROUP BY r.app_id, lower(r.owner), lower(r.repo), r.pr_number
+     ) grouped_reviews`
+  ).get(...where.values) as { count: number };
+  return Number(row?.count || 0);
+}
+
+export function listPullRequestReviewHistoryGroups(
+  filters: PullRequestReviewListFilters = {},
+  page = 1,
+  pageSize = 20,
+): PullRequestReviewSummaryRow[] {
+  const safePage = Math.max(1, Math.floor(page));
+  const safePageSize = Math.max(1, Math.min(100, Math.floor(pageSize)));
+  const where = reviewListWhere(filters, { statuses: ["completed", "failed", "not_supported"] });
+  return getDb().prepare(
+    `SELECT
+       r.*,
+       a.name AS app_name,
+       (SELECT COUNT(*) FROM review_findings f WHERE f.review_id = r.id) AS findings_count,
+       (
+         SELECT COUNT(*) FROM pull_request_reviews grouped
+         WHERE grouped.app_id = r.app_id
+           AND lower(grouped.owner) = lower(r.owner)
+           AND lower(grouped.repo) = lower(r.repo)
+           AND grouped.pr_number = r.pr_number
+           AND grouped.status IN ('completed', 'failed', 'not_supported')
+       ) AS review_run_count
+     FROM pull_request_reviews r
+     JOIN apps a ON a.id = r.app_id
+     ${where.sql}
+       AND r.id = (
+         SELECT MAX(latest.id) FROM pull_request_reviews latest
+         WHERE latest.app_id = r.app_id
+           AND lower(latest.owner) = lower(r.owner)
+           AND lower(latest.repo) = lower(r.repo)
+           AND latest.pr_number = r.pr_number
+           AND latest.status IN ('completed', 'failed', 'not_supported')
+       )
+     ORDER BY COALESCE(r.completed_at, r.updated_at) DESC, r.id DESC
+     LIMIT ? OFFSET ?`
+  ).all(...where.values, safePageSize, (safePage - 1) * safePageSize) as PullRequestReviewSummaryRow[];
+}
+
+export function listPullRequestReviewRunsForHistoryGroup(input: {
+  app_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  limit?: number;
+}): PullRequestReviewSummaryRow[] {
+  const limit = Math.max(1, Math.min(100, Math.floor(input.limit || 25)));
+  return getDb().prepare(
+    `${REVIEW_SUMMARY_SELECT}
+     WHERE r.app_id = ?
+       AND lower(r.owner) = lower(?)
+       AND lower(r.repo) = lower(?)
+       AND r.pr_number = ?
+       AND r.status IN ('completed', 'failed', 'not_supported')
+     ORDER BY COALESCE(r.completed_at, r.updated_at) DESC, r.id DESC
+     LIMIT ?`
+  ).all(input.app_id, input.owner, input.repo, input.pr_number, limit) as PullRequestReviewSummaryRow[];
+}
+
+export function getPullRequestReviewStatusCounts(
+  filters: PullRequestReviewListFilters = {},
+): Record<PullRequestReviewStatus, number> {
+  const where = reviewListWhere(filters);
+  const counts: Record<PullRequestReviewStatus, number> = {
+    queued: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+    not_supported: 0,
+  };
+  const rows = getDb().prepare(
+    `SELECT r.status, COUNT(*) AS count
+     FROM pull_request_reviews r
+     JOIN apps a ON a.id = r.app_id
+     ${where.sql}
+     GROUP BY r.status`
+  ).all(...where.values) as Array<{ status: PullRequestReviewStatus; count: number }>;
+  for (const row of rows) counts[row.status] = Number(row.count || 0);
+  return counts;
+}
+
+export function listPullRequestReviewProjects(): Array<{ id: number; name: string }> {
+  return getDb().prepare(
+    `SELECT DISTINCT a.id, a.name
+     FROM apps a
+     JOIN pull_request_reviews r ON r.app_id = a.id
+     ORDER BY lower(a.name), a.id`
+  ).all() as Array<{ id: number; name: string }>;
+}
+
+export interface PullRequestReviewCostRecord {
+  id: number;
+  app_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  status: PullRequestReviewStatus;
+  provider_id: string | null;
+  model_id: string | null;
+  model_usage_json: string | null;
+}
+
+export interface ReviewThreadInteractionCostRecord {
+  review_id: number;
+  status: "queued" | "completed" | "failed" | "ignored";
+  model_usage_json: string | null;
+}
+
+export function listPullRequestReviewCostRecords(
+  filters: PullRequestReviewListFilters = {},
+): PullRequestReviewCostRecord[] {
+  const where = reviewListWhere(filters);
+  return getDb().prepare(
+    `SELECT r.id, r.app_id, r.owner, r.repo, r.pr_number, r.status, r.provider_id, r.model_id, r.model_usage_json
+     FROM pull_request_reviews r
+     JOIN apps a ON a.id = r.app_id
+     ${where.sql}
+     ORDER BY r.id`
+  ).all(...where.values) as PullRequestReviewCostRecord[];
+}
+
+export function listReviewThreadInteractionCostRecords(
+  filters: PullRequestReviewListFilters = {},
+): ReviewThreadInteractionCostRecord[] {
+  const where = reviewListWhere(filters);
+  return getDb().prepare(
+    `SELECT i.review_id, i.status, i.model_usage_json
+     FROM review_thread_interactions i
+     JOIN pull_request_reviews r ON r.id = i.review_id
+     JOIN apps a ON a.id = r.app_id
+     ${where.sql}
+     ORDER BY i.id`
+  ).all(...where.values) as ReviewThreadInteractionCostRecord[];
 }

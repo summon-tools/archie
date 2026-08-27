@@ -44,6 +44,9 @@ export function createMockProvider(overrides?: Partial<AgentProvider>): AgentPro
     streamTask: (_params: StreamTaskParams) => mockStream(defaultEvents),
     resumeSession: (_params: ResumeSessionParams) => mockStream(defaultEvents),
     ephemeralQuery: async (_prompt: string, _opts?: EphemeralOpts) => "mock response",
+    ephemeralQueryWithMetrics: async (_prompt: string, _opts?: EphemeralOpts) => defaultEvents[2].type === "result"
+      ? defaultEvents[2].result
+      : { text: "mock response", sessionId: null, costUsd: null, durationMs: null, numTurns: 1, usage: null, models: [] },
     toolEnabledStream: async function* (_prompt: string, _opts?: EphemeralOpts): AsyncGenerator<ToolStreamEvent> {
       yield { type: "text", detail: "mock tool response" };
       yield { type: "result", detail: "done", resultText: "mock result" };
@@ -61,6 +64,7 @@ export function createFailingProvider(errorMessage = "Mock provider error"): Age
     streamTask: () => mockStream(errorEvents),
     resumeSession: () => mockStream(errorEvents),
     ephemeralQuery: async () => { throw new Error(errorMessage); },
+    ephemeralQueryWithMetrics: async () => { throw new Error(errorMessage); },
     isAvailable: async () => false,
   });
 }

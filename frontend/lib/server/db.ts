@@ -353,6 +353,7 @@ function initDb(db: Database.Database): void {
       disposition TEXT DEFAULT NULL,
       status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'completed', 'failed', 'ignored')),
       raw_json TEXT DEFAULT NULL,
+      model_usage_json TEXT DEFAULT NULL,
       processing_started_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -931,6 +932,7 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "pull_request_reviews", "error_text", "TEXT DEFAULT NULL");
   addColumnIfMissing(db, "github_webhook_events", "head_sha", "TEXT DEFAULT NULL");
   addColumnIfMissing(db, "review_thread_interactions", "processing_started_at", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "review_thread_interactions", "model_usage_json", "TEXT DEFAULT NULL");
 
   // A project can have historical mappings, but only one may remain active.
   db.exec(`

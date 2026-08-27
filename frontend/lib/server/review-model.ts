@@ -1,6 +1,13 @@
 import crypto from "crypto";
 import { getModelForCategory } from "@/lib/server/config";
-import { runEphemeralQuery } from "@/lib/server/sdk-helpers";
+import { runEphemeralQueryWithMetrics } from "@/lib/server/sdk-helpers";
+import type { AgentResult } from "@/lib/server/agent";
+import {
+  modelCallCostFromAgentResult,
+  summarizeReviewModelCalls,
+  type ReviewCostSummary,
+  type ReviewModelCallCost,
+} from "@/lib/server/review-costs";
 import { changedLinesForContext, contextDisclosure, publishableChangedLinesForContext, type ReviewContextPacket } from "@/lib/server/review-context";
 
 export interface ReviewCandidateFinding {
@@ -21,7 +28,7 @@ export interface ReviewModelOutput {
 }
 
 export interface ReviewModelRunner {
-  (prompt: string, phase: "discover" | "verify"): Promise<string>;
+  (prompt: string, phase: "discover" | "verify"): Promise<string | AgentResult>;
 }
 
 export interface ReviewValidationRejection {
@@ -112,25 +119,56 @@ function hasConcreteEvidence(evidence: ReviewCandidateFinding["evidence"]): bool
 }
 
 export function defaultReviewModelRunner(): ReviewModelRunner {
-  return async (prompt) => runEphemeralQuery(prompt, { category: "background", maxTurns: 4 });
+  return async (prompt) => runEphemeralQueryWithMetrics(prompt, { category: "background", maxTurns: 4 });
+}
+
+function normalizeRunnerResult(value: string | AgentResult): AgentResult {
+  if (typeof value !== "string") return value;
+  return {
+    text: value,
+    sessionId: null,
+    costUsd: null,
+    durationMs: null,
+    numTurns: 1,
+    usage: null,
+    models: [],
+  };
 }
 
 export async function generateValidatedReview(params: {
   context: ReviewContextPacket;
   runner?: ReviewModelRunner;
+  onModelCall?: (call: ReviewModelCallCost, calls: ReviewModelCallCost[]) => void;
 }): Promise<{
   output: ReviewModelOutput;
   provider_id: string;
   model_id: string;
   prompt_hash: string;
   validation_rejections: ReviewValidationRejection[];
+  model_calls: ReviewModelCallCost[];
+  cost_summary: ReviewCostSummary;
 }> {
   const runner = params.runner || defaultReviewModelRunner();
   const configured = getModelForCategory("background");
+  const modelCalls: ReviewModelCallCost[] = [];
+  const runPhase = async (prompt: string, phase: "discover" | "verify"): Promise<string> => {
+    const startedAt = Date.now();
+    const result = normalizeRunnerResult(await runner(prompt, phase));
+    const call = modelCallCostFromAgentResult({
+      phase,
+      providerId: configured.provider,
+      modelId: configured.model,
+      result,
+      measuredDurationMs: Date.now() - startedAt,
+    });
+    modelCalls.push(call);
+    params.onModelCall?.(call, [...modelCalls]);
+    return result.text;
+  };
   const discoveryPrompt = promptFor(params.context, "discover");
-  const discovery = normalizeOutput(extractJson(await runner(discoveryPrompt, "discover")));
+  const discovery = normalizeOutput(extractJson(await runPhase(discoveryPrompt, "discover")));
   const verificationPrompt = promptFor(params.context, "verify", discovery);
-  const verified = normalizeOutput(extractJson(await runner(verificationPrompt, "verify")));
+  const verified = normalizeOutput(extractJson(await runPhase(verificationPrompt, "verify")));
   const changedLines = changedLinesForContext(params.context);
   const publishableLines = publishableChangedLinesForContext(params.context);
   const validFiles = new Set(params.context.files.map((file) => file.filename));
@@ -210,5 +248,7 @@ export async function generateValidatedReview(params: {
     model_id: configured.model,
     prompt_hash: crypto.createHash("sha256").update(discoveryPrompt).digest("hex"),
     validation_rejections: validationRejections,
+    model_calls: modelCalls,
+    cost_summary: summarizeReviewModelCalls(modelCalls),
   };
 }

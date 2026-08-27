@@ -187,6 +187,20 @@ function estimateCostUsd(providerId: string | null, modelId: string | null, usag
   );
 }
 
+export function resolveModelCost(input: {
+  providerId: string | null;
+  modelId: string | null;
+  reportedCostUsd: number | null;
+  usage: TokenUsage | null;
+}): ResolvedRunCost {
+  if (input.reportedCostUsd !== null && Number.isFinite(input.reportedCostUsd) && input.reportedCostUsd >= 0) {
+    return { amountUsd: input.reportedCostUsd, source: "reported", usage: input.usage };
+  }
+  const estimated = estimateCostUsd(input.providerId, input.modelId, input.usage);
+  if (estimated !== null) return { amountUsd: estimated, source: "estimated", usage: input.usage };
+  return { amountUsd: null, source: "unknown", usage: input.usage };
+}
+
 function parseUsageObject(value: unknown): TokenUsage | null {
   if (!value || typeof value !== "object") return null;
   const object = value as Record<string, unknown>;

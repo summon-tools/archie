@@ -10,6 +10,7 @@ import {
 import { runReviewChecks, type ReviewCheckResult } from "@/lib/server/review-checks";
 import { buildReviewContext } from "@/lib/server/review-context";
 import { generateValidatedReview, type ReviewModelRunner } from "@/lib/server/review-model";
+import { reviewCostPersistenceFields, summarizeReviewModelCalls } from "@/lib/server/review-costs";
 import { createGitHubIssueComment, publishGitHubReview } from "@/lib/server/github-review-api";
 import type { PullRequestReviewRow } from "@/lib/server/types";
 
@@ -213,6 +214,17 @@ export async function runPullRequestReviewNow(reviewId: number, options: PullReq
         const generated = await generateValidatedReview({
           context,
           runner: options.modelRunner,
+          onModelCall: (call, calls) => {
+            const partialCost = summarizeReviewModelCalls(calls);
+            dal.updatePullRequestReview(reviewId, {
+              provider_id: call.provider_id,
+              model_id: call.model_id,
+              model_usage_json: JSON.stringify({
+                ...reviewCostPersistenceFields(partialCost),
+                duration_ms: Date.now() - modelStartedAt,
+              }),
+            });
+          },
         });
         const modelDurationMs = Date.now() - modelStartedAt;
         const findings = generated.output.findings.map((finding) => dal.createReviewFinding({
@@ -270,11 +282,8 @@ export async function runPullRequestReviewNow(reviewId: number, options: PullReq
             prompt_hash: generated.prompt_hash,
             findings: findings.length,
             validation_rejections: generated.validation_rejections,
-            model_calls: 2,
             duration_ms: modelDurationMs,
-            cost_usd: null,
-            usage: null,
-            cost_status: "unavailable_from_ephemeral_provider",
+            ...reviewCostPersistenceFields(generated.cost_summary),
           }),
           context_sources_json: JSON.stringify(context.sources),
           policy_revision: context.policy_revision,

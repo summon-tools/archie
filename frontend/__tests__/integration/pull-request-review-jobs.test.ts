@@ -248,18 +248,26 @@ describe("pull request review jobs", () => {
 
     const { runPullRequestReviewNow } = await import("@/lib/server/pull-request-review-jobs");
     const completed = await runPullRequestReviewNow(queued.review!.id, {
-      modelRunner: async (_prompt, phase) => JSON.stringify(phase === "verify"
-        ? {
-          summary: "One advisory compatibility finding is publishable.",
-          findings: [{
-            path: "missing.js",
-            line: 1,
-            title: "Invalid candidate",
-            body: "This candidate points to a file outside the changed files and must be rejected.",
-            evidence: "Missing file",
-          }],
-        }
-        : { summary: "Candidate", findings: [] }),
+      modelRunner: async (_prompt, phase) => ({
+        text: JSON.stringify(phase === "verify"
+          ? {
+            summary: "One advisory compatibility finding is publishable.",
+            findings: [{
+              path: "missing.js",
+              line: 1,
+              title: "Invalid candidate",
+              body: "This candidate points to a file outside the changed files and must be rejected.",
+              evidence: "Missing file",
+            }],
+          }
+          : { summary: "Candidate", findings: [] }),
+        sessionId: null,
+        costUsd: 0.01,
+        durationMs: 100,
+        numTurns: 1,
+        usage: { inputTokens: phase === "discover" ? 100 : 80, outputTokens: 20 },
+        models: ["review-model"],
+      }),
     });
 
     expect(completed.status).toBe("completed");
@@ -277,9 +285,12 @@ describe("pull request review jobs", () => {
       findings: 0,
       validation_rejections: [{ path: "missing.js", reason: "file_not_in_changed_files" }],
       model_calls: 2,
-      cost_usd: null,
-      usage: null,
-      cost_status: "unavailable_from_ephemeral_provider",
+      cost_usd: 0.02,
+      known_cost_usd: 0.02,
+      reported_cost_usd: 0.02,
+      unknown_cost_calls: 0,
+      cost_source: "reported",
+      usage: { input_tokens: 180, output_tokens: 40, cached_input_tokens: 0 },
     });
     const publication = JSON.parse(completed.publication_json);
     expect(publication.comments).toHaveLength(0);

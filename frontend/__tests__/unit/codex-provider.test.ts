@@ -153,7 +153,7 @@ describe("parseCodexEvent", () => {
     const event = parseCodexEvent(
       JSON.stringify({
         type: "turn.completed",
-        usage: { input_tokens: 100, output_tokens: 20 },
+        usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 60 },
       }),
       state
     );
@@ -165,7 +165,7 @@ describe("parseCodexEvent", () => {
         costUsd: null,
         durationMs: null,
         numTurns: 1,
-        usage: { inputTokens: 100, outputTokens: 20 },
+        usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 60 },
         models: [],
       },
     });
