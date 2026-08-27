@@ -9,6 +9,8 @@ export * from "./apps";
 export * from "./dependencies";
 export * from "./users";
 export * from "./github-connections";
+export * from "./github-review";
+export * from "./review-pipeline";
 export * from "./github-evidence";
 export * from "./github-repo-prs";
 export * from "./outcome-snapshots";

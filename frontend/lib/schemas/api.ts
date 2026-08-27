@@ -58,6 +58,38 @@ export const updateAppDependencySchema = z.object({
   purpose: z.string().trim().min(1, "Relationship purpose is required").max(2000, "Relationship purpose is too long").optional(),
 });
 
+export const createGitHubProjectRepositorySchema = z.object({
+  app_id: z.number().int().positive("Project is required"),
+  installation_id: z.number().int().positive("GitHub installation is required"),
+  account_login: z.string().trim().min(1, "GitHub account is required").max(255),
+  account_type: z.string().trim().max(80).optional().nullable(),
+  owner: z.string().trim().min(1, "Repository owner is required").max(255),
+  repo: z.string().trim().min(1, "Repository name is required").max(255),
+  default_branch: z.string().trim().min(1).max(255).optional().default("main"),
+});
+
+export const reviewPolicySchema = z.object({
+  owner: z.string().trim().min(1).max(255).optional().nullable(),
+  repo: z.string().trim().min(1).max(255).optional().nullable(),
+  revision: z.string().trim().min(1).max(120),
+  priorities: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  severity_guidance: z.string().trim().max(4000).optional(),
+  required_checks: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  behavior: z.array(z.string().trim().min(1).max(500)).max(30).optional(),
+  tone: z.string().trim().max(1000).optional(),
+});
+
+export const projectReviewDependencySchema = z.object({
+  provider_app_id: z.number().int().positive("Provider project is required"),
+  relationship_type: z.enum(["consumes_api", "publishes_events_to", "consumes_events_from", "uses_shared_package"]).optional().default("consumes_api"),
+  authoritative_ref: z.string().trim().min(1).max(255).optional().default("main"),
+  contract_type: z.literal("openapi").optional().default("openapi"),
+  source_path: z.string().trim().min(1).max(500),
+  version_expectation: z.string().trim().max(1000).optional().nullable(),
+});
+
+export const updateProjectReviewDependencySchema = projectReviewDependencySchema.partial();
+
 // ── Tasks ──
 
 export const createTaskSchema = z.object({

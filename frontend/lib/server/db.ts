@@ -195,6 +195,171 @@ function initDb(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_github_user_connections_login ON github_user_connections(github_login);
 
+    CREATE TABLE IF NOT EXISTS github_installations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      installation_id INTEGER NOT NULL UNIQUE,
+      account_login TEXT NOT NULL,
+      account_type TEXT DEFAULT NULL,
+      repository_selection TEXT DEFAULT NULL,
+      state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active', 'suspended', 'deleted')),
+      raw_json TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_installations_state ON github_installations(state);
+
+    CREATE TABLE IF NOT EXISTS project_repositories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      installation_id INTEGER NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      default_branch TEXT NOT NULL DEFAULT 'main',
+      state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active', 'paused')),
+      raw_json TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(owner, repo),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (installation_id) REFERENCES github_installations(installation_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_repositories_app_id ON project_repositories(app_id);
+    CREATE INDEX IF NOT EXISTS idx_project_repositories_installation_id ON project_repositories(installation_id);
+
+    CREATE TABLE IF NOT EXISTS pull_request_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      installation_id INTEGER NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      base_sha TEXT DEFAULT NULL,
+      head_sha TEXT DEFAULT NULL,
+      comparison_sha TEXT DEFAULT NULL,
+      requested_reviewer_login TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'completed', 'failed', 'not_supported')),
+      execution_mode TEXT NOT NULL DEFAULT 'isolated_worktree' CHECK(execution_mode IN ('isolated_worktree', 'api_only')),
+      workspace_path TEXT DEFAULT NULL,
+      execution_json TEXT NOT NULL DEFAULT '{}',
+      context_sources_json TEXT NOT NULL DEFAULT '[]',
+      policy_revision TEXT DEFAULT NULL,
+      model_usage_json TEXT DEFAULT NULL,
+      trigger_delivery_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pull_request_reviews_repo_pr ON pull_request_reviews(owner, repo, pr_number);
+    CREATE INDEX IF NOT EXISTS idx_pull_request_reviews_status ON pull_request_reviews(status);
+
+    CREATE TABLE IF NOT EXISTS github_webhook_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id TEXT NOT NULL UNIQUE,
+      event_name TEXT NOT NULL,
+      action TEXT DEFAULT NULL,
+      installation_id INTEGER DEFAULT NULL,
+      owner TEXT DEFAULT NULL,
+      repo TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'received' CHECK(status IN ('received', 'ignored', 'queued', 'failed')),
+      review_id INTEGER DEFAULT NULL,
+      error_text TEXT DEFAULT NULL,
+      payload_json TEXT NOT NULL,
+      received_at TEXT NOT NULL DEFAULT (datetime('now')),
+      processed_at TEXT DEFAULT NULL,
+      FOREIGN KEY (review_id) REFERENCES pull_request_reviews(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_webhook_events_status ON github_webhook_events(status);
+    CREATE INDEX IF NOT EXISTS idx_github_webhook_events_received_at ON github_webhook_events(received_at);
+
+    CREATE TABLE IF NOT EXISTS review_policies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL,
+      owner TEXT DEFAULT NULL,
+      repo TEXT DEFAULT NULL,
+      revision TEXT NOT NULL,
+      policy_json TEXT NOT NULL DEFAULT '{}',
+      state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active', 'archived')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      UNIQUE(app_id, owner, repo, revision)
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_policies_lookup ON review_policies(app_id, owner, repo, state);
+
+    CREATE TABLE IF NOT EXISTS project_dependencies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      consumer_app_id INTEGER NOT NULL,
+      provider_app_id INTEGER NOT NULL,
+      relationship_type TEXT NOT NULL DEFAULT 'consumes_api',
+      authoritative_ref TEXT NOT NULL DEFAULT 'main',
+      contract_type TEXT NOT NULL DEFAULT 'openapi',
+      source_path TEXT NOT NULL,
+      version_expectation TEXT DEFAULT NULL,
+      state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active', 'paused')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (consumer_app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      FOREIGN KEY (provider_app_id) REFERENCES apps(id) ON DELETE CASCADE,
+      CHECK(consumer_app_id != provider_app_id),
+      UNIQUE(consumer_app_id, provider_app_id, source_path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_dependencies_consumer ON project_dependencies(consumer_app_id, state);
+
+    CREATE TABLE IF NOT EXISTS contract_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      dependency_id INTEGER NOT NULL,
+      source_revision TEXT NOT NULL,
+      source_path TEXT NOT NULL,
+      normalized_json TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'ready' CHECK(status IN ('ready', 'fetching', 'failed')),
+      error_text TEXT DEFAULT NULL,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (dependency_id) REFERENCES project_dependencies(id) ON DELETE CASCADE,
+      UNIQUE(dependency_id, source_revision)
+    );
+    CREATE INDEX IF NOT EXISTS idx_contract_snapshots_dependency ON contract_snapshots(dependency_id, fetched_at DESC);
+
+    CREATE TABLE IF NOT EXISTS review_findings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      review_id INTEGER NOT NULL,
+      fingerprint TEXT NOT NULL,
+      path TEXT NOT NULL,
+      line INTEGER NOT NULL,
+      end_line INTEGER DEFAULT NULL,
+      side TEXT NOT NULL DEFAULT 'RIGHT' CHECK(side IN ('LEFT', 'RIGHT')),
+      start_side TEXT DEFAULT NULL CHECK(start_side IS NULL OR start_side IN ('LEFT', 'RIGHT')),
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'advisory' CHECK(severity IN ('blocking', 'high', 'medium', 'low', 'advisory')),
+      evidence_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed', 'published', 'accepted', 'fixed', 'dismissed', 'obsolete', 'unresolved')),
+      github_comment_id INTEGER DEFAULT NULL,
+      github_comment_url TEXT DEFAULT NULL,
+      resolution_json TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (review_id) REFERENCES pull_request_reviews(id) ON DELETE CASCADE,
+      UNIQUE(review_id, fingerprint)
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_findings_review ON review_findings(review_id, status);
+
+    CREATE TABLE IF NOT EXISTS review_thread_interactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      review_id INTEGER NOT NULL,
+      github_comment_id INTEGER NOT NULL UNIQUE,
+      author_login TEXT DEFAULT NULL,
+      mention_text TEXT NOT NULL,
+      response_body TEXT DEFAULT NULL,
+      disposition TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'completed', 'failed', 'ignored')),
+      raw_json TEXT DEFAULT NULL,
+      processing_started_at TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (review_id) REFERENCES pull_request_reviews(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_thread_interactions_review ON review_thread_interactions(review_id, status);
+
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id INTEGER NOT NULL,
@@ -747,6 +912,36 @@ function initDb(db: Database.Database): void {
   addColumnIfMissing(db, "conversations", "origin_run_id", "INTEGER DEFAULT NULL");
 
   addColumnIfMissing(db, "global_skills", "parts_json", "TEXT NOT NULL DEFAULT '[]'");
+
+  addColumnIfMissing(db, "pull_request_reviews", "execution_mode", "TEXT NOT NULL DEFAULT 'isolated_worktree'");
+  addColumnIfMissing(db, "pull_request_reviews", "workspace_path", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "execution_json", "TEXT NOT NULL DEFAULT '{}'" );
+
+  addColumnIfMissing(db, "pull_request_reviews", "pr_url", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "pr_title", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "pr_body", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "context_packet_json", "TEXT NOT NULL DEFAULT '{}'");
+  addColumnIfMissing(db, "pull_request_reviews", "publication_json", "TEXT NOT NULL DEFAULT '{}'");
+  addColumnIfMissing(db, "pull_request_reviews", "github_review_id", "INTEGER DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "provider_id", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "model_id", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "review_mode", "TEXT NOT NULL DEFAULT 'targeted'");
+  addColumnIfMissing(db, "pull_request_reviews", "previous_review_id", "INTEGER DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "completed_at", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "pull_request_reviews", "error_text", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "github_webhook_events", "head_sha", "TEXT DEFAULT NULL");
+  addColumnIfMissing(db, "review_thread_interactions", "processing_started_at", "TEXT DEFAULT NULL");
+
+  // A project can have historical mappings, but only one may remain active.
+  db.exec(`
+    UPDATE project_repositories
+    SET state = 'paused', updated_at = datetime('now')
+    WHERE state = 'active' AND id NOT IN (
+      SELECT MAX(id) FROM project_repositories WHERE state = 'active' GROUP BY app_id
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_repositories_one_active_app
+      ON project_repositories(app_id) WHERE state = 'active';
+  `);
 
   // ── Migrate app file status constraints ───────────────────────
   ensureAppFilesUploadingStatus(db);

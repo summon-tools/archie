@@ -153,6 +153,8 @@ export default function SettingsPage() {
   const [savingToken, setSavingToken] = useState(false);
   const [removingToken, setRemovingToken] = useState(false);
   const [githubClientSecret, setGithubClientSecret] = useState("");
+  const [githubPrivateKey, setGithubPrivateKey] = useState("");
+  const [githubWebhookSecret, setGithubWebhookSecret] = useState("");
   const [savingGithubApp, setSavingGithubApp] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
@@ -304,6 +306,8 @@ export default function SettingsPage() {
     try {
       const updated = await updateGitHubAppSettings({
         public_server_url: githubAppSettings.public_server_url,
+        app_id: githubAppSettings.app_id,
+        private_key: githubPrivateKey.trim() || undefined,
         client_id: githubAppSettings.client_id,
         client_secret: githubClientSecret.trim() || undefined,
         app_slug: githubAppSettings.app_slug,
@@ -311,9 +315,12 @@ export default function SettingsPage() {
         bot_username: githubAppSettings.bot_username,
         bot_display_name: githubAppSettings.bot_display_name,
         bot_email: githubAppSettings.bot_email,
+        webhook_secret: githubWebhookSecret.trim() || undefined,
       });
       setGithubAppSettings(updated);
       setGithubClientSecret("");
+      setGithubPrivateKey("");
+      setGithubWebhookSecret("");
       showMessage("success", "GitHub App settings saved");
     } catch (err) {
       showMessage("error", err instanceof Error ? err.message : "Failed to save GitHub App settings");
@@ -659,12 +666,19 @@ export default function SettingsPage() {
                 {/* GitHub App */}
                 {githubAppSettings && (
                   <div className="bg-th-surface rounded-2xl border border-th p-6 backdrop-blur-xl">
-                    <h2 className="text-lg font-bold text-th-primary mb-1">GitHub App</h2>
+                    <h2 className="text-lg font-bold text-th-primary mb-1">GitHub integrations</h2>
                     <p className="text-sm text-th-dimmed mb-4">
-                      Configure the GitHub App that users authorize before publishing pull requests.
+                      Configure one GitHub App for both personal OAuth connections and Archie&apos;s repository review service.
                     </p>
 
                     <div className="space-y-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-th-primary">GitHub OAuth</h3>
+                        <p className="text-xs text-th-dimmed mt-1">
+                          Used when a person connects GitHub to Archie. The callback URL belongs to this flow.
+                        </p>
+                      </div>
+
                       <div>
                         <label className="block text-sm font-medium text-th-secondary mb-1">
                           Public server URL
@@ -745,6 +759,56 @@ export default function SettingsPage() {
                         </div>
                       </div>
 
+                      <div className="border-t border-th pt-4 space-y-4">
+                        <div>
+                          <h3 className="text-sm font-semibold text-th-primary">GitHub App Reviews</h3>
+                          <p className="text-xs text-th-dimmed mt-1">
+                            Uses the same GitHub App, but requires its numeric App ID, private key, and webhook secret in addition to the OAuth client settings above.
+                          </p>
+                          <div className="mt-3 rounded-lg border border-th bg-th-subtle px-3 py-2 text-xs text-th-dimmed space-y-1">
+                            <p><span className="font-medium text-th-secondary">Review trigger:</span> comment <code>/{githubAppSettings.bot_username || "archie"} review</code> on a pull request.</p>
+                            <p>Use <code>/{githubAppSettings.bot_username || "archie"} full review</code> to review the entire pull request. A normal review is targeted to changes since Archie&apos;s previous completed review.</p>
+                            <p>The GitHub App must have <span className="font-medium text-th-secondary">Issues: Read</span> and the <span className="font-medium text-th-secondary">Issue comment</span> webhook enabled.</p>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">App ID</label>
+                          <input
+                            type="text"
+                            value={githubAppSettings.app_id}
+                            onChange={(e) => setGithubAppSettings({ ...githubAppSettings, app_id: e.target.value })}
+                            placeholder="123456"
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                          <p className="text-xs text-th-muted mt-1">Use the numeric App ID, not the OAuth Client ID.</p>
+                        </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Private key</label>
+                          <textarea
+                            value={githubPrivateKey}
+                            onChange={(e) => setGithubPrivateKey(e.target.value)}
+                            placeholder={githubAppSettings.private_key_configured ? "Saved — paste a new key to replace" : "-----BEGIN RSA PRIVATE KEY-----"}
+                            rows={4}
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-xs font-mono text-th-primary"
+                          />
+                          <p className="text-xs text-th-muted mt-1">Stored encrypted; it is never returned to the browser.</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-th-secondary mb-1">Webhook secret</label>
+                          <input
+                            type="password"
+                            value={githubWebhookSecret}
+                            onChange={(e) => setGithubWebhookSecret(e.target.value)}
+                            placeholder={githubAppSettings.webhook_secret_configured ? "Saved — enter a new secret to replace" : "Webhook secret"}
+                            className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
+                          />
+                          <p className="text-xs text-th-muted mt-1">Used to verify GitHub webhook signatures.</p>
+                        </div>
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div>
                           <label className="block text-sm font-medium text-th-secondary mb-1">Bot username</label>
@@ -776,6 +840,7 @@ export default function SettingsPage() {
                             className="w-full px-3 py-2 bg-th-subtle border border-th rounded-lg focus:ring-2 focus:ring-th focus:border-transparent text-sm text-th-primary"
                           />
                         </div>
+                      </div>
                       </div>
 
                       <button
