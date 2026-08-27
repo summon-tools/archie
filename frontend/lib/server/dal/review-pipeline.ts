@@ -272,8 +272,8 @@ export function createReviewThreadInteraction(data: {
   return db.prepare("SELECT * FROM review_thread_interactions WHERE github_comment_id = ?").get(data.github_comment_id) as ReviewThreadInteractionRow;
 }
 
-export function updateReviewThreadInteraction(id: number, fields: Partial<Pick<ReviewThreadInteractionRow, "response_body" | "disposition" | "status">>): ReviewThreadInteractionRow | undefined {
-  const allowed = ["response_body", "disposition", "status"] as const;
+export function updateReviewThreadInteraction(id: number, fields: Partial<Pick<ReviewThreadInteractionRow, "response_body" | "disposition" | "status" | "model_usage_json">>): ReviewThreadInteractionRow | undefined {
+  const allowed = ["response_body", "disposition", "status", "model_usage_json"] as const;
   const setParts: string[] = [];
   const values: unknown[] = [];
   for (const field of allowed) {

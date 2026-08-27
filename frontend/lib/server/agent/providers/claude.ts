@@ -115,6 +115,7 @@ function extractResultInfo(result: SDKResultSuccess | SDKResultError): AgentResu
     ? (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0)
     : null;
   const outTokens = usage ? (usage.output_tokens || 0) : null;
+  const cachedInputTokens = usage ? (usage.cache_read_input_tokens || 0) : 0;
 
   const modelUsage = result.modelUsage || {};
   const models = Object.keys(modelUsage);
@@ -125,7 +126,11 @@ function extractResultInfo(result: SDKResultSuccess | SDKResultError): AgentResu
     costUsd: result.total_cost_usd ?? null,
     durationMs: result.duration_ms ?? null,
     numTurns: result.num_turns ?? null,
-    usage: inTokens !== null ? { inputTokens: inTokens!, outputTokens: outTokens! } : null,
+    usage: inTokens !== null ? {
+      inputTokens: inTokens!,
+      outputTokens: outTokens!,
+      ...(cachedInputTokens ? { cachedInputTokens } : {}),
+    } : null,
     models,
   };
 }
@@ -232,6 +237,10 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   async ephemeralQuery(prompt: string, opts?: EphemeralOpts): Promise<string> {
+    return (await this.ephemeralQueryWithMetrics(prompt, opts)).text;
+  }
+
+  async ephemeralQueryWithMetrics(prompt: string, opts?: EphemeralOpts): Promise<AgentResult> {
     const MAX_RETRIES = 2;
     let lastError: Error | null = null;
 
@@ -254,7 +263,7 @@ export class ClaudeProvider implements AgentProvider {
         if (opts?.cwd) options.cwd = opts.cwd;
 
         const q = sdkQuery({ prompt, options });
-        let resultText = "";
+        let resultInfo: AgentResult | null = null;
         let gotMessages = false;
 
         try {
@@ -263,7 +272,7 @@ export class ClaudeProvider implements AgentProvider {
             if (msg.type === "result") {
               const result = msg as SDKResultSuccess | SDKResultError;
               if (result.subtype === "success") {
-                resultText = (result as SDKResultSuccess).result || "";
+                resultInfo = extractResultInfo(result);
               } else {
                 throw new Error(`SDK query failed: ${result.subtype}`);
               }
@@ -279,7 +288,11 @@ export class ClaudeProvider implements AgentProvider {
           continue;
         }
 
-        return resultText;
+        if (!resultInfo) {
+          lastError = new Error("SDK subprocess completed without a result");
+          continue;
+        }
+        return resultInfo;
       } catch (e: any) {
         lastError = e;
         if (e.name === "AbortError") throw e;

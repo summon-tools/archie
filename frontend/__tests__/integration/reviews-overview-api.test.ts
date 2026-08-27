@@ -42,6 +42,7 @@ function insertReview(input: {
   model?: string;
   baseSha?: string;
   headSha?: string;
+  modelUsage?: object;
   completedAt?: string;
   errorText?: string;
   createdAt: string;
@@ -51,8 +52,8 @@ function insertReview(input: {
     `INSERT INTO pull_request_reviews (
        app_id, installation_id, owner, repo, pr_number, action, base_sha, head_sha, status, review_mode,
        trigger_delivery_id, pr_title, pr_url, execution_json, publication_json,
-       provider_id, model_id, completed_at, error_text, created_at, updated_at
-     ) VALUES (?, 9001, ?, ?, ?, 'review_command', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'mock', ?, ?, ?, ?, ?)`
+       provider_id, model_id, model_usage_json, completed_at, error_text, created_at, updated_at
+     ) VALUES (?, 9001, ?, ?, ?, 'review_command', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'mock', ?, ?, ?, ?, ?, ?)`
   ).run(
     input.appId,
     owner,
@@ -68,6 +69,7 @@ function insertReview(input: {
     JSON.stringify({ phase: input.phase || input.status }),
     JSON.stringify(input.status === "completed" ? { html_url: `https://github.com/${owner}/${input.repo}/pull/${input.prNumber}#review` } : {}),
     input.model || null,
+    input.modelUsage ? JSON.stringify(input.modelUsage) : null,
     input.completedAt || null,
     input.errorText || null,
     input.createdAt,
@@ -86,13 +88,49 @@ describe("reviews overview API", () => {
 
     const waitingId = insertReview({ appId: web.id, repo: "store", prNumber: 10, status: "queued", title: "Improve checkout", createdAt: "2026-08-27 12:00:00" });
     const runningId = insertReview({ appId: api.id, repo: "orders", prNumber: 11, status: "running", title: "Validate orders", phase: "context_ready", createdAt: "2026-08-27 12:01:00" });
-    const firstRunId = insertReview({ appId: web.id, repo: "store", prNumber: 20, status: "completed", title: "Add cart totals", createdAt: "2026-08-26 10:00:00", completedAt: "2026-08-26 10:02:00" });
-    const latestRunId = insertReview({ appId: web.id, repo: "store", prNumber: 20, status: "completed", title: "Add cart totals", mode: "full", model: "review-model", createdAt: "2026-08-27 10:00:00", completedAt: "2026-08-27 10:03:00" });
+    const firstRunId = insertReview({ appId: web.id, repo: "store", prNumber: 20, status: "completed", title: "Add cart totals", model: "review-model", createdAt: "2026-08-26 10:00:00", completedAt: "2026-08-26 10:02:00" });
+    const latestRunId = insertReview({
+      appId: web.id,
+      repo: "store",
+      prNumber: 20,
+      status: "completed",
+      title: "Add cart totals",
+      mode: "full",
+      model: "review-model",
+      modelUsage: {
+        model_calls: 2,
+        known_cost_usd: 0.03,
+        reported_cost_usd: 0.03,
+        estimated_cost_usd: 0,
+        unknown_cost_calls: 0,
+        reported_cost_calls: 2,
+        estimated_cost_calls: 0,
+        cost_source: "reported",
+        usage: { input_tokens: 500, output_tokens: 100, cached_input_tokens: 0 },
+      },
+      createdAt: "2026-08-27 10:00:00",
+      completedAt: "2026-08-27 10:03:00",
+    });
     insertReview({ appId: api.id, repo: "orders", prNumber: 30, status: "failed", title: "Change order schema", errorText: "private local path and provider details", createdAt: "2026-08-27 11:00:00", completedAt: "2026-08-27 11:01:00" });
 
     const dal = await import("@/lib/server/dal");
     dal.createReviewFinding({ review_id: latestRunId, path: "cart.ts", line: 4, title: "First", body: "First finding has concrete evidence.", evidence_json: "{}" });
     dal.createReviewFinding({ review_id: latestRunId, path: "cart.ts", line: 8, title: "Second", body: "Second finding has concrete evidence.", evidence_json: "{}" });
+    const interaction = dal.createReviewThreadInteraction({ review_id: latestRunId, github_comment_id: 7001, mention_text: "@Archie is this resolved?" });
+    dal.updateReviewThreadInteraction(interaction.id, {
+      status: "completed",
+      model_usage_json: JSON.stringify({
+        model_calls: 1,
+        known_cost_usd: 0.01,
+        reported_cost_usd: 0,
+        estimated_cost_usd: 0.01,
+        unknown_cost_calls: 0,
+        reported_cost_calls: 0,
+        estimated_cost_calls: 1,
+        cost_source: "estimated",
+        usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 0 },
+      }),
+    });
 
     const route = await import("@/app/api/github/reviews/route");
     const response = await route.GET(makeRequest("http://localhost:8080/api/github/reviews", { token }));
@@ -104,14 +142,38 @@ describe("reviews overview API", () => {
     expect(payload.history).toHaveLength(2);
     const cartHistory = payload.history.find((group: any) => group.latest.pr_number === 20);
     expect(cartHistory).toMatchObject({
-      latest: { id: latestRunId, findings_count: 2, model_id: "review-model" },
+      latest: {
+        id: latestRunId,
+        findings_count: 2,
+        model_id: "review-model",
+        spend: {
+          model_calls: 3,
+          follow_up_calls: 1,
+          known_cost_usd: 0.04,
+          reported_cost_usd: 0.03,
+          estimated_cost_usd: 0.01,
+          unknown_cost_calls: 0,
+          cost_source: "mixed",
+          usage: { input_tokens: 600, output_tokens: 120, cached_input_tokens: 0 },
+        },
+      },
       run_count: 2,
+      spend: { known_cost_usd: 0.04, follow_up_calls: 1, unknown_cost_calls: 2, cost_source: "partial" },
     });
     expect(cartHistory.runs.map((review: any) => review.id)).toEqual([latestRunId, firstRunId]);
     const failure = payload.history.find((group: any) => group.latest.pr_number === 30).latest;
     expect(failure.failure_message).toContain("could not complete");
     expect(failure).not.toHaveProperty("error_text");
     expect(payload.counts).toMatchObject({ queued: 1, running: 1, completed: 2, failed: 1 });
+    expect(payload.spend).toMatchObject({
+      model_calls: 5,
+      follow_up_calls: 1,
+      known_cost_usd: 0.04,
+      reported_cost_usd: 0.03,
+      estimated_cost_usd: 0.01,
+      unknown_cost_calls: 2,
+      cost_source: "partial",
+    });
     expect(payload.projects).toEqual([{ id: api.id, name: "Orders API" }, { id: web.id, name: "Web Store" }]);
   });
 

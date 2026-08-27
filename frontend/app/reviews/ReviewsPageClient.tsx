@@ -16,7 +16,7 @@ import {
 } from "@phosphor-icons/react";
 import Header from "@/components/Header";
 import { getReviewsOverview, rerunPullRequestReview } from "@/lib/api";
-import type { ReviewHistoryGroup, ReviewRunStatus, ReviewRunSummary, ReviewsOverviewResponse } from "@/lib/types";
+import type { ReviewHistoryGroup, ReviewRunStatus, ReviewRunSummary, ReviewSpendSummary, ReviewsOverviewResponse } from "@/lib/types";
 
 const PAGE_SIZE = 20;
 
@@ -58,6 +58,48 @@ function formatElapsed(review: ReviewRunSummary): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+function formatUsd(value: number): string {
+  if (value > 0 && value < 0.01) return "<$0.01";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function spendHeadline(spend: ReviewSpendSummary): string {
+  if (spend.model_calls === 0) return "$0.00";
+  if (spend.known_cost_usd === 0 && spend.unknown_cost_calls > 0) return "Unknown";
+  return `${formatUsd(spend.known_cost_usd)}${spend.unknown_cost_calls > 0 ? "+" : ""}`;
+}
+
+function spendLabel(spend: ReviewSpendSummary): string | null {
+  if (spend.model_calls === 0) return null;
+  if (spend.known_cost_usd === 0 && spend.unknown_cost_calls > 0) return "Cost unknown";
+  const suffix = spend.cost_source === "reported"
+    ? "reported"
+    : spend.cost_source === "estimated"
+      ? "estimated"
+      : spend.cost_source === "partial"
+        ? "known"
+        : "mixed";
+  return `${spendHeadline(spend)} ${suffix}`;
+}
+
+function spendDetail(spend: ReviewSpendSummary): string {
+  const parts = [`${spend.model_calls} model call${spend.model_calls === 1 ? "" : "s"}`];
+  if (spend.follow_up_calls > 0) parts.push(`${spend.follow_up_calls} follow-up${spend.follow_up_calls === 1 ? "" : "s"}`);
+  if (spend.reported_cost_usd > 0) parts.push(`${formatUsd(spend.reported_cost_usd)} reported`);
+  if (spend.estimated_cost_usd > 0) parts.push(`${formatUsd(spend.estimated_cost_usd)} estimated`);
+  if (spend.unknown_cost_calls > 0) parts.push(`${spend.unknown_cost_calls} unknown`);
+  return parts.join(" · ");
+}
+
+function SpendText({ spend }: { spend: ReviewSpendSummary }) {
+  const label = spendLabel(spend);
+  if (!label) return null;
+  const usage = spend.usage
+    ? `${spend.usage.input_tokens.toLocaleString()} input, ${spend.usage.output_tokens.toLocaleString()} output${spend.usage.cached_input_tokens ? `, and ${spend.usage.cached_input_tokens.toLocaleString()} cached input` : ""} tokens`
+    : "Token usage unavailable";
+  return <span className="text-th-dimmed" title={`${spendDetail(spend)}. ${usage}.`}>{label}</span>;
 }
 
 function statusLabel(status: ReviewRunStatus): string {
@@ -136,6 +178,7 @@ function ActiveReviewCard({ review }: { review: ReviewRunSummary }) {
             <StatusBadge review={review} />
             <span className="text-xs font-medium text-th-secondary">{phaseLabel(review.phase)}</span>
             <span className="text-xs text-th-dimmed">{review.review_mode === "full" ? "Full review" : "Targeted review"}</span>
+            <span className="text-xs"><SpendText spend={review.spend} /></span>
           </div>
           <div className="mt-3 flex items-start gap-2">
             <GitPullRequest size={18} weight="bold" className="mt-0.5 flex-shrink-0 text-th-muted" />
@@ -183,6 +226,7 @@ function HistoryRun({
           {(review.model_id || review.provider_id) && (
             <span className="text-th-dimmed">{review.model_id || review.provider_id}</span>
           )}
+          <SpendText spend={review.spend} />
           <span className="text-th-dimmed">{formatDate(review.completed_at || review.updated_at)} · {formatElapsed(review)}</span>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -249,6 +293,7 @@ function HistoryGroupCard({
         <div className="flex flex-wrap items-center gap-3 pl-7 md:justify-end md:pl-0">
           <StatusBadge review={review} />
           <span className="text-xs text-th-muted">{review.findings_count} finding{review.findings_count === 1 ? "" : "s"}</span>
+          <span className="text-xs"><SpendText spend={group.spend} /></span>
           <span className="text-xs text-th-dimmed">{formatRelative(review.completed_at || review.updated_at)}</span>
           <PullRequestLink review={review} />
         </div>
@@ -368,11 +413,12 @@ export default function ReviewsPageClient({ isAdmin }: { isAdmin: boolean }) {
           </button>
         </div>
 
-        <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Review status summary">
+        <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Review status summary">
           {[
             { label: "Active", value: activeCount, detail: `${data?.counts.running || 0} running, ${data?.counts.queued || 0} waiting` },
             { label: "Completed", value: data?.counts.completed || 0, detail: "Published review runs" },
             { label: "Failed", value: data?.counts.failed || 0, detail: `${data?.counts.not_supported || 0} skipped` },
+            { label: "Review spend", value: data ? spendHeadline(data.spend) : "$0.00", detail: data ? spendDetail(data.spend) : "Model usage across filtered reviews" },
           ].map((item) => (
             <div key={item.label} className="rounded-xl border border-th bg-th-surface p-4">
               <div className="text-xs font-medium uppercase tracking-wide text-th-muted">{item.label}</div>

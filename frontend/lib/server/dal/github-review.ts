@@ -567,3 +567,48 @@ export function listPullRequestReviewProjects(): Array<{ id: number; name: strin
      ORDER BY lower(a.name), a.id`
   ).all() as Array<{ id: number; name: string }>;
 }
+
+export interface PullRequestReviewCostRecord {
+  id: number;
+  app_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  status: PullRequestReviewStatus;
+  provider_id: string | null;
+  model_id: string | null;
+  model_usage_json: string | null;
+}
+
+export interface ReviewThreadInteractionCostRecord {
+  review_id: number;
+  status: "queued" | "completed" | "failed" | "ignored";
+  model_usage_json: string | null;
+}
+
+export function listPullRequestReviewCostRecords(
+  filters: PullRequestReviewListFilters = {},
+): PullRequestReviewCostRecord[] {
+  const where = reviewListWhere(filters);
+  return getDb().prepare(
+    `SELECT r.id, r.app_id, r.owner, r.repo, r.pr_number, r.status, r.provider_id, r.model_id, r.model_usage_json
+     FROM pull_request_reviews r
+     JOIN apps a ON a.id = r.app_id
+     ${where.sql}
+     ORDER BY r.id`
+  ).all(...where.values) as PullRequestReviewCostRecord[];
+}
+
+export function listReviewThreadInteractionCostRecords(
+  filters: PullRequestReviewListFilters = {},
+): ReviewThreadInteractionCostRecord[] {
+  const where = reviewListWhere(filters);
+  return getDb().prepare(
+    `SELECT i.review_id, i.status, i.model_usage_json
+     FROM review_thread_interactions i
+     JOIN pull_request_reviews r ON r.id = i.review_id
+     JOIN apps a ON a.id = r.app_id
+     ${where.sql}
+     ORDER BY i.id`
+  ).all(...where.values) as ReviewThreadInteractionCostRecord[];
+}

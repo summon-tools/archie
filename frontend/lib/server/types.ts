@@ -274,6 +274,7 @@ export interface ReviewThreadInteractionRow {
   disposition: string | null;
   status: ReviewThreadInteractionStatus;
   raw_json: string | null;
+  model_usage_json: string | null;
   processing_started_at: string | null;
   created_at: string;
   updated_at: string;

@@ -383,6 +383,21 @@ export interface Notification {
 
 export type ReviewRunStatus = "queued" | "running" | "completed" | "failed" | "not_supported";
 
+export interface ReviewSpendSummary {
+  model_calls: number;
+  follow_up_calls: number;
+  known_cost_usd: number;
+  reported_cost_usd: number;
+  estimated_cost_usd: number;
+  unknown_cost_calls: number;
+  cost_source: "reported" | "estimated" | "mixed" | "partial" | "unknown";
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cached_input_tokens: number;
+  } | null;
+}
+
 export interface ReviewRunSummary {
   id: number;
   app_id: number;
@@ -405,6 +420,7 @@ export interface ReviewRunSummary {
   updated_at: string;
   completed_at: string | null;
   failure_message: string | null;
+  spend: ReviewSpendSummary;
 }
 
 export interface ReviewHistoryGroup {
@@ -412,12 +428,14 @@ export interface ReviewHistoryGroup {
   latest: ReviewRunSummary;
   run_count: number;
   runs: ReviewRunSummary[];
+  spend: ReviewSpendSummary;
 }
 
 export interface ReviewsOverviewResponse {
   active: ReviewRunSummary[];
   history: ReviewHistoryGroup[];
   counts: Record<ReviewRunStatus, number>;
+  spend: ReviewSpendSummary;
   projects: Array<{ id: number; name: string }>;
   pagination: {
     page: number;
