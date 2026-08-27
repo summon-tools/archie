@@ -1,4 +1,4 @@
-import { App, AppDependency, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse, ProjectTask, ProjectTaskStatus } from "./types";
+import { App, AppDependency, AppFile, Task, ClaudeStatusResponse, ClaudeMode, GitStatus, GitPushResult, GitSettings, PreviewStatus, ChatMessage, ChatStatus, ConversationMessage, DemoStatus, DemoPersona, WorkItem, WorkItemEnv, Conversation, Message, Artifact, GlobalSkill, GlobalSkillPart, GlobalSkillSummary, McpToken, OutcomesSummaryResponse, OutcomesGitHubSyncSettings, OutcomesJobEnqueueResponse, OutcomesJobStatusResponse, ProjectTask, ProjectTaskStatus, ReviewsOverviewResponse } from "./types";
 
 const BASE = "/api";
 
@@ -140,6 +140,33 @@ export async function restartApp(appId: number): Promise<{ success: boolean; mes
 
 export async function deleteApp(appId: number, deleteFiles = false): Promise<{ success: boolean; message: string; files_deleted: boolean }> {
   return fetchJSON(`${BASE}/apps/${appId}?delete_files=${deleteFiles}`, { method: "DELETE" });
+}
+
+// --- GitHub pull-request reviews ---
+
+export async function getReviewsOverview(query: {
+  app_id?: number;
+  search?: string;
+  page?: number;
+  page_size?: number;
+} = {}): Promise<ReviewsOverviewResponse> {
+  const params = new URLSearchParams();
+  if (query.app_id) params.set("app_id", String(query.app_id));
+  if (query.search) params.set("search", query.search);
+  if (query.page) params.set("page", String(query.page));
+  if (query.page_size) params.set("page_size", String(query.page_size));
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return fetchJSON<ReviewsOverviewResponse>(`${BASE}/github/reviews${suffix}`);
+}
+
+export async function rerunPullRequestReview(
+  reviewId: number,
+  mode: "targeted" | "full",
+): Promise<{ id: number; status: string }> {
+  return fetchJSON<{ id: number; status: string }>(`${BASE}/github/reviews/${reviewId}/rerun`, {
+    method: "POST",
+    body: JSON.stringify({ mode }),
+  });
 }
 
 // --- Global outcomes ---

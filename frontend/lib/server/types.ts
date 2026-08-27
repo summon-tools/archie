@@ -188,6 +188,12 @@ export interface PullRequestReviewRow {
   updated_at: string;
 }
 
+export interface PullRequestReviewSummaryRow extends PullRequestReviewRow {
+  app_name: string;
+  findings_count: number;
+  review_run_count: number;
+}
+
 export type ReviewPolicyState = "active" | "archived";
 
 export interface ReviewPolicyRow {

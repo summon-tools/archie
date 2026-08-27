@@ -381,6 +381,55 @@ export interface Notification {
 
 // ── Global LLM Outcomes ───────────────────────────────────────────
 
+export type ReviewRunStatus = "queued" | "running" | "completed" | "failed" | "not_supported";
+
+export interface ReviewRunSummary {
+  id: number;
+  app_id: number;
+  app_name: string;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  pr_title: string | null;
+  pr_url: string;
+  github_review_url: string | null;
+  status: ReviewRunStatus;
+  phase: string;
+  review_mode: "targeted" | "full";
+  action: string;
+  findings_count: number;
+  review_run_count: number;
+  provider_id: string | null;
+  model_id: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  failure_message: string | null;
+}
+
+export interface ReviewHistoryGroup {
+  key: string;
+  latest: ReviewRunSummary;
+  run_count: number;
+  runs: ReviewRunSummary[];
+}
+
+export interface ReviewsOverviewResponse {
+  active: ReviewRunSummary[];
+  history: ReviewHistoryGroup[];
+  counts: Record<ReviewRunStatus, number>;
+  projects: Array<{ id: number; name: string }>;
+  pagination: {
+    page: number;
+    page_size: number;
+    total_groups: number;
+    page_count: number;
+    has_previous: boolean;
+    has_next: boolean;
+  };
+  generated_at: string;
+}
+
 export type OutcomeState = "no_pr" | "pending_pr" | "merged" | "closed_unmerged" | "unknown";
 export type OutcomeEvidenceCompleteness = "no_pr_artifact" | "local_pr_artifact" | "github_enriched" | "incomplete";
 export type OutcomeQualityBand = "pending" | "strong" | "useful" | "costly_reworked" | "abandoned" | "unknown";
