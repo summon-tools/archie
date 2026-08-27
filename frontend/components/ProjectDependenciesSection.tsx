@@ -202,9 +202,9 @@ export default function ProjectDependenciesSection({ appId }: ProjectDependencie
     <div className="border-t border-th pt-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-th-muted">Project dependencies</h4>
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-th-muted">Agent context dependencies</h4>
           <p className="mt-1 text-meta text-th-dimmed">
-            Link other Archi projects and explain when their existing repository context should be used.
+            Link other Archie projects whose broader repository context agents may use. PR review contracts are configured under Git &amp; GitHub.
           </p>
         </div>
         <button

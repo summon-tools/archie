@@ -119,6 +119,179 @@ export interface GitHubUserConnectionRow {
   revoked_at: string | null;
 }
 
+export type GitHubInstallationState = "active" | "suspended" | "deleted";
+
+export interface GitHubInstallationRow {
+  id: number;
+  installation_id: number;
+  account_login: string;
+  account_type: string | null;
+  repository_selection: string | null;
+  state: GitHubInstallationState;
+  raw_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProjectRepositoryState = "active" | "paused";
+
+export interface ProjectRepositoryRow {
+  id: number;
+  app_id: number;
+  app_name: string;
+  installation_id: number;
+  owner: string;
+  repo: string;
+  default_branch: string;
+  state: ProjectRepositoryState;
+  raw_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PullRequestReviewStatus = "queued" | "running" | "completed" | "failed" | "not_supported";
+export type PullRequestReviewExecutionMode = "isolated_worktree" | "api_only";
+
+export interface PullRequestReviewRow {
+  id: number;
+  app_id: number;
+  installation_id: number;
+  owner: string;
+  repo: string;
+  pr_number: number;
+  action: string;
+  base_sha: string | null;
+  head_sha: string | null;
+  comparison_sha: string | null;
+  requested_reviewer_login: string | null;
+  status: PullRequestReviewStatus;
+  execution_mode: PullRequestReviewExecutionMode;
+  workspace_path: string | null;
+  execution_json: string;
+  context_sources_json: string;
+  policy_revision: string | null;
+  model_usage_json: string | null;
+  pr_url: string | null;
+  pr_title: string | null;
+  pr_body: string | null;
+  context_packet_json: string;
+  publication_json: string;
+  github_review_id: number | null;
+  provider_id: string | null;
+  model_id: string | null;
+  review_mode: "targeted" | "full";
+  previous_review_id: number | null;
+  completed_at: string | null;
+  error_text: string | null;
+  trigger_delivery_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ReviewPolicyState = "active" | "archived";
+
+export interface ReviewPolicyRow {
+  id: number;
+  app_id: number;
+  owner: string | null;
+  repo: string | null;
+  revision: string;
+  policy_json: string;
+  state: ReviewPolicyState;
+  created_at: string;
+}
+
+export type ProjectDependencyState = "active" | "paused";
+
+export interface ProjectDependencyRow {
+  id: number;
+  consumer_app_id: number;
+  provider_app_id: number;
+  relationship_type: string;
+  authoritative_ref: string;
+  contract_type: string;
+  source_path: string;
+  version_expectation: string | null;
+  state: ProjectDependencyState;
+  created_at: string;
+  updated_at: string;
+  provider_name?: string;
+  provider_directory?: string;
+  provider_github_repo?: string;
+}
+
+export type ContractSnapshotStatus = "ready" | "fetching" | "failed";
+
+export interface ContractSnapshotRow {
+  id: number;
+  dependency_id: number;
+  source_revision: string;
+  source_path: string;
+  normalized_json: string | null;
+  status: ContractSnapshotStatus;
+  error_text: string | null;
+  fetched_at: string;
+}
+
+export type ReviewFindingStatus = "proposed" | "published" | "accepted" | "fixed" | "dismissed" | "obsolete" | "unresolved";
+
+export interface ReviewFindingRow {
+  id: number;
+  review_id: number;
+  fingerprint: string;
+  path: string;
+  line: number;
+  end_line: number | null;
+  side: "LEFT" | "RIGHT";
+  start_side: "LEFT" | "RIGHT" | null;
+  title: string;
+  body: string;
+  severity: string;
+  evidence_json: string;
+  status: ReviewFindingStatus;
+  github_comment_id: number | null;
+  github_comment_url: string | null;
+  resolution_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ReviewThreadInteractionStatus = "queued" | "completed" | "failed" | "ignored";
+
+export interface ReviewThreadInteractionRow {
+  id: number;
+  review_id: number;
+  github_comment_id: number;
+  author_login: string | null;
+  mention_text: string;
+  response_body: string | null;
+  disposition: string | null;
+  status: ReviewThreadInteractionStatus;
+  raw_json: string | null;
+  processing_started_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type GitHubWebhookEventStatus = "received" | "ignored" | "queued" | "failed";
+
+export interface GitHubWebhookEventRow {
+  id: number;
+  delivery_id: string;
+  event_name: string;
+  action: string | null;
+  installation_id: number | null;
+  owner: string | null;
+  repo: string | null;
+  head_sha: string | null;
+  status: GitHubWebhookEventStatus;
+  review_id: number | null;
+  error_text: string | null;
+  payload_json: string;
+  received_at: string;
+  processed_at: string | null;
+}
+
 export interface AgentSessionRow {
   id: number;
   conversation_id: number;

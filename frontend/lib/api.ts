@@ -623,6 +623,8 @@ export async function generateSSHKey(): Promise<{ success: boolean; message: str
 
 export interface GitHubAppSettings {
   public_server_url: string;
+  app_id: string;
+  private_key_configured: boolean;
   callback_suffix: string;
   callback_url: string;
   client_id: string;
@@ -632,6 +634,7 @@ export interface GitHubAppSettings {
   bot_username: string;
   bot_display_name: string;
   bot_email: string;
+  webhook_secret_configured: boolean;
 }
 
 export interface GitHubConnection {
@@ -649,7 +652,14 @@ export async function getGitHubAppSettings(): Promise<GitHubAppSettings> {
 }
 
 export async function updateGitHubAppSettings(
-  data: Partial<GitHubAppSettings> & { client_secret?: string; clear_client_secret?: boolean },
+  data: Partial<GitHubAppSettings> & {
+    client_secret?: string;
+    private_key?: string;
+    webhook_secret?: string;
+    clear_client_secret?: boolean;
+    clear_private_key?: boolean;
+    clear_webhook_secret?: boolean;
+  },
 ): Promise<GitHubAppSettings> {
   return fetchJSON<GitHubAppSettings>(`${BASE}/github/app-settings`, {
     method: "PUT",
@@ -663,6 +673,144 @@ export async function getGitHubConnection(): Promise<GitHubConnection> {
 
 export async function disconnectGitHub(): Promise<GitHubConnection> {
   return fetchJSON<GitHubConnection>(`${BASE}/github/connection`, { method: "DELETE" });
+}
+
+export interface GitHubProjectRepository {
+  id: number;
+  app_id: number;
+  app_name: string;
+  installation_id: number;
+  owner: string;
+  repo: string;
+  default_branch: string;
+  state: "active" | "paused";
+  raw_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitHubAppInstallation {
+  installation_id: number;
+  account_login: string;
+  account_type: string | null;
+  repository_selection: string | null;
+}
+
+export async function getGitHubProjectRepositories(): Promise<GitHubProjectRepository[]> {
+  const data = await fetchJSON<{ repositories: GitHubProjectRepository[] }>(`${BASE}/github/project-repositories`);
+  return data.repositories;
+}
+
+export async function getGitHubAppInstallations(): Promise<GitHubAppInstallation[]> {
+  const data = await fetchJSON<{ installations: GitHubAppInstallation[] }>(`${BASE}/github/installations`);
+  return data.installations;
+}
+
+export async function connectGitHubProjectRepository(data: {
+  app_id: number;
+  installation_id: number;
+  account_login: string;
+  account_type?: string | null;
+  owner: string;
+  repo: string;
+  default_branch?: string;
+}): Promise<GitHubProjectRepository> {
+  return fetchJSON<GitHubProjectRepository>(`${BASE}/github/project-repositories`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export interface GitHubReviewPolicyRow {
+  id: number;
+  app_id: number;
+  owner: string | null;
+  repo: string | null;
+  revision: string;
+  policy_json: string;
+  state: "active" | "archived";
+  created_at: string;
+}
+
+export interface GitHubReviewPolicyInput {
+  owner?: string | null;
+  repo?: string | null;
+  revision: string;
+  priorities?: string[];
+  severity_guidance?: string;
+  required_checks?: string[];
+  behavior?: string[];
+  tone?: string;
+}
+
+export async function getProjectReviewPolicy(
+  appId: number,
+  repository?: { owner: string; repo: string },
+): Promise<{
+  policy: GitHubReviewPolicyRow | null;
+  company_policy: GitHubReviewPolicyRow | null;
+  repository_policy: GitHubReviewPolicyRow | null;
+}> {
+  const query = repository
+    ? `?owner=${encodeURIComponent(repository.owner)}&repo=${encodeURIComponent(repository.repo)}`
+    : "";
+  return fetchJSON(`${BASE}/apps/${appId}/review-policy${query}`);
+}
+
+export async function saveProjectReviewPolicy(appId: number, data: GitHubReviewPolicyInput): Promise<GitHubReviewPolicyRow> {
+  return fetchJSON(`${BASE}/apps/${appId}/review-policy`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export interface ProjectReviewDependency {
+  id: number;
+  consumer_app_id: number;
+  provider_app_id: number;
+  provider_name?: string;
+  relationship_type: "consumes_api" | "publishes_events_to" | "consumes_events_from" | "uses_shared_package";
+  authoritative_ref: string;
+  contract_type: "openapi";
+  source_path: string;
+  version_expectation: string | null;
+  state: "active" | "paused";
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getProjectReviewDependencies(appId: number): Promise<ProjectReviewDependency[]> {
+  const data = await fetchJSON<{ dependencies: ProjectReviewDependency[] }>(`${BASE}/apps/${appId}/review-dependencies`);
+  return data.dependencies;
+}
+
+export async function createProjectReviewDependency(appId: number, data: {
+  provider_app_id: number;
+  relationship_type?: ProjectReviewDependency["relationship_type"];
+  authoritative_ref?: string;
+  contract_type?: "openapi";
+  source_path: string;
+  version_expectation?: string | null;
+}): Promise<ProjectReviewDependency> {
+  return fetchJSON(`${BASE}/apps/${appId}/review-dependencies`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateProjectReviewDependency(
+  appId: number,
+  dependencyId: number,
+  data: Partial<Pick<ProjectReviewDependency, "relationship_type" | "authoritative_ref" | "source_path" | "version_expectation" | "state">>,
+): Promise<ProjectReviewDependency> {
+  return fetchJSON(`${BASE}/apps/${appId}/review-dependencies/${dependencyId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteProjectReviewDependency(appId: number, dependencyId: number): Promise<void> {
+  await fetchJSON(`${BASE}/apps/${appId}/review-dependencies/${dependencyId}`, { method: "DELETE" });
 }
 
 export async function getGitStatus(appId: number): Promise<GitStatus> {

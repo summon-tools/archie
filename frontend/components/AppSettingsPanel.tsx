@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { SpinnerGap, Play, Stop, ArrowsClockwise, CaretDown, Robot, Trash } from "@phosphor-icons/react";
 import GitHubSection from "./GitHubSection";
+import GitHubReviewSection from "./GitHubReviewSection";
+import ReviewConfigurationSection from "./ReviewConfigurationSection";
 import EnvVarsSection from "./EnvVarsSection";
 import ProjectDependenciesSection from "./ProjectDependenciesSection";
 
@@ -70,6 +72,10 @@ export default function AppSettingsPanel({
   }, []);
 
   const canDelete =
+    me !== null &&
+    (me.role === "admin" ||
+      (projectOwner !== null && projectOwner === me.id));
+  const canConfigureReviews =
     me !== null &&
     (me.role === "admin" ||
       (projectOwner !== null && projectOwner === me.id));
@@ -312,6 +318,8 @@ export default function AppSettingsPanel({
         {showGit && (
           <div>
             <GitHubSection appId={appId} githubRepo={githubRepo} />
+            {me?.role === "admin" && <GitHubReviewSection appId={appId} githubRepo={githubRepo} />}
+            {canConfigureReviews && <ReviewConfigurationSection appId={appId} />}
           </div>
         )}
       </div>
