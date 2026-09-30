@@ -24,8 +24,8 @@ if (!process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
 }
 
 const CLAUDE_MODELS: ModelEntry[] = [
-  { id: "claude-opus-5", label: "Opus 5", provider: "claude" },
-  { id: "claude-sonnet-5", label: "Sonnet 5", provider: "claude" },
+  { id: "claude-opus-5-5", label: "Opus 5.5", provider: "claude" },
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5", provider: "claude" },
 ];
 
 const CLAUDE_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "LS"] as const;

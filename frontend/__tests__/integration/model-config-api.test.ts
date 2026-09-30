@@ -81,23 +81,24 @@ describe("model config API", () => {
     );
     expect(primingResponse.status).toBe(200);
     await expect(primingResponse.json()).resolves.toMatchObject({
+      defaultModel: "claude-opus-5-5",
+      defaultProvider: "claude",
       availableModels: [
-        { id: "claude-opus-5", label: "Opus 5", provider: "claude" },
-        { id: "claude-sonnet-5", label: "Sonnet 5", provider: "claude" },
-        { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: "codex" },
-        { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "codex" },
-        { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "codex" },
+        { id: "claude-opus-5-5", label: "Opus 5.5", provider: "claude" },
+        { id: "claude-sonnet-5-5", label: "Sonnet 5.5", provider: "claude" },
+        { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", provider: "codex" },
+        { id: "gpt-6-luna", label: "GPT-6 Luna", provider: "codex" },
       ],
     });
 
     const nextConfig = {
-      chatModel: "gpt-5.6-sol",
+      chatModel: "gpt-6.1-sol",
       chatProvider: "codex",
-      backgroundModel: "claude-sonnet-5",
+      backgroundModel: "claude-sonnet-5-5",
       backgroundProvider: "claude",
-      quickModel: "gpt-5.6-luna",
+      quickModel: "gpt-6-luna",
       quickProvider: "codex",
-      demoModel: "claude-opus-5",
+      demoModel: "claude-opus-5-5",
       demoProvider: "claude",
     };
 
