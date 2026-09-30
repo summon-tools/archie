@@ -164,7 +164,7 @@ info "Installing frontend dependencies..."
 ok "Dependencies installed"
 
 info "Building Next.js for production..."
-(cd frontend && npx next build)
+(cd frontend && CI=1 npm run build </dev/null)
 ok "Production build complete"
 echo ""
 

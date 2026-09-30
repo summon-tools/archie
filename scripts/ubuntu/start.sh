@@ -89,7 +89,7 @@ if [ "$ARCHIE_MODE" = "production" ]; then
   # Build first if .next doesn't exist
   if [ ! -d ".next" ]; then
     echo "Building for production..."
-    npx next build
+    CI=1 npm run build </dev/null
   fi
   nohup npx next start -p "$PORT" \
     > "$LOG_DIR/archie.log" 2>&1 &

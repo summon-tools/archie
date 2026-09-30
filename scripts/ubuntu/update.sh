@@ -148,7 +148,7 @@ echo ""
 # Production: rebuild and restart
 if [ "$ARCHIE_MODE" = "production" ]; then
   info "Building for production..."
-  (cd frontend && npx next build)
+  (cd frontend && CI=1 npm run build </dev/null)
   ok "Production build complete"
   echo ""
 
