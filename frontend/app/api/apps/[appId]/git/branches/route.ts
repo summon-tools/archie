@@ -29,7 +29,7 @@ export async function GET(
       githubToken = null;
     }
 
-    const result = listRemoteBranches(access.app.directory, {
+    const result = await listRemoteBranches(access.app.directory, {
       token: githubToken,
       excludeCheckedOut: true,
     });

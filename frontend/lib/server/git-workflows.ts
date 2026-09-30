@@ -186,8 +186,8 @@ async function generatePullRequestBody(workItem: WorkItemRow, gitDir: string): P
   });
 }
 
-function getGitHubRemote(gitDir: string): { owner: string; repo: string } {
-  const status = getGitStatus(gitDir);
+async function getGitHubRemote(gitDir: string): Promise<{ owner: string; repo: string }> {
+  const status = await getGitStatus(gitDir);
   const parsed = status.remote_url ? parseGitHubRemoteUrl(status.remote_url) : null;
   if (!parsed) throw new GitWorkflowError("Remote URL is not a GitHub repository", 400);
   return parsed;
@@ -247,7 +247,7 @@ export async function publishWorkItemBranch({
     };
   }
 
-  const remote = getGitHubRemote(gitDir);
+  const remote = await getGitHubRemote(gitDir);
   const prMeta = parsePrArtifact(workItem.id);
   const body = await generatePullRequestBody(workItem, gitDir);
 

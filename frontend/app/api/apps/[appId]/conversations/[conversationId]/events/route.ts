@@ -4,6 +4,7 @@ import { subscribeConversation, getEventSeq } from "@/lib/server/conversation-ev
 import { getConversationMessages } from "@/lib/server/conversation";
 import { serializeAppFile } from "@/lib/server/file-storage";
 import { handleRouteError, requireConversationAccess } from "@/lib/server/route-utils";
+import { closeStreamOnShutdown } from "@/lib/server/shutdown";
 
 /**
  * GET /api/apps/[appId]/conversations/[conversationId]/events
@@ -32,6 +33,7 @@ export async function GET(
   const lastEventIdHeader = request.headers.get("Last-Event-ID");
   const lastEventId = lastEventIdHeader ? Number(lastEventIdHeader) : null;
 
+  let closeStream = () => {};
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
@@ -76,12 +78,14 @@ export async function GET(
         enqueue(": keepalive\n\n");
       }, 15000);
 
-      // Cleanup on abort
-      request.signal.addEventListener("abort", () => {
+      // Closing the response on shutdown lets Next.js drain its HTTP server.
+      closeStream = closeStreamOnShutdown(controller, request.signal, () => {
         unsubscribe();
         clearInterval(keepalive);
-        try { controller.close(); } catch {}
       });
+    },
+    cancel() {
+      closeStream();
     },
   });
 

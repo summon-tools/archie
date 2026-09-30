@@ -2,6 +2,7 @@ import { execSync, execFileSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { runGitAsync } from "./git-async";
 
 // .gitignore templates by project type
 const GITIGNORE_TEMPLATES: Record<string, string> = {
@@ -356,7 +357,7 @@ export function setRemote(directory: string, repoUrl: string): { success: boolea
   }
 }
 
-export function getStatus(directory: string): Record<string, any> {
+export async function getStatus(directory: string): Promise<Record<string, any>> {
   const result: Record<string, any> = {
     initialized: false,
     has_remote: false,
@@ -370,20 +371,22 @@ export function getStatus(directory: string): Record<string, any> {
     branch: "",
   };
 
-  if (!fs.existsSync(directory) || !isGitInitialized(directory)) return result;
+  if (!fs.existsSync(directory)) return result;
+  const initialized = await runGitAsync(directory, ["rev-parse", "--is-inside-work-tree"]);
+  if (initialized.returncode !== 0 || initialized.stdout.trim() !== "true") return result;
   result.initialized = true;
 
   try {
-    const branch = runGitSafe(directory, ["branch", "--show-current"]);
+    const branch = await runGitAsync(directory, ["branch", "--show-current"]);
     result.branch = branch.stdout.trim();
 
-    const remote = runGitSafe(directory, ["remote", "get-url", "origin"]);
+    const remote = await runGitAsync(directory, ["remote", "get-url", "origin"]);
     if (remote.returncode === 0) {
       result.has_remote = true;
       result.remote_url = remote.stdout.trim();
     }
 
-    const status = runGitSafe(directory, ["status", "--porcelain"]);
+    const status = await runGitAsync(directory, ["status", "--porcelain"]);
     const lines = status.stdout
       .trim()
       .split("\n")
@@ -393,28 +396,28 @@ export function getStatus(directory: string): Record<string, any> {
 
     if (result.has_remote && result.branch) {
       // Fetch latest from remote
-      runGitSafe(directory, ["fetch", "origin", result.branch], 15000);
+      await runGitAsync(directory, ["fetch", "origin", result.branch], 15000);
 
-      const unpushed = runGitSafe(directory, ["rev-list", `origin/${result.branch}..HEAD`, "--count"]);
+      const unpushed = await runGitAsync(directory, ["rev-list", `origin/${result.branch}..HEAD`, "--count"]);
       if (unpushed.returncode === 0 && /^\d+$/.test(unpushed.stdout.trim())) {
         result.unpushed_count = parseInt(unpushed.stdout.trim(), 10);
       } else {
         // origin/branch doesn't exist — compare against base branch instead
-        const base = runGitSafe(directory, ["rev-parse", "--verify", "origin/main"]);
+        const base = await runGitAsync(directory, ["rev-parse", "--verify", "origin/main"]);
         const baseBranch = base.returncode === 0 ? "origin/main" : "origin/master";
-        const fromBase = runGitSafe(directory, ["rev-list", `${baseBranch}..HEAD`, "--count"]);
+        const fromBase = await runGitAsync(directory, ["rev-list", `${baseBranch}..HEAD`, "--count"]);
         if (fromBase.returncode === 0 && /^\d+$/.test(fromBase.stdout.trim())) {
           result.unpushed_count = parseInt(fromBase.stdout.trim(), 10);
         }
       }
 
-      const behind = runGitSafe(directory, ["rev-list", `HEAD..origin/${result.branch}`, "--count"]);
+      const behind = await runGitAsync(directory, ["rev-list", `HEAD..origin/${result.branch}`, "--count"]);
       if (behind.returncode === 0 && /^\d+$/.test(behind.stdout.trim())) {
         result.behind_count = parseInt(behind.stdout.trim(), 10);
       }
     }
 
-    const log = runGitSafe(directory, ["log", "-1", "--format=%s|%ci"]);
+    const log = await runGitAsync(directory, ["log", "-1", "--format=%s|%ci"]);
     if (log.returncode === 0 && log.stdout.trim()) {
       const parts = log.stdout.trim().split("|");
       result.last_commit_message = parts[0];

@@ -13,6 +13,7 @@ import {
   type JsonRpcRequest,
 } from "@/lib/server/mcp/protocol";
 import { listMcpTools } from "@/lib/server/mcp/registry";
+import { closeStreamOnShutdown } from "@/lib/server/shutdown";
 
 const SERVER_INFO = {
   name: "archie",
@@ -88,10 +89,15 @@ function responseHeaders(request: NextRequest, response: NextResponse): NextResp
 function sseProbeResponse(request: NextRequest): NextResponse {
   const encoder = new TextEncoder();
   const endpointPath = new URL(request.url).pathname;
+  let closeStream = () => {};
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode(`event: endpoint\ndata: ${endpointPath}\n\n`));
       controller.enqueue(encoder.encode(": Archie MCP stream ready\n\n"));
+      closeStream = closeStreamOnShutdown(controller, request.signal);
+    },
+    cancel() {
+      closeStream();
     },
   });
   return responseHeaders(request, new NextResponse(stream, {

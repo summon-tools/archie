@@ -7,6 +7,7 @@ import { checkPortSync, stopApp } from "@/lib/server/apps";
 import { detectTechStack } from "@/lib/server/techstack";
 import * as dal from "@/lib/server/dal";
 import { deleteAppUploadDirectory, deleteStoredFile } from "@/lib/server/file-storage";
+import { getListeningPorts } from "@/lib/server/platform";
 
 export async function GET(
   request: NextRequest,
@@ -40,7 +41,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(dal.buildAppResponse(app));
+    return NextResponse.json(dal.buildAppResponse(app, await getListeningPorts()));
   } catch (e: any) {
     return NextResponse.json(
       { detail: e.message || "Failed to get app" },

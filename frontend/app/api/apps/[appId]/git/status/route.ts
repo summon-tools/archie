@@ -35,7 +35,7 @@ export async function GET(
     );
   }
 
-  const status = getStatus(app.directory);
+  const status = await getStatus(app.directory);
 
   // If app has a github_repo but git has no remote, include it
   if (app.github_repo && !status.has_remote) {

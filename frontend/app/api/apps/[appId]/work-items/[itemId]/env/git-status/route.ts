@@ -37,6 +37,6 @@ export async function GET(
     );
   }
 
-  const status = getGitStatus(gitDir);
+  const status = await getGitStatus(gitDir);
   return NextResponse.json(status);
 }

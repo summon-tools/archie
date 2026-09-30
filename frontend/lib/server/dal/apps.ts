@@ -79,14 +79,17 @@ export function deleteAppToolConfig(appId: number, toolKey: string): void {
   ).run(appId, toolKey);
 }
 
-export function buildAppResponse(app: AppRow): AppResponse {
+export function buildAppResponse(app: AppRow, listeningPorts?: ReadonlySet<number>): AppResponse {
+  const isListening = (port: number) => listeningPorts
+    ? listeningPorts.has(port)
+    : checkPortSync(port);
   const counts = getWorkItemCounts(app.id);
-  const isRunning = app.port ? checkPortSync(app.port) : false;
+  const isRunning = app.port ? isListening(app.port) : false;
 
   const stats = getConversationStats(app.id);
   let previewsRunning = 0;
   for (const port of stats.previewPorts) {
-    if (checkPortSync(port)) previewsRunning += 1;
+    if (isListening(port)) previewsRunning += 1;
   }
 
   // Get seed_script from app_tool_configs

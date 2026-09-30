@@ -144,7 +144,7 @@ describe("createWorktree", () => {
 });
 
 describe("createWorktreeFromBranch", () => {
-  it("lists available remote branches", () => {
+  it("lists available remote branches", async () => {
     const repo = makeRepo();
     const remoteDir = fs.mkdtempSync(path.join(path.dirname(repo.dir), "archie-remote-"));
     const baseBranch = execSync("git branch --show-current", { cwd: repo.dir, encoding: "utf-8" }).trim();
@@ -163,13 +163,13 @@ describe("createWorktreeFromBranch", () => {
     execSync("git push origin feature/existing", { cwd: repo.dir, stdio: "ignore" });
     execSync(`git checkout ${baseBranch}`, { cwd: repo.dir, stdio: "ignore" });
 
-    const result = listRemoteBranches(repo.dir);
+    const result = await listRemoteBranches(repo.dir);
 
     expect(result.success).toBe(true);
     expect(result.branches).toEqual(["feature/existing", "main"]);
   });
 
-  it("can exclude branches already checked out in a worktree", () => {
+  it("can exclude branches already checked out in a worktree", async () => {
     const repo = makeRepo();
     const remoteDir = fs.mkdtempSync(path.join(path.dirname(repo.dir), "archie-remote-"));
     const baseBranch = execSync("git branch --show-current", { cwd: repo.dir, encoding: "utf-8" }).trim();
@@ -188,7 +188,7 @@ describe("createWorktreeFromBranch", () => {
     execSync("git push origin feature/existing", { cwd: repo.dir, stdio: "ignore" });
     execSync(`git checkout ${baseBranch}`, { cwd: repo.dir, stdio: "ignore" });
 
-    const result = listRemoteBranches(repo.dir, { excludeCheckedOut: true });
+    const result = await listRemoteBranches(repo.dir, { excludeCheckedOut: true });
 
     expect(result.success).toBe(true);
     expect(result.branches).toEqual(["feature/existing"]);

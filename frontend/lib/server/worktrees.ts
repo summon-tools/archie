@@ -1,5 +1,6 @@
 import { execFileSync, execSync, spawn } from "child_process";
 import fs from "fs";
+import { runGitAsync } from "./git-async";
 import os from "os";
 import path from "path";
 import { killProcessOnPort } from "./process";
@@ -511,21 +512,10 @@ function localBranchExists(appDir: string, branchName: string): boolean {
   return runGitSafe(appDir, ["rev-parse", "--verify", `refs/heads/${branchName}`]).returncode === 0;
 }
 
-function checkedOutBranches(appDir: string): Set<string> {
-  const result = runGitSafe(appDir, ["worktree", "list", "--porcelain"], 15000);
-  if (result.returncode !== 0) return new Set();
-  return new Set(result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("branch refs/heads/"))
-    .map((line) => line.replace(/^branch refs\/heads\//, ""))
-    .filter(Boolean));
-}
-
-export function listRemoteBranches(
+export async function listRemoteBranches(
   appDir: string,
   options: { token?: string | null; excludeCheckedOut?: boolean } = {},
-): { success: boolean; message: string; branches: string[]; checked_out_branches: string[] } {
+): Promise<{ success: boolean; message: string; branches: string[]; checked_out_branches: string[] }> {
   if (!fs.existsSync(path.join(appDir, ".git"))) {
     return {
       success: false,
@@ -535,7 +525,7 @@ export function listRemoteBranches(
     };
   }
 
-  const remote = runGitSafe(appDir, ["remote", "get-url", "origin"]);
+  const remote = await runGitAsync(appDir, ["remote", "get-url", "origin"]);
   if (remote.returncode !== 0) {
     return {
       success: false,
@@ -545,7 +535,7 @@ export function listRemoteBranches(
     };
   }
 
-  const result = runGitSafe(appDir, ["ls-remote", "--heads", "origin"], 30000, options.token);
+  const result = await runGitAsync(appDir, gitArgsWithGitHubToken(["ls-remote", "--heads", "origin"], options.token));
   if (result.returncode !== 0) {
     return {
       success: false,
@@ -555,7 +545,13 @@ export function listRemoteBranches(
     };
   }
 
-  const unavailableBranches = options.excludeCheckedOut ? checkedOutBranches(appDir) : new Set<string>();
+  const worktrees = options.excludeCheckedOut
+    ? await runGitAsync(appDir, ["worktree", "list", "--porcelain"], 15000)
+    : { stdout: "", returncode: 0 };
+  const unavailableBranches = new Set(worktrees.returncode === 0 ? worktrees.stdout
+    .split("\n")
+    .filter((line) => line.startsWith("branch refs/heads/"))
+    .map((line) => line.replace(/^branch refs\/heads\//, "")) : []);
   const remoteBranches = new Set(result.stdout
     .split("\n")
     .map((line) => line.trim().split(/\s+/)[1] || "")

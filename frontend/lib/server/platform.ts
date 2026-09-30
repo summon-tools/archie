@@ -1,4 +1,4 @@
-import { execSync, execFileSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import os from "os";
 
 // --- Platform Detection ---
@@ -37,6 +37,29 @@ export function checkPortSync(port: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** One asynchronous socket scan for an entire project list, including previews. */
+export function getListeningPorts(): Promise<Set<number>> {
+  const mac = getPlatform() === "darwin";
+  return new Promise((resolve) => {
+    execFile(mac ? "lsof" : "ss", mac
+      ? ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fn"]
+      : ["-tlnH"], { encoding: "utf-8", timeout: 3000 }, (error, stdout) => {
+      const ports = new Set<number>();
+      // lsof exits with status 1 when there are no listeners.
+      if (!error) {
+        for (const line of stdout.split("\n")) {
+          const address = mac
+            ? (line.startsWith("n") ? line.slice(1) : "")
+            : (line.trim().split(/\s+/)[3] || "");
+          const match = address.match(/:(\d+)$/);
+          if (match) ports.add(Number(match[1]));
+        }
+      }
+      resolve(ports);
+    });
+  });
 }
 
 // --- Cross-Platform Install Hints ---

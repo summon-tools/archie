@@ -54,7 +54,7 @@ export async function GET(
     throw e;
   }
 
-  const status = getGitStatus(gitDir);
+  const status = await getGitStatus(gitDir);
   const parsed = status.remote_url ? parseGitHubRemoteUrl(status.remote_url) : null;
   if (!parsed) {
     return NextResponse.json({ state: "unknown" });

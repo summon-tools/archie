@@ -10,6 +10,7 @@ import { createAppSchema } from "@/lib/schemas/api";
 import { formatZodError } from "@/lib/schemas/utils";
 import { indexApp } from "@/lib/server/knowledge/indexer";
 import { allocateFreePort } from "@/lib/server/runner";
+import { getListeningPorts } from "@/lib/server/platform";
 
 function slugify(text: string): string {
   return text
@@ -80,7 +81,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const apps = filterAppsForUser(user, dal.getApps());
-    const results = apps.map((app) => dal.buildAppResponse(app));
+    const listeningPorts = apps.length ? await getListeningPorts() : new Set<number>();
+    const results = apps.map((app) => dal.buildAppResponse(app, listeningPorts));
     return NextResponse.json({ apps: results });
   } catch (e: any) {
     return NextResponse.json(
